@@ -144,6 +144,10 @@ function buildEnv(connectionString: string): Record<string, unknown> {
     CREDENTIAL_ENCRYPTION_KEY: masterKey,
     API_KEY_HASH_PEPPER: pepper,
     UPSTREAM_ANTHROPIC_BASE_URL: fakeBaseUrl,
+    // Same fake — the server inspects req.url to differentiate
+    // /v1/messages (anthropic) from /v1/responses (openai). Lets
+    // openai-upstream tests share the seed harness.
+    UPSTREAM_OPENAI_BASE_URL: fakeBaseUrl,
   };
 }
 
@@ -196,13 +200,14 @@ async function seedGroup(
 async function seedAccount(
   orgId: string,
   plaintextCredential: string,
+  platform: "anthropic" | "openai" = "anthropic",
 ): Promise<string> {
   const [acct] = await db
     .insert(upstreamAccounts)
     .values({
       orgId,
       name: "test-acct",
-      platform: "anthropic",
+      platform,
       type: "api_key",
       schedulable: true,
       status: "active",
@@ -619,13 +624,42 @@ describe("/v1/responses", () => {
     await app.close();
   });
 
-  it("7. openai-platform group → 503 openai_upstream_not_yet_wired", async () => {
+  it("7. openai-platform group → passthrough to OpenAI Responses upstream", async () => {
     const orgId = await seedOrg();
     const userId = await seedUser();
     const groupId = await seedGroup(orgId, "openai");
     const rawKey = `ak_resp_oai_${Math.random().toString(36).slice(2)}`;
     await seedApiKey(orgId, userId, rawKey, groupId);
-    // Account doesn't matter since we 503 before scheduling.
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      "openai",
+    );
+
+    const openaiResponse = {
+      id: "resp_openai_test",
+      object: "response",
+      created_at: 1700000000,
+      model: "gpt-4o",
+      status: "completed",
+      output: [
+        {
+          type: "message",
+          id: "msg_openai_1",
+          role: "assistant",
+          status: "completed",
+          content: [
+            { type: "output_text", text: "hello from openai", annotations: [] },
+          ],
+        },
+      ],
+      usage: { input_tokens: 9, output_tokens: 4, total_tokens: 13 },
+      incomplete_details: null,
+    };
+    nextUpstreamResponse = {
+      status: 200,
+      body: JSON.stringify(openaiResponse),
+    };
 
     const redis = makeRedisMock();
     const app = await makeApp(redis, container.getConnectionUri());
@@ -636,12 +670,151 @@ describe("/v1/responses", () => {
       headers: { authorization: `Bearer ${rawKey}` },
       payload: validResponsesPayload,
     });
+
+    expect(res.statusCode).toBe(200);
+    const json = res.json();
+    // Body is passthrough — OpenAI upstream shape arrives at the client.
+    expect(json).toMatchObject({
+      id: "resp_openai_test",
+      object: "response",
+      status: "completed",
+    });
+
+    // Verify the upstream request hit /v1/responses (not /v1/messages)
+    // and was sent unchanged (no Anthropic translation on either side).
+    expect(lastUpstreamRequest).not.toBeNull();
+    expect(lastUpstreamRequest!.url).toBe("/v1/responses");
+    const upstreamBody = JSON.parse(lastUpstreamRequest!.body!);
+    expect(upstreamBody.model).toBe(validResponsesPayload.model);
+    expect(upstreamBody.input).toBe(validResponsesPayload.input);
+    expect(upstreamBody.messages).toBeUndefined(); // no anthropic translation
+    await app.close();
+  });
+
+  it("7b. openai upstream 4xx error → forwards status to client", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_resp_oai_4xx_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      "openai",
+    );
+
+    nextUpstreamResponse = {
+      status: 401,
+      body: JSON.stringify({ error: { message: "Invalid API key" } }),
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: validResponsesPayload,
+    });
+    // 401 is `switch_account` — with one account in the pool, the
+    // failover loop exhausts it and surfaces AllUpstreamsFailed → 503.
     expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ error: "all_upstreams_failed" });
+    await app.close();
+  });
+
+  it("7c. openai-platform group + stream=true → 501 (deferred to PR 9e)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_resp_oai_stream_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      "openai",
+    );
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { ...validResponsesPayload, stream: true },
+    });
+    expect(res.statusCode).toBe(501);
     expect(res.json()).toMatchObject({
-      error: "openai_upstream_not_yet_wired",
-      platform: "openai",
+      error: "not_implemented",
+      detail: expect.stringContaining("openai-upstream streaming"),
     });
     await app.close();
+  });
+
+  it("7d. openai upstream sends Bearer auth header from api_key credential", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_resp_oai_auth_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-secret" }),
+      "openai",
+    );
+
+    // Capture the upstream Authorization header by extending the
+    // fake-server harness inline for this test only.
+    let capturedAuth: string | undefined;
+    const origOnRequest = fakeServer.listeners("request")[0];
+    fakeServer.removeAllListeners("request");
+    fakeServer.on("request", (req, res) => {
+      capturedAuth = req.headers.authorization;
+      let body = "";
+      req.on("data", (c: Buffer) => {
+        body += c.toString();
+      });
+      req.on("end", () => {
+        lastUpstreamRequest = { url: req.url, method: req.method, body };
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({
+            id: "resp_x",
+            object: "response",
+            created_at: 1,
+            model: "gpt-4o",
+            status: "completed",
+            output: [],
+            usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+            incomplete_details: null,
+          }),
+        );
+      });
+    });
+
+    try {
+      const redis = makeRedisMock();
+      const app = await makeApp(redis, container.getConnectionUri());
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/responses",
+        headers: { authorization: `Bearer ${rawKey}` },
+        payload: validResponsesPayload,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(capturedAuth).toBe("Bearer sk-openai-secret");
+      await app.close();
+    } finally {
+      // Restore the default request handler.
+      fakeServer.removeAllListeners("request");
+      fakeServer.on(
+        "request",
+        origOnRequest as (req: unknown, res: unknown) => void,
+      );
+    }
   });
 
   it("8. previous_response_id is accepted (sticky scheduling key)", async () => {

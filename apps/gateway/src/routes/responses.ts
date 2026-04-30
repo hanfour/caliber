@@ -40,6 +40,7 @@ import {
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
+import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
 import { acquireSlot, releaseSlot } from "../redis/slots.js";
 import { emitUsageLog } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
@@ -120,10 +121,33 @@ export async function responsesRoutes(
       }
       const body = parsed.data;
 
+      if (ctx.platform === "openai") {
+        // OpenAI upstream is the same format as the inbound — body
+        // passthrough. Streaming defers to PR 9e (parses OpenAI
+        // Responses SSE upstream); non-stream goes here.
+        if (body.stream === true) {
+          reply.code(501).send({
+            error: "not_implemented",
+            detail: "openai-upstream streaming arrives in PR 9e",
+          });
+          return;
+        }
+        await runOpenaiResponsesPassthroughFailover(
+          app,
+          opts,
+          req,
+          reply,
+          body,
+          req.id,
+          body.model,
+        );
+        return;
+      }
+
       if (ctx.platform !== "anthropic") {
-        // PR 9c will wire the openai branch (Tasks 9.1 + 9.2 handlers).
+        // gemini / antigravity not in 5A scope; clear deferral signal.
         reply.code(503).send({
-          error: "openai_upstream_not_yet_wired",
+          error: "platform_not_yet_wired",
           platform: ctx.platform,
         });
         return;
@@ -587,4 +611,221 @@ function syntheticAnthropicFromResponsesUsage(
     outputTokens: usage.output_tokens,
     cacheReadInputTokens: usage.cached_tokens,
   });
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI-upstream passthrough path (Plan 5A PR 9d).
+//
+// When `group.platform === "openai"` and the inbound route is also
+// `/v1/responses`, the client and upstream speak the same format —
+// body passthrough.  Auth headers + endpoint URL differ from the
+// Anthropic helper (Bearer token, `/v1/responses` on api.openai.com),
+// so we use `callUpstreamResponses`.  Reuses the same failover loop /
+// scheduler / slot semantics.
+//
+// Streaming is deferred to PR 9e (parses OpenAI Responses SSE upstream
+// and re-emits it; current PR returns 501 for stream=true).
+//
+// Usage extraction: OpenAI's Responses non-stream response shape
+// surfaces `usage.input_tokens` + `output_tokens` (+ optional
+// `input_tokens_details.cached_tokens`).  We translate that to the
+// shared synthetic Anthropic shape so emitUsageLog's pricing path runs
+// unchanged.
+// ---------------------------------------------------------------------------
+
+async function runOpenaiResponsesPassthroughFailover(
+  app: FastifyInstance,
+  opts: ResponsesRouteOptions,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  body: unknown,
+  requestId: string,
+  requestedModel: string,
+): Promise<void> {
+  const startedAtMs = Date.now();
+  const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
+
+  try {
+    const responsesResp = await runFailover({
+      db: app.db,
+      orgId: req.apiKey!.orgId,
+      teamId: req.apiKey!.teamId,
+      maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
+      scheduler: app.gwScheduler,
+      attempt: async (account) => {
+        const acquired = await acquireSlot(
+          app.redis,
+          "account",
+          account.id,
+          requestId,
+          account.concurrency,
+          SLOT_DURATION_MS,
+        );
+        if (!acquired) {
+          throw { status: 503, message: "account_at_capacity" };
+        }
+        try {
+          let credential = await resolveCredential(app.db, account.id, {
+            masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
+          });
+          if (credential.type === "oauth") {
+            credential = await maybeRefreshOAuth(
+              app.db,
+              app.redis,
+              account.id,
+              credential,
+              {
+                masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
+                leadMinutes: opts.env.GATEWAY_OAUTH_REFRESH_LEAD_MIN,
+                maxFail: opts.env.GATEWAY_OAUTH_MAX_FAIL,
+              },
+            );
+          }
+
+          const upstream = await callUpstreamResponses({
+            baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
+            body: upstreamBodyBuf,
+            credential,
+          });
+
+          if (upstream.kind === "stream") {
+            throw { status: 502, message: "unexpected_stream" };
+          }
+
+          if (upstream.status < 200 || upstream.status >= 300) {
+            const text = upstream.body.toString("utf8");
+            const retryAfterRaw = upstream.headers["retry-after"];
+            const retryAfter =
+              typeof retryAfterRaw === "string"
+                ? parseInt(retryAfterRaw, 10)
+                : Array.isArray(retryAfterRaw)
+                  ? parseInt(retryAfterRaw[0]!, 10)
+                  : undefined;
+            throw {
+              status: upstream.status,
+              retryAfter: Number.isNaN(retryAfter) ? undefined : retryAfter,
+              message: text.slice(0, 500),
+            };
+          }
+
+          let openaiResp: unknown = null;
+          let parseErr: unknown = null;
+          try {
+            openaiResp = JSON.parse(upstream.body.toString("utf8"));
+          } catch (err) {
+            parseErr = err;
+            req.log.warn(
+              {
+                requestId,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              "openai upstream 2xx body was not valid JSON",
+            );
+          }
+
+          // Translate OpenAI usage → synthetic Anthropic shape so
+          // emitUsageLog's pricing path runs unchanged.  Pricing maps
+          // input_tokens / output_tokens directly; cache details
+          // surface as input_tokens_details.cached_tokens upstream.
+          const usage = extractOpenaiResponsesUsage(openaiResp);
+          const upstreamForLog = usage
+            ? buildSyntheticAnthropicUsage({
+                id: `openai-passthrough:${requestId}`,
+                model: requestedModel,
+                inputTokens: Math.max(
+                  0,
+                  usage.input_tokens - usage.cached_tokens,
+                ),
+                outputTokens: usage.output_tokens,
+                cacheReadInputTokens: usage.cached_tokens,
+              })
+            : null;
+
+          await emitUsageLog({
+            app,
+            req,
+            requestedModel,
+            accountId: account.id,
+            upstreamResponse: upstreamForLog,
+            platform: "openai",
+            surface: "responses",
+            statusCode: 200,
+            durationMs: Date.now() - startedAtMs,
+          });
+          await emitBodyCapture({
+            app,
+            req,
+            requestId,
+            requestBodyJson: upstreamBodyBuf.toString("utf8"),
+            responseBody: openaiResp,
+            stream: false,
+          });
+
+          if (parseErr !== null) {
+            throw { status: 502, message: "upstream_malformed_json" };
+          }
+
+          return openaiResp;
+        } finally {
+          await releaseSlot(app.redis, "account", account.id, requestId).catch(
+            () => {
+              // Slot expires on its own.
+            },
+          );
+        }
+      },
+    });
+
+    reply
+      .code(200)
+      .header("content-type", "application/json")
+      .send(responsesResp);
+  } catch (err) {
+    if (err instanceof AllUpstreamsFailed) {
+      reply.code(503).send({
+        error: "all_upstreams_failed",
+        attempted_count: err.attemptedIds.length,
+        request_id: requestId,
+      });
+      return;
+    }
+    if (err instanceof FatalUpstreamError) {
+      reply.code(err.statusCode).send({
+        error: err.reason,
+        request_id: requestId,
+      });
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Read OpenAI Responses non-stream `usage` block.  Returns null when
+ * the upstream omitted usage (error response, malformed body) so the
+ * call site can decide between `null` upstreamResponse + zero-cost
+ * row vs synthetic shape with real numbers.
+ */
+function extractOpenaiResponsesUsage(
+  resp: unknown,
+): {
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+} | null {
+  if (!resp || typeof resp !== "object") return null;
+  const u = (resp as { usage?: unknown }).usage;
+  if (!u || typeof u !== "object") return null;
+  const usage = u as Record<string, unknown>;
+  const input = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+  const output =
+    typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
+  const details = usage.input_tokens_details as
+    | { cached_tokens?: unknown }
+    | undefined;
+  const cached =
+    details && typeof details.cached_tokens === "number"
+      ? details.cached_tokens
+      : 0;
+  return { input_tokens: input, output_tokens: output, cached_tokens: cached };
 }

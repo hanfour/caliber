@@ -27,6 +27,7 @@ function makeEnv(overrides: Partial<ServerEnv> = {}): ServerEnv {
     CREDENTIAL_ENCRYPTION_KEY: "a".repeat(64),
     API_KEY_HASH_PEPPER: "b".repeat(64),
     UPSTREAM_ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+    UPSTREAM_OPENAI_BASE_URL: "https://api.openai.com",
     GATEWAY_MAX_ACCOUNT_SWITCHES: 10,
     GATEWAY_MAX_BODY_BYTES: 10485760,
     GATEWAY_BUFFER_WINDOW_MS: 500,

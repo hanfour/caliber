@@ -63,6 +63,10 @@ export const serverEnvSchema = z
       .string()
       .url()
       .default("https://api.anthropic.com"),
+    UPSTREAM_OPENAI_BASE_URL: z
+      .string()
+      .url()
+      .default("https://api.openai.com"),
     GATEWAY_MAX_ACCOUNT_SWITCHES: z.coerce.number().int().min(1).default(10),
     GATEWAY_MAX_BODY_BYTES: z.coerce.number().int().min(1024).default(10485760),
     GATEWAY_BUFFER_WINDOW_MS: z.coerce.number().int().min(0).default(500),
