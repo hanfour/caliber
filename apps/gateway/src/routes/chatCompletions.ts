@@ -18,6 +18,7 @@ import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import { acquireSlot, releaseSlot } from "../redis/slots.js";
 import { emitUsageLog } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
+import { buildSyntheticAnthropicUsage } from "../runtime/syntheticUsageShapes.js";
 
 export interface ChatCompletionsRouteOptions {
   env: ServerEnv;
@@ -488,42 +489,19 @@ async function runChatCompletionsStreamingFailover(
 }
 
 /**
- * Build a minimal Anthropic-shaped response object from the final OpenAI
- * stream chunk's usage block, so `emitUsageLog`'s pricing path receives
- * the same shape it would on the non-streaming hot path.  The fields
- * outside `usage` are best-effort placeholders — pricing only reads
- * `usage.input_tokens` / `usage.output_tokens` (cache fields default to
- * 0 since the streaming Anthropic API doesn't surface them in the
- * intermediate `message_delta` event we have access to here).
+ * Adapter from the OpenAI stream chunk's usage shape into the shared
+ * synthetic Anthropic shape consumed by `emitUsageLog`'s pricing path.
+ * Cache fields default to 0 — the streaming Anthropic API doesn't
+ * surface them in the intermediate `message_delta` event we have
+ * access to here.
  */
-function syntheticAnthropicResponse(chunk: OpenAIStreamChunk): {
-  id: string;
-  type: "message";
-  role: "assistant";
-  content: [];
-  model: string;
-  stop_reason: null;
-  stop_sequence: null;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_creation_input_tokens: 0;
-    cache_read_input_tokens: 0;
-  };
-} {
-  return {
+function syntheticAnthropicResponse(
+  chunk: OpenAIStreamChunk,
+): ReturnType<typeof buildSyntheticAnthropicUsage> {
+  return buildSyntheticAnthropicUsage({
     id: chunk.id,
-    type: "message",
-    role: "assistant",
-    content: [],
     model: chunk.model,
-    stop_reason: null,
-    stop_sequence: null,
-    usage: {
-      input_tokens: chunk.usage?.prompt_tokens ?? 0,
-      output_tokens: chunk.usage?.completion_tokens ?? 0,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-    },
-  };
+    inputTokens: chunk.usage?.prompt_tokens ?? 0,
+    outputTokens: chunk.usage?.completion_tokens ?? 0,
+  });
 }

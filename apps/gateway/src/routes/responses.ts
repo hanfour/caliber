@@ -28,6 +28,9 @@ import {
   ResponsesRequestSchema,
   translateResponsesToAnthropic,
   translateAnthropicResponseToResponses,
+  makeAnthropicToResponsesStream,
+  parseAnthropicSse,
+  type ResponsesSSEEvent,
 } from "@aide/gateway-core";
 import {
   runFailover,
@@ -40,6 +43,7 @@ import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import { acquireSlot, releaseSlot } from "../redis/slots.js";
 import { emitUsageLog } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
+import { buildSyntheticAnthropicUsage } from "../runtime/syntheticUsageShapes.js";
 
 export interface ResponsesRouteOptions {
   env: ServerEnv;
@@ -116,16 +120,6 @@ export async function responsesRoutes(
       }
       const body = parsed.data;
 
-      if (body.stream === true) {
-        // Streaming responses path is wired in PR 9c (alongside
-        // `makeAnthropicToResponsesStream`).
-        reply.code(501).send({
-          error: "not_implemented",
-          detail: "responses streaming arrives in PR 9c",
-        });
-        return;
-      }
-
       if (ctx.platform !== "anthropic") {
         // PR 9c will wire the openai branch (Tasks 9.1 + 9.2 handlers).
         reply.code(503).send({
@@ -157,7 +151,25 @@ export async function responsesRoutes(
       }
 
       const requestId = req.id;
-      const upstreamBodyBuf = Buffer.from(JSON.stringify(anthropicBody));
+      const isStream = body.stream === true;
+      const upstreamBody = isStream
+        ? { ...anthropicBody, stream: true }
+        : anthropicBody;
+      const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
+
+      if (isStream) {
+        await runResponsesStreamingFailover(
+          app,
+          opts,
+          req,
+          reply,
+          upstreamBodyBuf,
+          requestId,
+          body.model,
+        );
+        return;
+      }
+
       const startedAtMs = Date.now();
       const requestedModel = body.model;
 
@@ -308,4 +320,271 @@ export async function responsesRoutes(
       }
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Streaming path (Plan 5A PR 9c).
+//
+// Translates `stream: true` /v1/responses requests into streaming
+// Anthropic upstream calls, parses upstream Anthropic SSE via
+// `parseAnthropicSse`, runs each event through
+// `makeAnthropicToResponsesStream`, and serializes Responses SSE events
+// (`event: <type>\ndata: <json>\n\n`) to the client.
+//
+// Captures the terminal `response.completed` event's usage block so the
+// existing pricing path runs unchanged via `emitUsageLog` (translated
+// back to a synthetic Anthropic-shape).
+// ---------------------------------------------------------------------------
+
+async function runResponsesStreamingFailover(
+  app: FastifyInstance,
+  opts: ResponsesRouteOptions,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  upstreamBodyBuf: Buffer,
+  requestId: string,
+  requestedModel: string,
+): Promise<void> {
+  reply.hijack();
+  const startedAtMs = Date.now();
+
+  // Wire AbortSignal from client disconnect so a hung upstream is cancelled.
+  const ac = new AbortController();
+  const onClose = () => ac.abort();
+  req.raw.once("close", onClose);
+
+  try {
+    await runFailover({
+      db: app.db,
+      orgId: req.apiKey!.orgId,
+      teamId: req.apiKey!.teamId,
+      maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
+      scheduler: app.gwScheduler,
+      attempt: async (account) => {
+        const acquired = await acquireSlot(
+          app.redis,
+          "account",
+          account.id,
+          requestId,
+          account.concurrency,
+          SLOT_DURATION_MS,
+        );
+        if (!acquired) {
+          throw { status: 503, message: "account_at_capacity" };
+        }
+
+        try {
+          let credential = await resolveCredential(app.db, account.id, {
+            masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
+          });
+          if (credential.type === "oauth") {
+            credential = await maybeRefreshOAuth(
+              app.db,
+              app.redis,
+              account.id,
+              credential,
+              {
+                masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
+                leadMinutes: opts.env.GATEWAY_OAUTH_REFRESH_LEAD_MIN,
+                maxFail: opts.env.GATEWAY_OAUTH_MAX_FAIL,
+              },
+            );
+          }
+
+          const upstream = await callUpstreamMessages({
+            baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
+            body: upstreamBodyBuf,
+            credential,
+            signal: ac.signal,
+          });
+
+          if (upstream.kind !== "stream") {
+            throw {
+              status: upstream.status,
+              message:
+                upstream.status >= 400
+                  ? upstream.body.toString("utf8").slice(0, 500)
+                  : "expected_stream",
+            };
+          }
+
+          if (upstream.status < 200 || upstream.status >= 300) {
+            throw {
+              status: upstream.status,
+              message: `upstream_${upstream.status}`,
+            };
+          }
+
+          // Capture the terminal `response.completed` event's usage so
+          // the pricing path can run after the stream closes. Stream
+          // events are flushed to the client as soon as they arrive.
+          let completedUsage: {
+            input_tokens: number;
+            output_tokens: number;
+            cached_tokens: number;
+          } | null = null;
+
+          if (!reply.raw.headersSent) {
+            reply.raw.writeHead(200, {
+              "content-type": "text/event-stream",
+              "cache-control": "no-cache",
+              connection: "keep-alive",
+            });
+          }
+
+          const translator = makeAnthropicToResponsesStream();
+          const flushEvent = (ev: ResponsesSSEEvent): void => {
+            if (ev.type === "response.completed" && ev.response.usage) {
+              completedUsage = {
+                input_tokens: ev.response.usage.input_tokens,
+                output_tokens: ev.response.usage.output_tokens,
+                cached_tokens:
+                  ev.response.usage.input_tokens_details?.cached_tokens ?? 0,
+              };
+            }
+            // Responses SSE uses named events — `event: <type>\ndata: …`.
+            reply.raw.write(
+              `event: ${ev.type}\ndata: ${JSON.stringify(ev)}\n\n`,
+            );
+          };
+
+          try {
+            for await (const event of parseAnthropicSse(upstream.body, {
+              strict: false,
+              onError: (err) => {
+                req.log.warn(
+                  { requestId, err: err.message },
+                  "anthropic SSE parse error — skipping event",
+                );
+              },
+            })) {
+              for (const ev of translator.onEvent(event)) flushEvent(ev);
+            }
+            for (const ev of translator.onEnd()) flushEvent(ev);
+          } catch (err) {
+            for (const ev of translator.onError({
+              kind: err instanceof Error ? err.name : "unknown",
+              message: err instanceof Error ? err.message : String(err),
+            })) {
+              flushEvent(ev);
+            }
+          }
+
+          reply.raw.end();
+
+          // Translate the captured Responses-shape usage back to a
+          // synthetic Anthropic response so emitUsageLog's pricing path
+          // runs unchanged. Cache fields default to zero — the streaming
+          // Anthropic API surfaces `cache_read_input_tokens` only on
+          // message_start, which `makeAnthropicToResponsesStream` already
+          // folded into `input_tokens_details.cached_tokens`.
+          const upstreamResponse = completedUsage
+            ? syntheticAnthropicFromResponsesUsage(
+                completedUsage,
+                requestedModel,
+                requestId,
+              )
+            : null;
+          await emitUsageLog({
+            app,
+            req,
+            requestedModel,
+            accountId: account.id,
+            upstreamResponse,
+            platform: "openai",
+            surface: "responses",
+            statusCode: 200,
+            durationMs: Date.now() - startedAtMs,
+          });
+          await emitBodyCapture({
+            app,
+            req,
+            requestId,
+            requestBodyJson: upstreamBodyBuf.toString("utf8"),
+            responseBody: null,
+            stream: true,
+          });
+          return undefined as never;
+        } finally {
+          await releaseSlot(app.redis, "account", account.id, requestId).catch(
+            () => {
+              // Slot expires on its own.
+            },
+          );
+        }
+      },
+    });
+  } catch (err) {
+    if (
+      err instanceof AllUpstreamsFailed ||
+      err instanceof FatalUpstreamError
+    ) {
+      if (reply.raw.headersSent) {
+        // Responses uses named events — surface the error in the same
+        // shape the SDK consumer would parse from real upstream errors.
+        // M2 from PR #44 review: `message` carries the actual error,
+        // not the requestId; the requestId goes in its own field.
+        const kind =
+          err instanceof FatalUpstreamError
+            ? err.reason
+            : "all_upstreams_failed";
+        const message =
+          err instanceof FatalUpstreamError
+            ? err.message
+            : `all upstreams failed (attempted=${err.attemptedIds.length})`;
+        const errorEvent = {
+          type: "error" as const,
+          error: { kind, message, request_id: requestId },
+        };
+        reply.raw.write(
+          `event: error\ndata: ${JSON.stringify(errorEvent)}\n\n`,
+        );
+        reply.raw.end();
+      } else {
+        reply.raw.writeHead(
+          err instanceof FatalUpstreamError ? err.statusCode : 503,
+          { "content-type": "application/json" },
+        );
+        reply.raw.end(
+          JSON.stringify({
+            error:
+              err instanceof FatalUpstreamError
+                ? err.reason
+                : "all_upstreams_failed",
+            request_id: requestId,
+          }),
+        );
+      }
+      return;
+    }
+    if (!reply.raw.headersSent) {
+      reply.raw.writeHead(500, { "content-type": "application/json" });
+      reply.raw.end(JSON.stringify({ error: "internal_error" }));
+    } else {
+      reply.raw.end();
+    }
+  } finally {
+    req.raw.removeListener("close", onClose);
+  }
+}
+
+/**
+ * Adapter from the Responses SSE terminal usage shape into the shared
+ * synthetic Anthropic shape consumed by `emitUsageLog`'s pricing path.
+ * Responses `input_tokens` is the gross count (cached + non-cached);
+ * the pricing path expects Anthropic's split (non-cached in
+ * `input_tokens`, cached in `cache_read_input_tokens`).
+ */
+function syntheticAnthropicFromResponsesUsage(
+  usage: { input_tokens: number; output_tokens: number; cached_tokens: number },
+  model: string,
+  requestId: string,
+): ReturnType<typeof buildSyntheticAnthropicUsage> {
+  return buildSyntheticAnthropicUsage({
+    id: `synthetic-stream:${requestId}`,
+    model,
+    inputTokens: Math.max(0, usage.input_tokens - usage.cached_tokens),
+    outputTokens: usage.output_tokens,
+    cacheReadInputTokens: usage.cached_tokens,
+  });
 }
