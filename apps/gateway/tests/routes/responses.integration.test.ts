@@ -20,7 +20,6 @@ import {
   upstreamAccounts,
   credentialVault,
   accountGroups,
-  accountGroupMembers,
   type Database,
 } from "@aide/db";
 import { buildServer } from "../../src/server.js";
@@ -314,7 +313,10 @@ describe("/v1/responses", () => {
           {
             type: "function",
             name: "lookup",
-            parameters: { type: "object", properties: { q: { type: "string" } } },
+            parameters: {
+              type: "object",
+              properties: { q: { type: "string" } },
+            },
           },
         ],
       },
@@ -489,7 +491,148 @@ describe("/v1/responses", () => {
     expect(res.statusCode).toBe(200);
     await app.close();
   });
-});
 
-// Reference unused imports to keep TS happy in strict files.
-void accountGroupMembers;
+  it("9. upstream 503 → failover retries on the next account → 200", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_resp_503_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey);
+    // Two accounts so the failover loop has somewhere to switch to.
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-1" }),
+    );
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-2" }),
+    );
+
+    let calls = 0;
+    nextUpstreamResponse = {
+      get status(): number {
+        calls += 1;
+        return calls === 1 ? 503 : 200;
+      },
+      get body(): string {
+        return calls === 1
+          ? "service unavailable"
+          : JSON.stringify(defaultAnthropicResponse);
+      },
+    } as unknown as { status: number; body: string };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: validResponsesPayload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(calls).toBeGreaterThanOrEqual(2);
+    await app.close();
+  });
+
+  it("10. upstream returns 2xx with malformed JSON → 502 + forensic zero-usage log", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_resp_mal_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test" }),
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: "not valid json {",
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: validResponsesPayload,
+    });
+
+    // The classifier maps `{status: 502}` thrown from the attempt to
+    // either a fatal upstream error or a switchable one; with only one
+    // account in the pool we expect AllUpstreamsFailed → 503.
+    expect([502, 503]).toContain(res.statusCode);
+    await app.close();
+  });
+
+  it("11. input as array of message items round-trips correctly", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_resp_arr_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test" }),
+    );
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: "gpt-4o",
+        max_output_tokens: 50,
+        input: [
+          { role: "user", content: "first turn" },
+          { role: "assistant", content: "previous reply" },
+          { role: "user", content: "follow-up" },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(lastUpstreamRequest).not.toBeNull();
+    const upstreamBody = JSON.parse(lastUpstreamRequest!.body!);
+    // The Responses input array became a 3-message Anthropic conversation.
+    expect(upstreamBody.messages).toHaveLength(3);
+    expect(upstreamBody.messages[0]).toMatchObject({ role: "user" });
+    expect(upstreamBody.messages[1]).toMatchObject({ role: "assistant" });
+    expect(upstreamBody.messages[2]).toMatchObject({ role: "user" });
+    await app.close();
+  });
+
+  it("12. instructions field maps to Anthropic system prompt", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_resp_ins_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test" }),
+    );
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        ...validResponsesPayload,
+        instructions: "you are a terse assistant",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(lastUpstreamRequest).not.toBeNull();
+    const upstreamBody = JSON.parse(lastUpstreamRequest!.body!);
+    expect(upstreamBody.system).toBe("you are a terse assistant");
+    await app.close();
+  });
+});

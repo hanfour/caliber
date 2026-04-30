@@ -157,6 +157,25 @@ function toNonNegInt(v: unknown): number {
 
 // ── Payload builder ──────────────────────────────────────────────────────────
 
+/**
+ * Client URL space the request hit. NOT the upstream platform — both
+ * fields exist in the row because the inbound surface and the upstream
+ * provider can disagree (e.g. /v1/chat/completions hitting an Anthropic
+ * upstream after translation; /v1/responses hitting Anthropic in 5A
+ * before the openai handlers ship).
+ */
+export type UsageLogSurface = "messages" | "chat-completions" | "responses";
+
+/**
+ * Inbound URL space platform — derived from the route, NOT from the
+ * resolved upstream. /v1/messages uses "anthropic"; /v1/chat/completions
+ * + /v1/responses use "openai". Operators reading this column want to
+ * know "which client format did the user speak?" — pair it with
+ * `accountId` (and that account's row's `platform`) to get the upstream
+ * provider answer.
+ */
+export type UsageLogInboundPlatform = "anthropic" | "openai";
+
 export interface BuildUsageLogPayloadInput {
   req: FastifyRequest;
   /** Client-requested model (e.g., `body.model` from the inbound request). */
@@ -164,15 +183,10 @@ export interface BuildUsageLogPayloadInput {
   accountId: string;
   /** Parsed upstream Anthropic response body (used for usage + upstreamModel). */
   upstreamResponse: unknown;
-  /** "anthropic" for /v1/messages, "openai" for /v1/chat/completions. */
-  platform: "anthropic" | "openai";
-  /**
-   * Client URL space:
-   *   "messages" — /v1/messages (Anthropic format)
-   *   "chat-completions" — /v1/chat/completions (OpenAI Chat format)
-   *   "responses" — /v1/responses (OpenAI Responses format; Plan 5A)
-   */
-  surface: "messages" | "chat-completions" | "responses";
+  /** Inbound URL-space platform — see `UsageLogInboundPlatform` for nuance. */
+  platform: UsageLogInboundPlatform;
+  /** Client URL space — see `UsageLogSurface`. */
+  surface: UsageLogSurface;
   /** HTTP status code sent downstream to the client. */
   statusCode: number;
   /** Wall-clock ms since the request started (route handler entry). */
@@ -463,8 +477,8 @@ export interface EmitUsageLogInput {
   requestedModel: string;
   accountId: string;
   upstreamResponse: unknown;
-  platform: "anthropic" | "openai";
-  surface: "messages" | "chat-completions" | "responses";
+  platform: UsageLogInboundPlatform;
+  surface: UsageLogSurface;
   statusCode: number;
   durationMs: number;
   /**

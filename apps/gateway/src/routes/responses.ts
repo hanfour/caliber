@@ -135,13 +135,22 @@ export async function responsesRoutes(
         return;
       }
 
-      // Translate Responses request → Anthropic shape.
+      // Translate Responses request → Anthropic shape.  The translator is
+      // expected to be total over a Zod-validated input, so a throw here
+      // signals a translator bug or a schema-translator drift — surface
+      // as 502 (gateway error) rather than 400 (user error).  The route's
+      // top-level try/catch wraps `runFailover`; we handle this case
+      // separately because we haven't entered the failover loop yet.
       let anthropicBody;
       try {
         anthropicBody = translateResponsesToAnthropic(body);
       } catch (err) {
-        reply.code(400).send({
-          error: "invalid_request",
+        req.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "translateResponsesToAnthropic threw on a Zod-validated body — translator bug or schema drift",
+        );
+        reply.code(502).send({
+          error: "translator_error",
           detail: err instanceof Error ? err.message : String(err),
         });
         return;
