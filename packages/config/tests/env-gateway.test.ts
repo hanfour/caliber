@@ -126,6 +126,12 @@ describe("parseServerEnv — gateway vars", () => {
     expect(env.UPSTREAM_ANTHROPIC_BASE_URL).toBe("https://api.anthropic.com");
   });
 
+  // 13b. Defaults UPSTREAM_OPENAI_BASE_URL (Plan 5A PR 9d)
+  it('defaults UPSTREAM_OPENAI_BASE_URL to "https://api.openai.com"', () => {
+    const env = parseServerEnv(validBase);
+    expect(env.UPSTREAM_OPENAI_BASE_URL).toBe("https://api.openai.com");
+  });
+
   // 14. Accepts ENABLE_GATEWAY="true" string (coerced to boolean true)
   it('accepts ENABLE_GATEWAY="true" string and coerces to boolean true', () => {
     const env = parseServerEnv(validGateway);
