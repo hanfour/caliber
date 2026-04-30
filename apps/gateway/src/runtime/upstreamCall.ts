@@ -29,7 +29,9 @@ export interface StreamUpstreamResult {
 
 export type UpstreamResult = NonStreamUpstreamResult | StreamUpstreamResult;
 
-function buildAuthHeaders(credential: ResolvedCredential): Record<string, string> {
+function buildAuthHeaders(
+  credential: ResolvedCredential,
+): Record<string, string> {
   if (credential.type === "api_key") {
     return {
       "x-api-key": credential.apiKey,
@@ -37,13 +39,19 @@ function buildAuthHeaders(credential: ResolvedCredential): Record<string, string
     };
   }
   return {
-    "authorization": `Bearer ${credential.accessToken}`,
+    authorization: `Bearer ${credential.accessToken}`,
     "anthropic-version": ANTHROPIC_VERSION,
     "anthropic-beta": OAUTH_BETA,
   };
 }
 
-function isStreamRequest(body: Buffer | string): boolean {
+/**
+ * Inspect a request body buffer/string for `{ stream: true }`.  Both
+ * the Anthropic and OpenAI upstream helpers use this to decide whether
+ * to ask for SSE on the upstream call. Exported so `upstreamCallOpenai`
+ * shares a single implementation.
+ */
+export function isStreamRequest(body: Buffer | string): boolean {
   try {
     const text = typeof body === "string" ? body : body.toString("utf8");
     const parsed = JSON.parse(text);
@@ -60,7 +68,7 @@ export async function callUpstreamMessages(
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    "accept": "application/json",
+    accept: "application/json",
     ...input.forwardHeaders,
     ...buildAuthHeaders(input.credential),
   };

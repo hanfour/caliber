@@ -199,3 +199,40 @@ export interface ResponsesResponse {
       | (string & {});
   } | null;
 }
+
+/**
+ * Read the `usage` block off an unknown OpenAI Responses non-stream
+ * response body. Returns null when the upstream omitted usage (error
+ * response, malformed body, etc.). Defensive — caller decides between
+ * a null `upstreamResponse` (zero-cost log row) and a synthetic shape
+ * with real numbers.
+ */
+export function extractResponsesUsage(resp: unknown): ResponsesUsage | null {
+  if (!resp || typeof resp !== "object") return null;
+  const u = (resp as { usage?: unknown }).usage;
+  if (!u || typeof u !== "object") return null;
+  const usage = u as Record<string, unknown>;
+  const input = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+  const output =
+    typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
+  const total =
+    typeof usage.total_tokens === "number"
+      ? usage.total_tokens
+      : input + output;
+  const details = usage.input_tokens_details as
+    | { cached_tokens?: unknown }
+    | undefined;
+  const cached =
+    details && typeof details.cached_tokens === "number"
+      ? details.cached_tokens
+      : undefined;
+  const result: ResponsesUsage = {
+    input_tokens: input,
+    output_tokens: output,
+    total_tokens: total,
+  };
+  if (cached !== undefined) {
+    result.input_tokens_details = { cached_tokens: cached };
+  }
+  return result;
+}

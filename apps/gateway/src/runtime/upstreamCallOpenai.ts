@@ -15,24 +15,20 @@
 
 import { request } from "undici";
 import type { ResolvedCredential } from "./resolveCredential.js";
-import type {
-  NonStreamUpstreamResult,
-  StreamUpstreamResult,
-  UpstreamResult,
+import {
+  isStreamRequest,
+  type NonStreamUpstreamResult,
+  type StreamUpstreamResult,
+  type UpstreamCallInput,
+  type UpstreamResult,
 } from "./upstreamCall.js";
 
-export interface OpenAIUpstreamCallInput {
-  baseUrl: string;
-  body: Buffer | string;
-  credential: ResolvedCredential;
-  signal?: AbortSignal;
-  /**
-   * Headers the route handler wants to forward as-is — typically
-   * empty.  Hop-by-hop / forbidden headers are stripped after merge.
-   */
-  forwardHeaders?: Record<string, string>;
-  timeoutMs?: number;
-}
+/**
+ * OpenAI's HTTP client takes the same input shape as the Anthropic
+ * one — base URL, body, credential, optional signal/headers/timeout.
+ * Aliased rather than redefined so the contract stays in one place.
+ */
+export type OpenAIUpstreamCallInput = UpstreamCallInput;
 
 function buildOpenAIAuthHeaders(
   credential: ResolvedCredential,
@@ -44,16 +40,6 @@ function buildOpenAIAuthHeaders(
     return { authorization: `Bearer ${credential.apiKey}` };
   }
   return { authorization: `Bearer ${credential.accessToken}` };
-}
-
-function isStreamRequest(body: Buffer | string): boolean {
-  try {
-    const text = typeof body === "string" ? body : body.toString("utf8");
-    const parsed = JSON.parse(text);
-    return parsed?.stream === true;
-  } catch {
-    return false;
-  }
 }
 
 export async function callUpstreamResponses(
