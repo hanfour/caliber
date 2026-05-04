@@ -142,76 +142,70 @@ const EXPLICIT_UNSUPPORTED_FIELDS = [
   "computer_use",
 ] as const;
 
-export async function responsesRoutes(
+/**
+ * Core handler for the OpenAI Responses surface — exported so the
+ * Codex CLI alias route (`/backend-api/codex/responses` + subpath)
+ * can wrap it with `forcePlatform("openai")` instead of duplicating
+ * the body. The handler dispatches by `req.gwGroupContext.platform`
+ * just like the inline `/v1/responses` registration does.
+ */
+export function makeResponsesRouteHandler(
   app: FastifyInstance,
   opts: ResponsesRouteOptions,
-): Promise<void> {
-  app.post(
-    "/v1/responses",
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      if (!req.apiKey || !req.gwUser || !req.gwOrg) {
-        reply.code(401).send({ error: "missing_api_key" });
-        return;
-      }
+): (req: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!req.apiKey || !req.gwUser || !req.gwOrg) {
+      reply.code(401).send({ error: "missing_api_key" });
+      return;
+    }
 
-      const ctx = req.gwGroupContext;
-      if (!ctx) {
-        // groupContextPlugin should have either set ctx or 403'd before
-        // this handler runs — defense-in-depth.
-        reply.code(403).send({ error: "group_required" });
-        return;
-      }
+    const ctx = req.gwGroupContext;
+    if (!ctx) {
+      // groupContextPlugin should have either set ctx or 403'd before
+      // this handler runs — defense-in-depth.
+      reply.code(403).send({ error: "group_required" });
+      return;
+    }
 
-      const rawBody = req.body as Record<string, unknown> | undefined;
-      if (!rawBody || typeof rawBody !== "object") {
-        reply.code(400).send({ error: "invalid_body" });
-        return;
-      }
+    const rawBody = req.body as Record<string, unknown> | undefined;
+    if (!rawBody || typeof rawBody !== "object") {
+      reply.code(400).send({ error: "invalid_body" });
+      return;
+    }
 
-      // Surface the design-A6 reject list with clear field names before
-      // Zod's "unrecognized_keys" — friendlier for curl users.
-      for (const key of EXPLICIT_UNSUPPORTED_FIELDS) {
-        if (rawBody[key] !== undefined) {
-          reply.code(400).send({
-            error: "unsupported_feature",
-            field: key,
-          });
-          return;
-        }
-      }
-
-      const parsed = ResponsesRequestSchema.safeParse(rawBody);
-      if (!parsed.success) {
+    // Surface the design-A6 reject list with clear field names before
+    // Zod's "unrecognized_keys" — friendlier for curl users.
+    for (const key of EXPLICIT_UNSUPPORTED_FIELDS) {
+      if (rawBody[key] !== undefined) {
         reply.code(400).send({
-          error: "invalid_request",
-          issues: parsed.error.issues.map((i) => ({
-            path: i.path.join("."),
-            message: i.message,
-            code: i.code,
-          })),
+          error: "unsupported_feature",
+          field: key,
         });
         return;
       }
-      const body = parsed.data;
+    }
 
-      if (ctx.platform === "openai") {
-        // OpenAI upstream is the same format as the inbound — body
-        // passthrough on both the request and the response.  Stream +
-        // non-stream paths share the same shape; only the upstream
-        // call + serialization differ.
-        if (body.stream === true) {
-          await runOpenaiResponsesStreamingPassthrough(
-            app,
-            opts,
-            req,
-            reply,
-            body,
-            req.id,
-            body.model,
-          );
-          return;
-        }
-        await runOpenaiResponsesPassthroughFailover(
+    const parsed = ResponsesRequestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      reply.code(400).send({
+        error: "invalid_request",
+        issues: parsed.error.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+          code: i.code,
+        })),
+      });
+      return;
+    }
+    const body = parsed.data;
+
+    if (ctx.platform === "openai") {
+      // OpenAI upstream is the same format as the inbound — body
+      // passthrough on both the request and the response.  Stream +
+      // non-stream paths share the same shape; only the upstream
+      // call + serialization differ.
+      if (body.stream === true) {
+        await runOpenaiResponsesStreamingPassthrough(
           app,
           opts,
           req,
@@ -222,162 +216,179 @@ export async function responsesRoutes(
         );
         return;
       }
+      await runOpenaiResponsesPassthroughFailover(
+        app,
+        opts,
+        req,
+        reply,
+        body,
+        req.id,
+        body.model,
+      );
+      return;
+    }
 
-      if (ctx.platform !== "anthropic") {
-        // gemini / antigravity not in 5A scope; clear deferral signal.
-        reply.code(503).send({
-          error: "platform_not_yet_wired",
-          platform: ctx.platform,
-        });
-        return;
-      }
+    if (ctx.platform !== "anthropic") {
+      // gemini / antigravity not in 5A scope; clear deferral signal.
+      reply.code(503).send({
+        error: "platform_not_yet_wired",
+        platform: ctx.platform,
+      });
+      return;
+    }
 
-      // Translate Responses request → Anthropic shape.  The translator is
-      // expected to be total over a Zod-validated input, so a throw here
-      // signals a translator bug or a schema-translator drift — surface
-      // as 502 (gateway error) rather than 400 (user error).  The route's
-      // top-level try/catch wraps `runFailover`; we handle this case
-      // separately because we haven't entered the failover loop yet.
-      let anthropicBody;
-      try {
-        anthropicBody = translateResponsesToAnthropic(body);
-      } catch (err) {
-        req.log.error(
-          { err: err instanceof Error ? err.message : String(err) },
-          "translateResponsesToAnthropic threw on a Zod-validated body — translator bug or schema drift",
-        );
-        reply.code(502).send({
-          error: "translator_error",
-          detail: err instanceof Error ? err.message : String(err),
-        });
-        return;
-      }
+    // Translate Responses request → Anthropic shape.  The translator is
+    // expected to be total over a Zod-validated input, so a throw here
+    // signals a translator bug or a schema-translator drift — surface
+    // as 502 (gateway error) rather than 400 (user error).  The route's
+    // top-level try/catch wraps `runFailover`; we handle this case
+    // separately because we haven't entered the failover loop yet.
+    let anthropicBody;
+    try {
+      anthropicBody = translateResponsesToAnthropic(body);
+    } catch (err) {
+      req.log.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        "translateResponsesToAnthropic threw on a Zod-validated body — translator bug or schema drift",
+      );
+      reply.code(502).send({
+        error: "translator_error",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
 
-      const requestId = req.id;
-      const isStream = body.stream === true;
-      const upstreamBody = isStream
-        ? { ...anthropicBody, stream: true }
-        : anthropicBody;
-      const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
+    const requestId = req.id;
+    const isStream = body.stream === true;
+    const upstreamBody = isStream
+      ? { ...anthropicBody, stream: true }
+      : anthropicBody;
+    const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
 
-      if (isStream) {
-        await runResponsesStreamingFailover(
-          app,
-          opts,
-          req,
-          reply,
-          upstreamBodyBuf,
-          requestId,
-          body.model,
-        );
-        return;
-      }
+    if (isStream) {
+      await runResponsesStreamingFailover(
+        app,
+        opts,
+        req,
+        reply,
+        upstreamBodyBuf,
+        requestId,
+        body.model,
+      );
+      return;
+    }
 
-      const startedAtMs = Date.now();
-      const requestedModel = body.model;
+    const startedAtMs = Date.now();
+    const requestedModel = body.model;
 
-      try {
-        const responsesResp = await runFailover({
-          db: app.db,
-          orgId: req.apiKey.orgId,
-          teamId: req.apiKey.teamId,
-          maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
-          scheduler: app.gwScheduler,
-          attempt: async (account) =>
-            withSlotAndCredential(
-              app,
-              opts,
-              account,
-              requestId,
-              async (credential) => {
-                const upstream = await callUpstreamMessages({
-                  baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
-                  body: upstreamBodyBuf,
-                  credential,
-                });
+    try {
+      const responsesResp = await runFailover({
+        db: app.db,
+        orgId: req.apiKey.orgId,
+        teamId: req.apiKey.teamId,
+        maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
+        scheduler: app.gwScheduler,
+        attempt: async (account) =>
+          withSlotAndCredential(
+            app,
+            opts,
+            account,
+            requestId,
+            async (credential) => {
+              const upstream = await callUpstreamMessages({
+                baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
+                body: upstreamBodyBuf,
+                credential,
+              });
 
-                if (upstream.kind === "stream") {
-                  throw { status: 502, message: "unexpected_stream" };
-                }
+              if (upstream.kind === "stream") {
+                throw { status: 502, message: "unexpected_stream" };
+              }
 
-                if (upstream.status < 200 || upstream.status >= 300) {
-                  throw upstreamErrorThrow(upstream);
-                }
+              if (upstream.status < 200 || upstream.status >= 300) {
+                throw upstreamErrorThrow(upstream);
+              }
 
-                // Parse defensively — emit a forensic zero-usage log on
-                // parse failure, then 502 the client.
-                let anthropicResp: unknown = null;
-                let parseErr: unknown = null;
-                try {
-                  anthropicResp = JSON.parse(upstream.body.toString("utf8"));
-                } catch (err) {
-                  parseErr = err;
-                  req.log.warn(
-                    {
-                      requestId,
-                      err: err instanceof Error ? err.message : String(err),
-                    },
-                    "upstream 2xx body was not valid JSON; emitting zero-usage log then failing",
-                  );
-                }
-
-                await emitUsageLog({
-                  app,
-                  req,
-                  requestedModel,
-                  accountId: account.id,
-                  upstreamResponse: anthropicResp,
-                  platform: "openai",
-                  surface: "responses",
-                  statusCode: 200,
-                  durationMs: Date.now() - startedAtMs,
-                });
-                await emitBodyCapture({
-                  app,
-                  req,
-                  requestId,
-                  requestBodyJson: upstreamBodyBuf.toString("utf8"),
-                  responseBody: anthropicResp,
-                  stream: false,
-                });
-
-                if (parseErr !== null) {
-                  throw { status: 502, message: "upstream_malformed_json" };
-                }
-
-                return translateAnthropicResponseToResponses(
-                  anthropicResp as Parameters<
-                    typeof translateAnthropicResponseToResponses
-                  >[0],
+              // Parse defensively — emit a forensic zero-usage log on
+              // parse failure, then 502 the client.
+              let anthropicResp: unknown = null;
+              let parseErr: unknown = null;
+              try {
+                anthropicResp = JSON.parse(upstream.body.toString("utf8"));
+              } catch (err) {
+                parseErr = err;
+                req.log.warn(
+                  {
+                    requestId,
+                    err: err instanceof Error ? err.message : String(err),
+                  },
+                  "upstream 2xx body was not valid JSON; emitting zero-usage log then failing",
                 );
-              },
-            ),
-        });
+              }
 
-        reply
-          .code(200)
-          .header("content-type", "application/json")
-          .send(responsesResp);
-      } catch (err) {
-        if (err instanceof AllUpstreamsFailed) {
-          reply.code(503).send({
-            error: "all_upstreams_failed",
-            attempted_count: err.attemptedIds.length,
-            request_id: requestId,
-          });
-          return;
-        }
-        if (err instanceof FatalUpstreamError) {
-          reply.code(err.statusCode).send({
-            error: err.reason,
-            request_id: requestId,
-          });
-          return;
-        }
-        throw err;
+              await emitUsageLog({
+                app,
+                req,
+                requestedModel,
+                accountId: account.id,
+                upstreamResponse: anthropicResp,
+                platform: "openai",
+                surface: "responses",
+                statusCode: 200,
+                durationMs: Date.now() - startedAtMs,
+              });
+              await emitBodyCapture({
+                app,
+                req,
+                requestId,
+                requestBodyJson: upstreamBodyBuf.toString("utf8"),
+                responseBody: anthropicResp,
+                stream: false,
+              });
+
+              if (parseErr !== null) {
+                throw { status: 502, message: "upstream_malformed_json" };
+              }
+
+              return translateAnthropicResponseToResponses(
+                anthropicResp as Parameters<
+                  typeof translateAnthropicResponseToResponses
+                >[0],
+              );
+            },
+          ),
+      });
+
+      reply
+        .code(200)
+        .header("content-type", "application/json")
+        .send(responsesResp);
+    } catch (err) {
+      if (err instanceof AllUpstreamsFailed) {
+        reply.code(503).send({
+          error: "all_upstreams_failed",
+          attempted_count: err.attemptedIds.length,
+          request_id: requestId,
+        });
+        return;
       }
-    },
-  );
+      if (err instanceof FatalUpstreamError) {
+        reply.code(err.statusCode).send({
+          error: err.reason,
+          request_id: requestId,
+        });
+        return;
+      }
+      throw err;
+    }
+  };
+}
+
+export async function responsesRoutes(
+  app: FastifyInstance,
+  opts: ResponsesRouteOptions,
+): Promise<void> {
+  app.post("/v1/responses", makeResponsesRouteHandler(app, opts));
 }
 
 // ---------------------------------------------------------------------------

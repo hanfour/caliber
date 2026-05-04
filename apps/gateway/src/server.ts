@@ -12,6 +12,7 @@ import { groupContextPlugin } from "./middleware/groupContext.js";
 import { messagesRoutes } from "./routes/messages.js";
 import { chatCompletionsRoutes } from "./routes/chatCompletions.js";
 import { responsesRoutes } from "./routes/responses.js";
+import { codexResponsesRoutes } from "./routes/codexResponses.js";
 import {
   createUsageLogQueue,
   type UsageLogJobPayload,
@@ -113,6 +114,7 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
   await app.register(messagesRoutes, { env: opts.env });
   await app.register(chatCompletionsRoutes, { env: opts.env });
   await app.register(responsesRoutes, { env: opts.env });
+  await app.register(codexResponsesRoutes, { env: opts.env });
 
   // BullMQ wiring: skip when a test injected its own Redis (see BuildOpts docs).
   if (opts.redis === undefined) {
