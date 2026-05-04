@@ -34,7 +34,7 @@ function isValidJson(s: string): boolean {
 const schema = z
   .object({
     name: z.string().min(1, "Name is required").max(255),
-    platform: z.enum(["anthropic"]),
+    platform: z.enum(["anthropic", "openai"]),
     type: z.enum(["api_key", "oauth"]),
     scopeType: z.enum(["org", "team"]),
     teamId: z.string().uuid().optional().or(z.literal("")),
@@ -47,6 +47,16 @@ const schema = z
   .refine((v) => v.type !== "oauth" || isValidJson(v.credentials), {
     message: "OAuth credentials must be valid JSON",
     path: ["credentials"],
+  })
+  // OpenAI OAuth (Codex CLI subscription token paste) is intentionally not
+  // exposed through this form per the API-key migration plan — the
+  // compliant onboarding path for OpenAI is the org/project `sk-` API
+  // key.  The backend still accepts `{platform: "openai", type: "oauth"}`
+  // for callers that bypass this UI, so we enforce the constraint at the
+  // form layer rather than the schema layer.
+  .refine((v) => !(v.platform === "openai" && v.type === "oauth"), {
+    message: "OpenAI accounts are onboarded with an API key (sk-...).",
+    path: ["type"],
   });
 
 type FormValues = z.infer<typeof schema>;
@@ -97,6 +107,7 @@ export function AccountCreateForm({ orgId }: Props) {
   });
 
   const type = watch("type");
+  const platform = watch("platform");
   const scopeType = watch("scopeType");
 
   // Clear stale credentials validation error when the user toggles `type`.
@@ -105,6 +116,17 @@ export function AccountCreateForm({ orgId }: Props) {
   useEffect(() => {
     clearErrors("credentials");
   }, [type, clearErrors]);
+
+  // Force `type=api_key` when the user picks OpenAI — OAuth subscription
+  // paste is not an exposed onboarding path for OpenAI (see schema
+  // refinement). Re-toggling to anthropic restores the user's choice
+  // would be nice but adds state; keeping it simple — they re-pick.
+  useEffect(() => {
+    if (platform === "openai" && type === "oauth") {
+      setValue("type", "api_key");
+      clearErrors("type");
+    }
+  }, [platform, type, setValue, clearErrors]);
 
   // Reset `teamId` when scope toggles back to `org`. RHF retains the value
   // even though the <select> is conditionally unmounted, which is misleading
@@ -118,7 +140,16 @@ export function AccountCreateForm({ orgId }: Props) {
   const credentialHint =
     type === "oauth"
       ? "Paste the OAuth JSON returned by `claude auth login` — must include `access_token`, `refresh_token`, `expires_at`."
-      : "Paste the raw Anthropic API key (sk-ant-...).";
+      : platform === "openai"
+        ? "Paste the OpenAI org/project API key (sk-... or sk-proj-...). See docs/admin/openai-account-setup.md for sourcing."
+        : "Paste the raw Anthropic API key (sk-ant-...).";
+
+  const credentialPlaceholder =
+    type === "oauth"
+      ? '{"access_token":"...","refresh_token":"...","expires_at":...}'
+      : platform === "openai"
+        ? "sk-proj-..."
+        : "sk-ant-...";
 
   const onSubmit = handleSubmit((v) =>
     create.mutateAsync({
@@ -153,9 +184,12 @@ export function AccountCreateForm({ orgId }: Props) {
           {...register("platform")}
         >
           <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
         </select>
         <p className="text-xs text-muted-foreground">
-          Only Anthropic is supported today.
+          {platform === "openai"
+            ? "Onboard via API key obtained from a compliant OpenAI org / project."
+            : "Anthropic supports both API key and OAuth (claude auth login)."}
         </p>
       </div>
 
@@ -176,21 +210,29 @@ export function AccountCreateForm({ orgId }: Props) {
               </span>
             </span>
           </label>
-          <label className="flex items-start gap-2 text-sm">
+          <label
+            className={`flex items-start gap-2 text-sm ${platform === "openai" ? "opacity-50" : ""}`}
+          >
             <input
               type="radio"
               value="oauth"
               className="mt-0.5"
+              disabled={platform === "openai"}
               {...register("type")}
             />
             <span>
               <span className="font-medium">OAuth (JSON)</span>
               <span className="block text-xs text-muted-foreground">
-                Refreshable token bundle from `claude auth login`.
+                {platform === "openai"
+                  ? "Not available for OpenAI — use API key path."
+                  : "Refreshable token bundle from `claude auth login`."}
               </span>
             </span>
           </label>
         </div>
+        {errors.type && (
+          <p className="text-xs text-destructive">{errors.type.message}</p>
+        )}
       </fieldset>
 
       <fieldset className="space-y-2">
@@ -262,11 +304,7 @@ export function AccountCreateForm({ orgId }: Props) {
           id="credentials"
           rows={6}
           className={TEXTAREA_CLASS}
-          placeholder={
-            type === "oauth"
-              ? '{"access_token":"...","refresh_token":"...","expires_at":...}'
-              : "sk-ant-..."
-          }
+          placeholder={credentialPlaceholder}
           {...register("credentials")}
         />
         <p className="text-xs text-muted-foreground">{credentialHint}</p>
