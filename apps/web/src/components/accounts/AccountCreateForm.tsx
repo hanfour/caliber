@@ -47,17 +47,14 @@ const schema = z
   .refine((v) => v.type !== "oauth" || isValidJson(v.credentials), {
     message: "OAuth credentials must be valid JSON",
     path: ["credentials"],
-  })
-  // OpenAI OAuth (Codex CLI subscription token paste) is intentionally not
-  // exposed through this form per the API-key migration plan — the
-  // compliant onboarding path for OpenAI is the org/project `sk-` API
-  // key.  The backend still accepts `{platform: "openai", type: "oauth"}`
-  // for callers that bypass this UI, so we enforce the constraint at the
-  // form layer rather than the schema layer.
-  .refine((v) => !(v.platform === "openai" && v.type === "oauth"), {
-    message: "OpenAI accounts are onboarded with an API key (sk-...).",
-    path: ["type"],
   });
+// Note: the OpenAI + oauth combo is unreachable through this form — the
+// `type=oauth` radio is `disabled={platform === "openai"}` and a
+// useEffect below snaps back to api_key if the user picked OAuth first
+// then toggled to OpenAI. The backend `accounts.create` mutation still
+// accepts the combo for callers that bypass this UI; per the API-key
+// migration plan, the OAuth-pool path is intentionally not surfaced
+// here.
 
 type FormValues = z.infer<typeof schema>;
 
@@ -230,9 +227,6 @@ export function AccountCreateForm({ orgId }: Props) {
             </span>
           </label>
         </div>
-        {errors.type && (
-          <p className="text-xs text-destructive">{errors.type.message}</p>
-        )}
       </fieldset>
 
       <fieldset className="space-y-2">
