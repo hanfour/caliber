@@ -1,9 +1,22 @@
 # API Key Migration Plan — pivot from individual-OAuth pool to compliant path
 
-**Status**: Planning. Replaces the planned PR 5b deployment trajectory.
+**Status**: Phase 1 + Phase 3 #1 shipped (PRs #52, #53). Phase 2/3
+remainder pending.
 **Date recorded**: 2026-05-04.
 **Supersedes for forward work**: `.claude/plans/2026-05-04-forward-debt-5b-handoff.md`
 (5b work itself stays on the abandoned branch — see Phase 0).
+
+## Progress
+
+| Phase | Status | Landed as |
+|---|---|---|
+| Phase 0 — abandon 5b | 🟡 Branch retained locally; calendar deletion ≈ 2026-05-18 | — |
+| Phase 1 — OpenAI api_key onboarding | 🟢 **shipped 2026-05-04** | PR #52 (commit `a19c8f0`) |
+| Phase 3 #1 — accountGroups admin CRUD | 🟢 **shipped 2026-05-04** | PR #53 (commit `5685583`) |
+| Phase 2 — ChatGPT Team/Enterprise admin API | ⚪ deferred (no customer pull yet) | — |
+| Phase 3 #2 — caching / dedup | ⚪ pending design | — |
+| Phase 3 #4 — log masking + RPS limit | ⚪ pending | — |
+| Anthropic path | ⚪ unchanged (decision A11 stands) | — |
 
 ---
 
