@@ -120,6 +120,7 @@ export function makeMessagesAnthropicHandler(
         scope: "v1/messages",
         bodyBuf: upstreamBodyBuf,
         reply,
+        onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
@@ -808,6 +809,7 @@ export function makeMessagesOpenaiHandler(
         scope: "v1/messages",
         bodyBuf: clientBodyBuf,
         reply,
+        onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;

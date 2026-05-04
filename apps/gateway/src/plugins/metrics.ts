@@ -12,6 +12,15 @@ export interface GatewayMetrics {
   waitQueueDepth: Gauge<string>;
   idempotencyHitTotal: Counter<string>;
   stickyHitTotal: Counter<string>;
+  // Phase 3 #2 follow-up — cache hit/miss counter so operators can
+  // observe hit-rate from Prometheus rather than only via the
+  // `x-cache` response header on individual requests.
+  gwCacheTotal: Counter<"result">;
+  // Phase 3 #4-b follow-up — counts the rateLimitPlugin's fail-open
+  // path (Redis error → request let through). Sustained non-zero =
+  // rate limiting is silently disabled; pair with the existing
+  // `gw_redis_latency_seconds` to root-cause.
+  gwRateLimitFailOpenTotal: Counter<string>;
   redisLatencySeconds: Histogram<string>;
   upstreamDurationSeconds: Histogram<string>;
   pricingMissTotal: Counter<"model">;
@@ -106,6 +115,19 @@ async function metricsPluginBody(
   const stickyHitTotal = new Counter({
     name: "gw_sticky_hit_total",
     help: "Sticky-session cache hits",
+    registers: [register],
+  });
+
+  const gwCacheTotal = new Counter({
+    name: "gw_cache_total",
+    help: "Response-cache hit/miss counter (only emitted when GATEWAY_CACHE_TTL_SEC > 0)",
+    labelNames: ["result"] as const,
+    registers: [register],
+  });
+
+  const gwRateLimitFailOpenTotal = new Counter({
+    name: "gw_rate_limit_fail_open_total",
+    help: "Per-apiKey rate-limit checks that hit the fail-open path due to Redis errors",
     registers: [register],
   });
 
@@ -389,12 +411,19 @@ async function metricsPluginBody(
   gwGdprAutoRejectedTotal.inc(0);
   // Histograms appear as _count/_sum=0 without an explicit observation
 
+  // Initialise zero so the new counters appear immediately in /metrics.
+  gwCacheTotal.inc({ result: "hit" }, 0);
+  gwCacheTotal.inc({ result: "miss" }, 0);
+  gwRateLimitFailOpenTotal.inc(0);
+
   fastify.decorate("gwMetrics", {
     slotAcquireTotal,
     slotHoldDurationSeconds,
     waitQueueDepth,
     idempotencyHitTotal,
     stickyHitTotal,
+    gwCacheTotal,
+    gwRateLimitFailOpenTotal,
     redisLatencySeconds,
     upstreamDurationSeconds,
     pricingMissTotal,

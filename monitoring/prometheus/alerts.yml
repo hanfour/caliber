@@ -58,18 +58,18 @@ groups:
         runbook: "docs/runbooks/rpm-limit-triggered.md"
 
     - alert: GatewayRateLimitFailingOpen
-      # The plugin fails open on Redis errors. If we see warnings of
-      # rate_limit_check_failed (no metric today; would need to add one)
-      # — for now alert on Redis latency as a proxy.
+      # Direct counter (added alongside the rate limiter): every fail-open
+      # path increments. Sustained > 0.1/sec = rate limiting is silently
+      # off due to Redis errors.
       expr: |
-        histogram_quantile(0.95, sum(rate(gw_redis_latency_seconds_bucket[5m])) by (le)) > 0.5
+        sum(rate(gw_rate_limit_fail_open_total[5m])) > 0.1
       for: 3m
       labels:
         severity: warning
         service: gateway
       annotations:
-        summary: "Redis p95 latency >500ms — rate limiter may be failing open"
-        description: "Sustained Redis slowness affects rate limiting (fail-open path lets traffic through), idempotency, sticky sessions, and slot management. Check Redis health."
+        summary: "Rate limiter is failing open due to Redis errors"
+        description: "More than 0.1 fail-open events per second over 5+ min — clients are bypassing the per-apiKey RPM cap. Check Redis health (gw_redis_latency_seconds, redis-cli ping)."
         runbook: "docs/runbooks/rpm-limit-triggered.md (last section)"
 
 # ── Failover loop / scheduler ─────────────────────────────────────────────
@@ -180,6 +180,24 @@ groups:
         summary: "Billing drift detected — usage_logs / cost_ledger diverging"
         description: "The billing audit worker found a drift between usage_logs cost computation and cost_ledger. Investigate before the discrepancy compounds."
         runbook: "docs/runbooks/cost-ledger-mismatch.md"
+
+    - alert: GatewayCacheHitRateLow
+      # Cache enabled but hit rate is <5% over 1h — Redis is taking
+      # writes without saving cost. Either traffic shape is too diverse
+      # to benefit, or TTL is too short. Tune or disable.
+      expr: |
+        sum(rate(gw_cache_total{result="hit"}[1h]))
+          / clamp_min(sum(rate(gw_cache_total[1h])), 0.0001)
+          < 0.05
+        and sum(rate(gw_cache_total[1h])) > 0.1
+      for: 30m
+      labels:
+        severity: info
+        service: gateway
+      annotations:
+        summary: "Response cache enabled but hit rate <5% over the last hour"
+        description: "Either GATEWAY_CACHE_TTL_SEC is too short for the traffic shape, or the workload is too diverse to benefit from caching. Consider raising TTL or disabling (`GATEWAY_CACHE_TTL_SEC=0`) to free Redis."
+        runbook: "docs/runbooks/cache-issues.md"
 
     - alert: GatewayLlmBudgetExceeded
       expr: |

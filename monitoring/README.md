@@ -63,22 +63,22 @@ runbooks under `docs/runbooks/` to actual signals.
 
 ## Known gaps
 
-These would-be-useful alerts aren't shipped yet:
+These alerts can't be expressed without infrastructure outside aide
+itself:
 
-- **Cache hit rate** — no `gw_cache_hit_total` / `gw_cache_miss_total`
-  metric exists today. Currently only observable via the `x-cache`
-  response header. Adding the metric is a one-PR follow-up.
-- **Rate-limit fail-open count** — `rate_limit_check_failed` is logged
-  but not metricked. Same one-PR fix.
 - **Backup freshness** — runbook prescribes daily pg_dumpall but no
   alert if a backup is missed; needs a node-exporter textfile collector
-  on the backup host.
+  on the backup host (write a sentinel file after each successful
+  backup; alert if `node_textfile_mtime_seconds{file="aide-backup"}`
+  is more than 25 hours old).
 - **Cert expiry** — your reverse proxy's TLS cert. Use Prometheus
   blackbox-exporter (`probe_ssl_earliest_cert_expiry`) on the public
   endpoints.
 
-These aren't blockers for first deploy — the current rule set covers
-the high-impact failure modes the runbooks cover.
+The previous gaps for cache hit-rate and rate-limit fail-open count
+are now covered by `gw_cache_total{result}` and
+`gw_rate_limit_fail_open_total` respectively — see the
+`GatewayCacheHitRateLow` and `GatewayRateLimitFailingOpen` rules.
 
 ## Optional: Grafana
 

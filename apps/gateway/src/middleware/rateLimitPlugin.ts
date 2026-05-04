@@ -34,18 +34,18 @@ async function pluginBody(
 
     let result;
     try {
-      result = await checkApiKeyRateLimit(
-        fastify.redis,
-        req.apiKey.id,
-        limit,
-      );
+      result = await checkApiKeyRateLimit(fastify.redis, req.apiKey.id, limit);
     } catch (err) {
       // Fail open on Redis errors — losing rate limiting is preferable
-      // to losing all traffic. Still log so operators notice.
+      // to losing all traffic. Still log + count so operators notice
+      // and can alert on `gw_rate_limit_fail_open_total`.
       req.log.warn(
         { err: err instanceof Error ? err.message : String(err) },
         "rate_limit_check_failed",
       );
+      // Decorate may not be set in unit tests that build a bare fastify
+      // — guard so the plugin stays test-friendly.
+      fastify.gwMetrics?.gwRateLimitFailOpenTotal.inc();
       return;
     }
 

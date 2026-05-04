@@ -160,6 +160,7 @@ export function makeResponsesRouteHandler(
         scope: "v1/responses",
         bodyBuf: clientBodyBuf,
         reply,
+        onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;

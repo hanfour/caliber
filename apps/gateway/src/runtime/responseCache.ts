@@ -208,6 +208,14 @@ export interface CheckRouteCacheDeps {
     header(k: string, v: string): unknown;
     send(b: Buffer): unknown;
   };
+  /**
+   * Optional metric emitter — called once per check with `"hit"` or
+   * `"miss"` when the cache is enabled (`ttlSec > 0`). Omit in tests
+   * or when metrics aren't decorated yet. Disabled cache (`ttlSec=0`)
+   * skips the callback entirely so disabled-mode doesn't pollute the
+   * counter.
+   */
+  onResult?: (result: "hit" | "miss") => void;
 }
 
 export interface CheckRouteCacheResult {
@@ -233,9 +241,11 @@ export async function checkRouteCache(
     }
     deps.reply.header("x-cache", "hit");
     deps.reply.send(decodeCachedBody(cached));
+    deps.onResult?.("hit");
     return { hit: true, cacheKey };
   }
   deps.reply.header("x-cache", "miss");
+  deps.onResult?.("miss");
   return { hit: false, cacheKey };
 }
 

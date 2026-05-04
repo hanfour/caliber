@@ -135,6 +135,7 @@ export function makeChatCompletionsAnthropicHandler(
         scope: "v1/chat/completions",
         bodyBuf: clientBodyBuf,
         reply,
+        onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
@@ -616,6 +617,7 @@ export function makeChatCompletionsOpenaiHandler(
         scope: "v1/chat/completions",
         bodyBuf: clientBodyBuf,
         reply,
+        onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
