@@ -1,8 +1,9 @@
 # API Key Migration Plan — pivot from individual-OAuth pool to compliant path
 
-**Status**: Phase 1 + Phase 3 #1 shipped (PRs #52, #53). Phase 2/3
-remainder pending.
-**Date recorded**: 2026-05-04.
+**Status**: Phase 1, Phase 3 #1, Phase 3 #4, and Phase 3 #2 (canary
+on /v1/messages) shipped.  Phase 2 deferred; Phase 3 #2 expansion to
+remaining routes pending.
+**Date recorded**: 2026-05-04 (initial), last updated 2026-05-04.
 **Supersedes for forward work**: `.claude/plans/2026-05-04-forward-debt-5b-handoff.md`
 (5b work itself stays on the abandoned branch — see Phase 0).
 
@@ -11,11 +12,13 @@ remainder pending.
 | Phase | Status | Landed as |
 |---|---|---|
 | Phase 0 — abandon 5b | 🟡 Branch retained locally; calendar deletion ≈ 2026-05-18 | — |
-| Phase 1 — OpenAI api_key onboarding | 🟢 **shipped 2026-05-04** | PR #52 (commit `a19c8f0`) |
-| Phase 3 #1 — accountGroups admin CRUD | 🟢 **shipped 2026-05-04** | PR #53 (commit `5685583`) |
+| Phase 1 — OpenAI api_key onboarding | 🟢 shipped 2026-05-04 | PR #52 (`a19c8f0`) |
+| Phase 3 #1 — accountGroups admin CRUD | 🟢 shipped 2026-05-04 | PR #53 (`5685583`) |
+| Phase 3 #4-a — credential log redaction | 🟢 shipped 2026-05-04 | PR #55 (`b5ac3ce`) |
+| Phase 3 #4-b — per-apiKey RPM rate limit | 🟢 shipped 2026-05-04 | PR #56 (`929feb4`) |
+| Phase 3 #2 — response cache (helper + canary route) | 🟡 partial — only `/v1/messages` non-stream (anthropic-platform branch) wired; helper is platform-agnostic and reusable | PR #57 (`ed91263`) |
+| Phase 3 #2 expansion | ⚪ pending — wire helper into `/v1/chat/completions`, `/v1/responses`, `/v1/codex/responses` (and the openai-platform branch of /v1/messages) | — |
 | Phase 2 — ChatGPT Team/Enterprise admin API | ⚪ deferred (no customer pull yet) | — |
-| Phase 3 #2 — caching / dedup | ⚪ pending design | — |
-| Phase 3 #4 — log masking + RPS limit | ⚪ pending | — |
 | Anthropic path | ⚪ unchanged (decision A11 stands) | — |
 
 ---
