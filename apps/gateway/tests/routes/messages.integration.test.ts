@@ -722,7 +722,10 @@ describe("POST /v1/messages", () => {
     await app.close();
   });
 
-  it("openai-platform group + stream=true → 501 (deferred to PR 9h)", async () => {
+  it("openai-platform group + stream=true → Responses SSE translated to Anthropic SSE", async () => {
+    // PR 9h cross-format streaming. The same upstream wire bytes from
+    // PR 9e's `7c.` test get translated through the inverse direction
+    // (Responses → Anthropic) and emerge as Anthropic-shaped SSE.
     const orgId = await seedOrg();
     const userId = await seedUser(orgId);
     const groupId = await seedGroup(orgId, "openai");
@@ -733,6 +736,47 @@ describe("POST /v1/messages", () => {
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
     );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: "",
+      sseChunks: [
+        `event: response.created\ndata: ${JSON.stringify({
+          type: "response.created",
+          response: { id: "resp_msg_strm_1", model: "gpt-4o", created_at: 1 },
+        })}\n\n`,
+        `event: response.output_item.added\ndata: ${JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_oai_1", role: "assistant" },
+        })}\n\n`,
+        `event: response.content_part.added\ndata: ${JSON.stringify({
+          type: "response.content_part.added",
+          output_index: 0,
+          content_index: 0,
+          part: { type: "output_text", text: "" },
+        })}\n\n`,
+        `event: response.output_text.delta\ndata: ${JSON.stringify({
+          type: "response.output_text.delta",
+          output_index: 0,
+          content_index: 0,
+          delta: "Hello world",
+        })}\n\n`,
+        `event: response.output_item.done\ndata: ${JSON.stringify({
+          type: "response.output_item.done",
+          output_index: 0,
+        })}\n\n`,
+        `event: response.completed\ndata: ${JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp_msg_strm_1",
+            status: "completed",
+            incomplete_details: null,
+            usage: { input_tokens: 9, output_tokens: 2, total_tokens: 11 },
+          },
+        })}\n\n`,
+      ],
+    };
 
     const redis = new RedisMock({
       keyPrefix: "aide:gw:",
@@ -752,8 +796,164 @@ describe("POST /v1/messages", () => {
         stream: true,
       },
     });
-    expect(res.statusCode).toBe(501);
-    expect(res.json()).toMatchObject({ error: "not_implemented" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    const body = res.body;
+    // Anthropic SSE shape — translator emits these named events.
+    expect(body).toContain("event: message_start");
+    expect(body).toContain("event: content_block_start");
+    expect(body).toContain("event: content_block_delta");
+    expect(body).toContain("event: content_block_stop");
+    expect(body).toContain("event: message_delta");
+    expect(body).toContain("event: message_stop");
+    // The text delta survives translation.
+    expect(body).toContain("Hello world");
+    // No raw OpenAI-shaped events leaked through.
+    expect(body).not.toContain("event: response.completed");
+    expect(body).not.toContain("event: response.output_text.delta");
+    // Upstream got stream=true and was POSTed to /v1/responses.
+    expect(lastRequest).not.toBeNull();
+    expect(lastRequest!.url).toBe("/v1/responses");
+    await app.close();
+  });
+
+  it("openai-platform group + stream=true with malformed mid-stream event → continues (lenient)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_msg_oai_strm_mal_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      { platform: "openai" },
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: "",
+      sseChunks: [
+        `event: response.created\ndata: ${JSON.stringify({
+          type: "response.created",
+          response: { id: "resp_mal_msg", model: "gpt-4o", created_at: 1 },
+        })}\n\n`,
+        // Single malformed event in the middle.
+        `event: response.output_text.delta\ndata: not-json-at-all\n\n`,
+        `event: response.completed\ndata: ${JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp_mal_msg",
+            status: "completed",
+            incomplete_details: null,
+            usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 },
+          },
+        })}\n\n`,
+      ],
+    };
+
+    const redis = new RedisMock({
+      keyPrefix: "aide:gw:",
+    }) as unknown as Redis;
+    const { parseServerEnv } = await import("@aide/config");
+    const env = parseServerEnv(buildEnv(container.getConnectionUri()));
+    const app = await buildServer({ env, db, redis });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: "claude-3-haiku-20240307",
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 10,
+        stream: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.body;
+    // Surrounding events translated through despite the malformed one.
+    expect(body).toContain("event: message_start");
+    expect(body).toContain("event: message_stop");
+    // The malformed payload was dropped, not echoed verbatim.
+    expect(body).not.toContain("not-json-at-all");
+    await app.close();
+  });
+
+  it("openai-platform group + stream=true truncated before response.completed → partial events delivered", async () => {
+    // Upstream closes mid-stream without emitting response.completed.
+    // The parser exits cleanly; whatever events did arrive get
+    // translated, and the usage_log row is filled with null
+    // (zero-cost forensic entry).
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_msg_oai_strm_trunc_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      { platform: "openai" },
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: "",
+      sseChunks: [
+        `event: response.created\ndata: ${JSON.stringify({
+          type: "response.created",
+          response: { id: "resp_msg_trunc", model: "gpt-4o", created_at: 1 },
+        })}\n\n`,
+        `event: response.output_item.added\ndata: ${JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_oai_t", role: "assistant" },
+        })}\n\n`,
+        `event: response.content_part.added\ndata: ${JSON.stringify({
+          type: "response.content_part.added",
+          output_index: 0,
+          content_index: 0,
+          part: { type: "output_text", text: "" },
+        })}\n\n`,
+        `event: response.output_text.delta\ndata: ${JSON.stringify({
+          type: "response.output_text.delta",
+          output_index: 0,
+          content_index: 0,
+          delta: "hi",
+        })}\n\n`,
+        // No response.completed — upstream truncates here.
+      ],
+    };
+
+    const redis = new RedisMock({
+      keyPrefix: "aide:gw:",
+    }) as unknown as Redis;
+    const { parseServerEnv } = await import("@aide/config");
+    const env = parseServerEnv(buildEnv(container.getConnectionUri()));
+    const app = await buildServer({ env, db, redis });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: "claude-3-haiku-20240307",
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 10,
+        stream: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.body;
+    expect(body).toContain("event: message_start");
+    expect(body).toContain("event: content_block_delta");
+    expect(body).toContain('"text":"hi"');
+    // Translator's onEnd() emits the closing terminators even though
+    // upstream never sent response.completed, so the client-side
+    // Anthropic SDK reader sees a clean termination.
+    expect(body).toContain("event: message_stop");
     await app.close();
   });
 
