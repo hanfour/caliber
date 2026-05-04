@@ -127,7 +127,23 @@ Append to your `docker/.env`:
 
 All other gateway vars (`GATEWAY_MAX_ACCOUNT_SWITCHES`,
 `GATEWAY_REDIS_FAILURE_MODE`, etc.) have sensible defaults and are documented
-in [`GATEWAY.md#2-configuration`](./GATEWAY.md#2-configuration).
+in [`GATEWAY.md#2-configuration`](./GATEWAY.md#2-configuration).  Two of them
+are particularly worth knowing about for a first deploy:
+
+- **`GATEWAY_APIKEY_RPM_LIMIT`** (default 600 ≈ 10 RPS sustained) — protects
+  the upstream-account pool from a runaway client. Rate-limit headers are
+  emitted on every response (`x-ratelimit-limit`, `x-ratelimit-remaining`)
+  so client SDKs can self-throttle. Over-limit calls get 429 + `Retry-After`.
+  Set to `0` to disable temporarily during an incident; long-term tune up or
+  down based on observed traffic.
+- **`GATEWAY_CACHE_TTL_SEC`** (default `0` = OFF) — opt-in response cache
+  for non-streaming `/v1/*` endpoints. When >0, identical
+  `(orgId, endpoint, body)` requests within the TTL window short-circuit
+  upstream and return the cached response with `x-cache: hit`. Cached
+  payloads contain model output (not prompts); confirm your data
+  classification permits this before enabling. Recommended first-deploy
+  rollout: keep at 0 for the first week, observe, then enable with a short
+  TTL (60-300s).
 
 For production, inject `CREDENTIAL_ENCRYPTION_KEY` and `API_KEY_HASH_PEPPER`
 via Docker secrets or your orchestrator's secret mount — do not leave them in
@@ -169,7 +185,48 @@ docker compose --profile gateway up -d
 The gateway has no migrations of its own beyond what `migrate` already
 ran — schema changes ship with new releases of `apps/api`.
 
-### 6.5 Feature flag (process-level)
+### 6.5 First-time admin walkthrough — onboarding an OpenAI account
+
+After the gateway service is up and a `super_admin` has signed in, work
+through this checklist once to put real traffic through the stack. (Skip
+the OpenAI parts if you're starting with Anthropic.)
+
+1. **Provision OpenAI org / project** — sign in at
+   <https://platform.openai.com/>, create an org if needed, set a monthly
+   spend cap, and create a Project (e.g. `aide-prod`) under that org with
+   its own per-project spend cap.  Mint a **project API key**
+   (`sk-proj-...`) scoped to inference only. Full step-by-step in
+   [`admin/openai-account-setup.md`](./admin/openai-account-setup.md).
+2. **Add the upstream account** — in the admin UI go to
+   `/dashboard/organizations/<org>/accounts`, click "New account",
+   pick **OpenAI** + **API key**, paste the `sk-proj-...` value, choose
+   org-wide or team-specific scope, save.
+3. **(Optional) Build a pool** — if you have multiple OpenAI project
+   keys (e.g. one per business unit budget), create them as separate
+   accounts and group them under `/dashboard/organizations/<org>/account-groups`.
+   Set per-member priority — the scheduler picks lowest first.
+4. **Issue a client API key** — go to **Profile → Generate new API
+   key**. Copy the one-time `ak_...` value (the gateway hashes it on
+   submit; you cannot recover it).
+5. **Smoke test from a client** —
+   ```sh
+   curl https://gateway.example.com/v1/chat/completions \
+     -H "Authorization: Bearer ak_..." \
+     -H "Content-Type: application/json" \
+     -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}]}'
+   ```
+   You should get a 200 with response headers including
+   `x-ratelimit-limit: 600`, `x-ratelimit-remaining: 599`, and (when
+   `GATEWAY_CACHE_TTL_SEC>0`) `x-cache: miss`. A second identical call
+   within the TTL window flips to `x-cache: hit`.
+6. **Verify usage logging** — `/dashboard/profile/usage` (or the
+   org-wide dashboard for `org_admin`) shows the call within ~30s.
+
+If a step fails, check `docker compose --profile gateway logs gateway`
+for the structured error. Credential material is redacted in logs
+automatically (Phase 3 #4-a) — operator messages are safe to share.
+
+### 6.6 Feature flag (process-level)
 
 `ENABLE_GATEWAY=true` is baked into the gateway service definition. If you
 ever need to boot the gateway container in a "surface-off" mode (e.g. during

@@ -6,6 +6,26 @@ const booleanUnion = z
   .union([z.boolean(), z.string()])
   .transform((v) => (typeof v === "string" ? v === "true" : v));
 
+/**
+ * Treat the empty string as `undefined` so docker-compose's
+ * `${VAR:-}` soft-default (which evaluates to `""` when the operator
+ * hasn't set the var) lets `z.*.default(...)` kick in. Without this,
+ * `Number("")` coerces to `0` and bypasses the schema-level default —
+ * which can either silently change behaviour (0 = disabled) or crash
+ * boot when the schema demands `min(1)`.
+ *
+ * Wrap any optional-with-default schema that might receive an empty
+ * string from the env via compose interpolation:
+ *
+ *   GATEWAY_X: emptyAsUndefined(z.coerce.number().int().min(1).default(10))
+ */
+function emptyAsUndefined<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(
+    (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
+    schema,
+  );
+}
+
 export const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]),
@@ -59,39 +79,55 @@ export const serverEnvSchema = z
         "API_KEY_HASH_PEPPER must be 64 hex characters (32 bytes)",
       )
       .optional(),
-    UPSTREAM_ANTHROPIC_BASE_URL: z
-      .string()
-      .url()
-      .default("https://api.anthropic.com"),
-    UPSTREAM_OPENAI_BASE_URL: z
-      .string()
-      .url()
-      .default("https://api.openai.com"),
-    GATEWAY_MAX_ACCOUNT_SWITCHES: z.coerce.number().int().min(1).default(10),
-    GATEWAY_MAX_BODY_BYTES: z.coerce.number().int().min(1024).default(10485760),
-    GATEWAY_BUFFER_WINDOW_MS: z.coerce.number().int().min(0).default(500),
-    GATEWAY_BUFFER_WINDOW_BYTES: z.coerce.number().int().min(0).default(2048),
-    GATEWAY_REDIS_FAILURE_MODE: z.enum(["strict", "lenient"]).default("strict"),
-    GATEWAY_IDEMPOTENCY_TTL_SEC: z.coerce.number().int().min(0).default(300),
-    GATEWAY_TRUSTED_PROXIES: z.string().default(""),
-    GATEWAY_OAUTH_REFRESH_LEAD_MIN: z.coerce.number().int().min(1).default(10),
-    GATEWAY_OAUTH_MAX_FAIL: z.coerce.number().int().min(1).default(3),
-    GATEWAY_QUEUE_SATURATE_THRESHOLD: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .default(5000),
+    UPSTREAM_ANTHROPIC_BASE_URL: emptyAsUndefined(
+      z.string().url().default("https://api.anthropic.com"),
+    ),
+    UPSTREAM_OPENAI_BASE_URL: emptyAsUndefined(
+      z.string().url().default("https://api.openai.com"),
+    ),
+    GATEWAY_MAX_ACCOUNT_SWITCHES: emptyAsUndefined(
+      z.coerce.number().int().min(1).default(10),
+    ),
+    GATEWAY_MAX_BODY_BYTES: emptyAsUndefined(
+      z.coerce.number().int().min(1024).default(10485760),
+    ),
+    GATEWAY_BUFFER_WINDOW_MS: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(500),
+    ),
+    GATEWAY_BUFFER_WINDOW_BYTES: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(2048),
+    ),
+    GATEWAY_REDIS_FAILURE_MODE: emptyAsUndefined(
+      z.enum(["strict", "lenient"]).default("strict"),
+    ),
+    GATEWAY_IDEMPOTENCY_TTL_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(300),
+    ),
+    GATEWAY_TRUSTED_PROXIES: emptyAsUndefined(z.string().default("")),
+    GATEWAY_OAUTH_REFRESH_LEAD_MIN: emptyAsUndefined(
+      z.coerce.number().int().min(1).default(10),
+    ),
+    GATEWAY_OAUTH_MAX_FAIL: emptyAsUndefined(
+      z.coerce.number().int().min(1).default(3),
+    ),
+    GATEWAY_QUEUE_SATURATE_THRESHOLD: emptyAsUndefined(
+      z.coerce.number().int().min(1).default(5000),
+    ),
     // Phase 3 #4-b — per-apiKey fixed-bucket rate limit. Per-minute
     // requests-per-key cap; first line of defence against a runaway
     // client burning through the quota_usd budget. 0 disables enforcement
     // entirely (still increments counters for observability when 0
     // would be confusing — currently we just skip the check).
-    GATEWAY_APIKEY_RPM_LIMIT: z.coerce.number().int().min(0).default(600),
+    GATEWAY_APIKEY_RPM_LIMIT: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(600),
+    ),
     // Phase 3 #2 — response-cache TTL. 0 disables caching. Cache scope is
     // (orgId, platform, request_body_bytes) → upstream response, only for
     // 200 + non-streaming + body < 64 KiB.  See
     // `apps/gateway/src/runtime/responseCache.ts` for the boundaries.
-    GATEWAY_CACHE_TTL_SEC: z.coerce.number().int().min(0).default(0),
+    GATEWAY_CACHE_TTL_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(0),
+    ),
   })
   .superRefine((data, ctx) => {
     if (!data.ENABLE_GATEWAY) {

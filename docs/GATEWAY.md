@@ -100,6 +100,10 @@ rejection, so a misconfigured container never accepts traffic.
 | `GATEWAY_OAUTH_REFRESH_LEAD_MIN` |  | `10` | Minutes before expiry at which inline refresh fires. |
 | `GATEWAY_OAUTH_MAX_FAIL` |  | `3` | Refresh failures before the account is parked with `status='error'`. |
 | `GATEWAY_QUEUE_SATURATE_THRESHOLD` |  | `5000` | BullMQ `wait+active` count above which strict mode rejects new billing-incurring requests. |
+| `GATEWAY_APIKEY_RPM_LIMIT` |  | `600` | Per-apiKey requests-per-minute cap (fixed-bucket sliding window). 0 disables enforcement. Sets `x-ratelimit-{limit,remaining}` headers on every response; over-limit returns 429 + `Retry-After`. |
+| `GATEWAY_CACHE_TTL_SEC` |  | `0` | Response cache TTL for non-streaming /v1/* endpoints. **0 = OFF (default)**. When >0, identical `(orgId, endpoint, body)` tuples within the TTL window short-circuit upstream. Cached payloads contain model output (not prompts); confirm data classification permits it before enabling. Sets `x-cache: hit\|miss` headers when enabled. |
+| `UPSTREAM_ANTHROPIC_BASE_URL` |  | `https://api.anthropic.com` | Override for staging / fake upstream in tests. |
+| `UPSTREAM_OPENAI_BASE_URL` |  | `https://api.openai.com` | Override for staging / fake upstream in tests. |
 
 **Secrets posture.** `CREDENTIAL_ENCRYPTION_KEY` and `API_KEY_HASH_PEPPER`
 should never appear in `.env` checked into a repo, logs, or stack traces.

@@ -125,6 +125,25 @@ services:
       GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       API_KEY_HASH_PEPPER: ${API_KEY_HASH_PEPPER:-}
+      # ── Operational tunables ────────────────────────────────────────────
+      # All optional — parseServerEnv has sensible defaults so unset vars
+      # boot fine. Override here when you need to tune for traffic shape
+      # or compliance posture. See docs/GATEWAY.md §2 for the per-knob
+      # reference + recommended starting values.
+      GATEWAY_APIKEY_RPM_LIMIT: ${GATEWAY_APIKEY_RPM_LIMIT:-}
+      GATEWAY_CACHE_TTL_SEC: ${GATEWAY_CACHE_TTL_SEC:-}
+      GATEWAY_REDIS_FAILURE_MODE: ${GATEWAY_REDIS_FAILURE_MODE:-}
+      GATEWAY_TRUSTED_PROXIES: ${GATEWAY_TRUSTED_PROXIES:-}
+      GATEWAY_MAX_ACCOUNT_SWITCHES: ${GATEWAY_MAX_ACCOUNT_SWITCHES:-}
+      GATEWAY_MAX_BODY_BYTES: ${GATEWAY_MAX_BODY_BYTES:-}
+      GATEWAY_BUFFER_WINDOW_MS: ${GATEWAY_BUFFER_WINDOW_MS:-}
+      GATEWAY_BUFFER_WINDOW_BYTES: ${GATEWAY_BUFFER_WINDOW_BYTES:-}
+      GATEWAY_IDEMPOTENCY_TTL_SEC: ${GATEWAY_IDEMPOTENCY_TTL_SEC:-}
+      GATEWAY_OAUTH_REFRESH_LEAD_MIN: ${GATEWAY_OAUTH_REFRESH_LEAD_MIN:-}
+      GATEWAY_OAUTH_MAX_FAIL: ${GATEWAY_OAUTH_MAX_FAIL:-}
+      GATEWAY_QUEUE_SATURATE_THRESHOLD: ${GATEWAY_QUEUE_SATURATE_THRESHOLD:-}
+      UPSTREAM_ANTHROPIC_BASE_URL: ${UPSTREAM_ANTHROPIC_BASE_URL:-}
+      UPSTREAM_OPENAI_BASE_URL: ${UPSTREAM_OPENAI_BASE_URL:-}
     ports:
       # Customer-facing /v1/messages and /v1/chat/completions endpoints.
       # Put a TLS-terminating reverse proxy in front in production.
