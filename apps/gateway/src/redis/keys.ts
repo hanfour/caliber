@@ -14,4 +14,9 @@ export const keys = {
     `sticky:session:${groupId}:${sessionHash}`,
   state: (accountId: string) => `state:account:${accountId}`,
   oauthRefresh: (accountId: string) => `oauth-refresh:${accountId}`,
+  // Phase 3 #4-b — fixed-bucket sliding-window rate limit on per-apiKey
+  // request rate. `minuteBucket = floor(Date.now() / 60_000)`; the key
+  // implicitly rotates every 60s, so we don't need cleanup.
+  rlApiKey: (apiKeyId: string, minuteBucket: number) =>
+    `rl:apikey:${apiKeyId}:${minuteBucket}`,
 } as const;
