@@ -81,6 +81,12 @@ export const serverEnvSchema = z
       .int()
       .min(1)
       .default(5000),
+    // Phase 3 #4-b — per-apiKey fixed-bucket rate limit. Per-minute
+    // requests-per-key cap; first line of defence against a runaway
+    // client burning through the quota_usd budget. 0 disables enforcement
+    // entirely (still increments counters for observability when 0
+    // would be confusing — currently we just skip the check).
+    GATEWAY_APIKEY_RPM_LIMIT: z.coerce.number().int().min(0).default(600),
   })
   .superRefine((data, ctx) => {
     if (!data.ENABLE_GATEWAY) {
