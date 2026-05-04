@@ -1,6 +1,7 @@
 import type { Redis } from "ioredis";
 import type { Database } from "@aide/db";
 import { upstreamAccounts } from "@aide/db";
+import { maskCredentialMaterial } from "@aide/gateway-core";
 import { eq } from "drizzle-orm";
 import {
   OAuthLockTimeoutError,
@@ -109,8 +110,7 @@ export class OAuthRefreshAPI {
     this.cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
     this.now = deps.now ?? Date.now;
     this.sleep =
-      deps.sleep ??
-      ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+      deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /**
@@ -166,7 +166,13 @@ export class OAuthRefreshAPI {
       return await this.performRefresh(accountId, account.platform);
     } catch (err) {
       if (err instanceof OAuthRefreshTokenInvalid) {
-        await this.markAccountOAuthInvalid(accountId, err.message);
+        // Mask credential material — invalid_grant responses sometimes
+        // echo the rejected refresh token verbatim, and we don't want
+        // that landing in upstream_accounts.error_message.
+        await this.markAccountOAuthInvalid(
+          accountId,
+          maskCredentialMaterial(err.message),
+        );
         this.tokenCache.delete(accountId);
         throw err;
       }
@@ -209,11 +215,7 @@ export class OAuthRefreshAPI {
     return entry;
   }
 
-  private populateMem(
-    accountId: string,
-    token: string,
-    expiresAt: Date,
-  ): void {
+  private populateMem(accountId: string, token: string, expiresAt: Date): void {
     this.tokenCache.set(accountId, {
       token,
       expiresAt,

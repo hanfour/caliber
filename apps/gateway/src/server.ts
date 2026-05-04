@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { parseServerEnv, type ServerEnv } from "@aide/config";
+import { LOG_REDACT_PATHS } from "@aide/gateway-core";
 import type { Database } from "@aide/db";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
@@ -95,7 +96,14 @@ export interface BuildOpts {
 export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
   const enabled = opts.env.ENABLE_GATEWAY;
   const app = Fastify({
-    logger: { level: opts.env.LOG_LEVEL },
+    logger: {
+      level: opts.env.LOG_LEVEL,
+      // Phase 3 #4-a — pino redacts known credential / auth-header paths
+      // before any structured-log entry is serialised. Free-form strings
+      // (e.g. err.message) still need `safeErrorMessage()` at the call
+      // site; this is the structured-field defence.
+      redact: { paths: [...LOG_REDACT_PATHS], censor: "[REDACTED]" },
+    },
     bodyLimit: opts.env.GATEWAY_MAX_BODY_BYTES,
   });
   await app.register(metricsPlugin);

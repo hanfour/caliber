@@ -3,7 +3,11 @@ import { request } from "undici";
 import type { Redis } from "ioredis";
 import { credentialVault, upstreamAccounts } from "@aide/db";
 import type { Database } from "@aide/db";
-import { encryptCredential, decryptCredential } from "@aide/gateway-core";
+import {
+  encryptCredential,
+  decryptCredential,
+  safeErrorMessage,
+} from "@aide/gateway-core";
 import { keys } from "../redis/keys.js";
 import type { ResolvedCredential } from "./resolveCredential.js";
 
@@ -247,7 +251,10 @@ export async function recordFailure(
   maxFail: number,
   now: () => number,
 ): Promise<void> {
-  const message = err instanceof Error ? err.message : String(err);
+  // Strip credential-shaped substrings before persisting — upstream OAuth
+  // 401/400 bodies sometimes echo back the failing token verbatim, and we
+  // don't want that landing in oauth_refresh_last_error / audit logs.
+  const message = safeErrorMessage(err);
   const [row] = await db
     .select({ failCount: upstreamAccounts.oauthRefreshFailCount })
     .from(upstreamAccounts)

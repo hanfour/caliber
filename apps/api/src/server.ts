@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { LOG_REDACT_PATHS } from "@aide/gateway-core";
 import rateLimit from "@fastify/rate-limit";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Redis } from "ioredis";
@@ -40,6 +41,10 @@ export async function buildServer() {
       level: env.LOG_LEVEL,
       transport:
         env.NODE_ENV === "production" ? undefined : { target: "pino-pretty" },
+      // Phase 3 #4-a — credential redaction at the structured-log layer.
+      // Same path list the gateway uses; free-form strings (err.message)
+      // still need `safeErrorMessage()` at the call site.
+      redact: { paths: [...LOG_REDACT_PATHS], censor: "[REDACTED]" },
     },
     disableRequestLogging: false,
     genReqId: () => crypto.randomUUID(),

@@ -4,6 +4,7 @@ export * from "./pricing/pricingLookup.js";
 export * from "./stateMachine/classifier.js";
 export * from "./stateMachine/types.js";
 export * from "./crypto/credentialCipher.js";
+export * from "./logging/redact.js";
 export * from "./crypto/bodyCipher.js";
 export * from "./crypto/apiKey.js";
 export * from "./translate/types.js";
