@@ -1,0 +1,36 @@
+# Fly.io app config for the aide api (Fastify + tRPC, internal-only).
+#
+# This service has NO public ingress — it's reached over Fly's
+# internal `.flycast` network from the web app. Do not assign a
+# public IP.
+
+app = "aide-api"
+primary_region = "iad"
+
+[build]
+  image = "ghcr.io/hanfour/aide-api:latest"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3001"
+  BOOTSTRAP_DEFAULT_ORG_SLUG = "demo"
+  BOOTSTRAP_DEFAULT_ORG_NAME = "Demo"
+
+# No `[http_service]` block — the api isn't reachable from the public
+# internet. The web app connects via `http://aide-api.flycast:3001`.
+
+[[services]]
+  internal_port = 3001
+  protocol = "tcp"
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

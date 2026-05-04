@@ -1,0 +1,151 @@
+# Render Blueprint for aide (web + api + gateway + Postgres).
+#
+# Render does NOT ship a native managed Redis at the time of writing.
+# Recommended: provision an Upstash Redis instance separately
+# (https://upstash.com/), then set the `REDIS_URL` env var on the
+# `aide-gateway` service via the Render dashboard.
+#
+# All three services pull pre-built images from ghcr.io. To build from
+# source instead, replace `image:` with `runtime: docker` + `dockerfilePath`.
+#
+# After deploy: see deploy/render/README.md for the post-launch checklist
+# (admin sign-in, OpenAI account onboarding, smoke test).
+
+databases:
+  - name: aide-postgres
+    plan: starter # 256 MB RAM / 1 GB storage — fine for evaluation; upgrade for prod
+    postgresMajorVersion: 16
+    databaseName: aide
+    user: aide
+
+services:
+  # ── Web (Next.js admin UI) ──────────────────────────────────────────────
+  - type: web
+    name: aide-web
+    runtime: image
+    image:
+      url: ghcr.io/hanfour/aide-web:latest
+    plan: starter
+    healthCheckPath: /api/health
+    autoDeploy: false # bump tag manually, then redeploy
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aide-postgres
+          property: connectionString
+      - key: AUTH_SECRET
+        sync: false # generate with `openssl rand -base64 48`, paste in dashboard
+      - key: NEXTAUTH_URL
+        sync: false # set to https://<your-render-web-host>
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: BOOTSTRAP_SUPER_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_DEFAULT_ORG_SLUG
+        value: demo
+      - key: BOOTSTRAP_DEFAULT_ORG_NAME
+        value: Demo
+      - key: API_INTERNAL_URL
+        value: http://aide-api:3001 # internal Render service-to-service URL
+
+  # ── API (Fastify + tRPC admin plane) ────────────────────────────────────
+  - type: pserv # private service, not internet-facing
+    name: aide-api
+    runtime: image
+    image:
+      url: ghcr.io/hanfour/aide-api:latest
+    plan: starter
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aide-postgres
+          property: connectionString
+      - key: REDIS_URL
+        sync: false # paste your Upstash Redis URL here
+      - key: AUTH_SECRET
+        sync: false
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: BOOTSTRAP_SUPER_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_DEFAULT_ORG_SLUG
+        value: demo
+      - key: BOOTSTRAP_DEFAULT_ORG_NAME
+        value: Demo
+
+  # ── Gateway (customer-facing /v1/* proxy) ──────────────────────────────
+  - type: web
+    name: aide-gateway
+    runtime: image
+    image:
+      url: ghcr.io/hanfour/aide-gateway:latest
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ENABLE_GATEWAY
+        value: "true"
+      - key: PORT
+        value: "3002"
+      - key: GATEWAY_PORT
+        value: "3002"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aide-postgres
+          property: connectionString
+      - key: REDIS_URL
+        sync: false # same Upstash URL as the api service
+      - key: AUTH_SECRET
+        sync: false
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: BOOTSTRAP_SUPER_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_DEFAULT_ORG_SLUG
+        value: demo
+      - key: BOOTSTRAP_DEFAULT_ORG_NAME
+        value: Demo
+      - key: GATEWAY_BASE_URL
+        sync: false # set to https://<your-render-gateway-host>
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false # openssl rand -hex 32
+      - key: API_KEY_HASH_PEPPER
+        sync: false # openssl rand -hex 32 — losing this invalidates every issued ak_
+      # Optional tunables — see docker/.env.example for reference / defaults.
+      - key: GATEWAY_APIKEY_RPM_LIMIT
+        value: "600"
+      - key: GATEWAY_CACHE_TTL_SEC
+        value: "0" # OFF for first deploy; raise to 60-300 once observed

@@ -1,0 +1,44 @@
+# Fly.io app config for the aide gateway (customer-facing /v1/* proxy).
+#
+# Public-internet-facing — assigned its own dedicated hostname so
+# customer SDKs can hit it independently of the admin UI.
+
+app = "aide-gateway"
+primary_region = "iad"
+
+[build]
+  image = "ghcr.io/hanfour/aide-gateway:latest"
+
+[env]
+  NODE_ENV = "production"
+  ENABLE_GATEWAY = "true"
+  PORT = "3002"
+  GATEWAY_PORT = "3002"
+  BOOTSTRAP_DEFAULT_ORG_SLUG = "demo"
+  BOOTSTRAP_DEFAULT_ORG_NAME = "Demo"
+  # GATEWAY_BASE_URL set via `fly secrets` after the public hostname
+  # is assigned (see deploy/fly/README.md §3).
+
+  # Tunables — override here or via `fly secrets`. Defaults are safe.
+  GATEWAY_APIKEY_RPM_LIMIT = "600"
+  GATEWAY_CACHE_TTL_SEC = "0"
+
+[http_service]
+  internal_port = 3002
+  force_https = true
+  # `min_machines_running = 1` keeps a hot instance because cold-start
+  # for SSE streaming is unfriendly. Adjust upward for HA.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb" # gateway is the hot path — give it more headroom

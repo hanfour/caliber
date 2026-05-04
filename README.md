@@ -137,6 +137,16 @@ Operator guides:
 - Self-hosting bring-up (api + web + gateway): [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md)
 - Gateway operator + user reference: [`docs/GATEWAY.md`](docs/GATEWAY.md)
 
+**Cloud deploy templates** (alternatives to docker-compose self-hosting):
+
+- [Render Blueprint](deploy/render/README.md) — closest thing to one-click; provisions Postgres + 3 services; needs Upstash Redis externally
+- [Fly.io](deploy/fly/README.md) — three apps + Fly Postgres + Upstash; geographically distributed if you want
+- [Railway](deploy/railway/README.md) — native Postgres + Redis plugins; manual service creation per the README
+
+⚠️ Vercel is **not supported** — the gateway is a long-running Fastify
+server with BullMQ workers, doesn't fit Vercel's serverless model. See
+the deploy/ READMEs for what does work.
+
 CLI mode and platform mode share no runtime state; pick whichever fits.
 
 ---

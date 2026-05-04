@@ -1,0 +1,37 @@
+# Fly.io app config for the aide web (Next.js admin UI).
+#
+# `fly launch --copy-config --config deploy/fly/web.toml` will create
+# a new app from this template; subsequent deploys are
+# `fly deploy --config deploy/fly/web.toml`.
+
+app = "aide-web"
+primary_region = "iad" # change to your preferred region
+
+[build]
+  image = "ghcr.io/hanfour/aide-web:latest"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  BOOTSTRAP_DEFAULT_ORG_SLUG = "demo"
+  BOOTSTRAP_DEFAULT_ORG_NAME = "Demo"
+  # API_INTERNAL_URL set via `fly secrets` to point at the api app's
+  # internal `.flycast` address — see deploy/fly/README.md.
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

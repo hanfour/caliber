@@ -4,6 +4,15 @@ This guide walks you through running `aide` (platform mode) on your own
 infrastructure using the published Docker images. For CLI mode, see the root
 `README.md`.
 
+> **Looking for a managed alternative?** Pre-baked deploy templates are
+> available in [`deploy/render/`](../deploy/render/), [`deploy/fly/`](../deploy/fly/),
+> and [`deploy/railway/`](../deploy/railway/) — these target Render
+> Blueprint, Fly.io, and Railway respectively. They follow the same
+> overall shape as this guide (web + api + gateway + Postgres + Redis)
+> but skip the Docker-compose plumbing. **Vercel is not supported** —
+> the gateway is a long-running Fastify server with BullMQ workers and
+> doesn't fit Vercel's serverless model.
+
 ## 1. Prerequisites
 
 - **Docker 27+** with the `compose` plugin (`docker compose version`).
