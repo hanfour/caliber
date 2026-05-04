@@ -18,6 +18,10 @@ import {
   AllUpstreamsFailed,
   FatalUpstreamError,
 } from "../runtime/failoverLoop.js";
+import {
+  checkRouteCache,
+  tryStoreOnSuccess,
+} from "../runtime/responseCache.js";
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
@@ -116,6 +120,25 @@ export function makeChatCompletionsAnthropicHandler(
       ? { ...anthropicBody, stream: true }
       : anthropicBody;
     const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
+
+    // Phase 3 #2 — cache scope `v1/chat/completions` keyed on the
+    // CLIENT body (openai-chat shape), shared across this handler and
+    // the openai-platform branch so a reconfigured group hits the same
+    // cache. Skipped for streaming.
+    const clientBodyBuf = Buffer.from(JSON.stringify(body));
+    let cacheKey: string | null = null;
+    if (!isStream) {
+      const result = await checkRouteCache({
+        redis: app.redis,
+        ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+        orgId: req.gwOrg.id,
+        scope: "v1/chat/completions",
+        bodyBuf: clientBodyBuf,
+        reply,
+      });
+      if (result.hit) return;
+      cacheKey = result.cacheKey;
+    }
 
     if (isStream) {
       await runChatCompletionsStreamingFailover(
@@ -268,10 +291,20 @@ export function makeChatCompletionsAnthropicHandler(
         },
       });
 
+      const responseBuf = Buffer.from(JSON.stringify(openaiResponse));
       reply
         .code(200)
         .header("content-type", "application/json")
-        .send(openaiResponse);
+        .send(responseBuf);
+      tryStoreOnSuccess(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        cacheKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
     } catch (err) {
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
@@ -571,6 +604,23 @@ export function makeChatCompletionsOpenaiHandler(
     const startedAtMs = Date.now();
     const requestedModel = body.model;
 
+    // Phase 3 #2 — same scope as the anthropic-platform handler so a
+    // group reconfigure doesn't invalidate.
+    const clientBodyBuf = Buffer.from(JSON.stringify(body));
+    let cacheKey: string | null = null;
+    if (!isStream) {
+      const result = await checkRouteCache({
+        redis: app.redis,
+        ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+        orgId: req.gwOrg.id,
+        scope: "v1/chat/completions",
+        bodyBuf: clientBodyBuf,
+        reply,
+      });
+      if (result.hit) return;
+      cacheKey = result.cacheKey;
+    }
+
     if (isStream) {
       await runChatCompletionsOpenaiStreamingFailover(
         app,
@@ -686,7 +736,20 @@ export function makeChatCompletionsOpenaiHandler(
           ),
       });
 
-      reply.code(200).header("content-type", "application/json").send(chatResp);
+      const responseBuf = Buffer.from(JSON.stringify(chatResp));
+      reply
+        .code(200)
+        .header("content-type", "application/json")
+        .send(responseBuf);
+      tryStoreOnSuccess(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        cacheKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
     } catch (err) {
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
