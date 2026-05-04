@@ -1,6 +1,11 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerEnv } from "@aide/config";
 import {
+  translateAnthropicToResponses,
+  translateResponsesResponseToAnthropic,
+  type AnthropicMessagesRequest,
+} from "@aide/gateway-core";
+import {
   runFailover,
   AllUpstreamsFailed,
   FatalUpstreamError,
@@ -8,6 +13,7 @@ import {
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
+import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
 import { acquireSlot, releaseSlot } from "../redis/slots.js";
 import { SmartBuffer } from "../runtime/smartBuffer.js";
 import {
@@ -17,6 +23,9 @@ import {
 import type { SelectedAccount } from "../runtime/selectAccount.js";
 import { emitUsageLog } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
+import { withSlotAndCredential } from "../runtime/withSlotAndCredential.js";
+import { usageLogInboundPlatformForSurface } from "../runtime/usageLogging.js";
+import { autoRoute } from "./dispatch.js";
 
 export interface MessagesRouteOptions {
   env: ServerEnv;
@@ -43,11 +52,20 @@ class CapacityError extends Error {
   }
 }
 
-export async function messagesRoutes(
+/**
+ * Core 4A handler for the Anthropic surface — extracted into a factory
+ * so the autoRoute wrap (Plan 5A PR 9g) can dispatch by group platform
+ * to either this handler (anthropic upstream) or
+ * `makeMessagesOpenaiHandler` (cross-format → openai upstream).
+ *
+ * Body unchanged from the original inline handler; the only difference
+ * is that it returns a closure instead of being registered directly.
+ */
+export function makeMessagesAnthropicHandler(
   app: FastifyInstance,
   opts: MessagesRouteOptions,
-): Promise<void> {
-  app.post("/v1/messages", async (req: FastifyRequest, reply: FastifyReply) => {
+): (req: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
     // apiKeyAuthPlugin should have already rejected unauthenticated requests.
     // Defense-in-depth: verify decorations are present.
     if (!req.apiKey || !req.gwUser || !req.gwOrg) {
@@ -134,7 +152,27 @@ export async function messagesRoutes(
     } finally {
       req.raw.off("close", onClose);
     }
-  });
+  };
+}
+
+export async function messagesRoutes(
+  app: FastifyInstance,
+  opts: MessagesRouteOptions,
+): Promise<void> {
+  // Plan 5A PR 9g: autoRoute dispatch by group platform.
+  // - anthropic-platform groups → existing 4A handler (passthrough +
+  //   credential cipher resolution + Anthropic-shaped failover loop).
+  // - openai-platform groups → translate Anthropic body to OpenAI
+  //   Responses, call openai upstream, translate back.
+  // - other platforms → 503 platform_not_yet_wired (gemini /
+  //   antigravity defer to Plan 5B / 5C).
+  app.post(
+    "/v1/messages",
+    autoRoute({
+      anthropic: makeMessagesAnthropicHandler(app, opts),
+      openai: makeMessagesOpenaiHandler(app, opts),
+    }),
+  );
 }
 
 async function runNonStreamFailover(
@@ -661,5 +699,214 @@ function buildUpstreamShape(
       cache_creation_input_tokens: snap.cache_creation_tokens,
       cache_read_input_tokens: snap.cache_read_tokens,
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Plan 5A PR 9g — openai-platform branch for /v1/messages.
+//
+// Cross-format flow when an Anthropic-format client request hits an
+// openai-platform group:
+//
+//   1. Validate body is Anthropic-shaped (existing checks above).
+//   2. translateAnthropicToResponses(body) → OpenAI Responses request.
+//   3. runFailover + scheduler + slot — same as the openai branch in
+//      /v1/responses (PR 9d).
+//   4. callUpstreamResponses with the translated body.
+//   5. translateResponsesResponseToAnthropic on the upstream response.
+//   6. Return Anthropic-shaped JSON to the client.
+//
+// Streaming defers to PR 9h (needs the Responses-stream-to-Anthropic
+// translator from PR #41 + the SSE pipe wiring).
+// ---------------------------------------------------------------------------
+
+export function makeMessagesOpenaiHandler(
+  app: FastifyInstance,
+  opts: MessagesRouteOptions,
+): (req: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!req.apiKey || !req.gwUser || !req.gwOrg) {
+      reply.code(401).send({ error: "missing_api_key" });
+      return;
+    }
+
+    const body = req.body as Record<string, unknown> | undefined;
+    if (!body || typeof body !== "object") {
+      reply.code(400).send({ error: "invalid_body" });
+      return;
+    }
+    if (typeof body.model !== "string" || body.model.length === 0) {
+      reply.code(400).send({ error: "missing_model" });
+      return;
+    }
+
+    if (body.stream === true) {
+      reply.code(501).send({
+        error: "not_implemented",
+        detail: "openai-upstream streaming for /v1/messages arrives in PR 9h",
+      });
+      return;
+    }
+
+    // Body validation is best-effort — the 4A inline handler also
+    // forwards loose-shaped Anthropic bodies upstream. The translator
+    // is total over a well-shaped input but may throw when invoked on
+    // malformed `tools[].input_schema` or unexpected `tool_use` block
+    // shapes; we catch that throw below and surface 400.  Proper Zod
+    // validation could move here once an `AnthropicMessagesRequestSchema`
+    // exists in gateway-core (deferred).
+    const anthropicBody = body as unknown as AnthropicMessagesRequest;
+
+    let openaiBody;
+    try {
+      openaiBody = translateAnthropicToResponses(anthropicBody);
+    } catch (err) {
+      reply.code(400).send({
+        error: "invalid_request",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    const requestId = req.id;
+    const upstreamBodyBuf = Buffer.from(JSON.stringify(openaiBody));
+    const startedAtMs = Date.now();
+    const requestedModel = anthropicBody.model;
+
+    // Wire AbortSignal from client disconnect → upstream cancel.
+    // Without this, a long-running OpenAI call keeps holding upstream
+    // resources for up to 60s after the client gives up.
+    const ac = new AbortController();
+    const onClose = () => ac.abort();
+    req.raw.once("close", onClose);
+
+    try {
+      const anthropicResp = await runFailover({
+        db: app.db,
+        orgId: req.apiKey.orgId,
+        teamId: req.apiKey.teamId,
+        maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
+        scheduler: app.gwScheduler,
+        attempt: async (account) =>
+          withSlotAndCredential(
+            app,
+            opts,
+            account,
+            requestId,
+            async (credential) => {
+              const upstream = await callUpstreamResponses({
+                baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
+                body: upstreamBodyBuf,
+                credential,
+                signal: ac.signal,
+              });
+
+              if (upstream.kind === "stream") {
+                throw { status: 502, message: "unexpected_stream" };
+              }
+
+              if (upstream.status < 200 || upstream.status >= 300) {
+                const text = upstream.body.toString("utf8");
+                const retryAfterRaw = upstream.headers["retry-after"];
+                const retryAfter =
+                  typeof retryAfterRaw === "string"
+                    ? parseInt(retryAfterRaw, 10)
+                    : Array.isArray(retryAfterRaw)
+                      ? parseInt(retryAfterRaw[0]!, 10)
+                      : undefined;
+                throw {
+                  status: upstream.status,
+                  retryAfter: Number.isNaN(retryAfter) ? undefined : retryAfter,
+                  message: text.slice(0, 500),
+                };
+              }
+
+              let openaiResp: unknown = null;
+              let parseErr: unknown = null;
+              try {
+                openaiResp = JSON.parse(upstream.body.toString("utf8"));
+              } catch (err) {
+                parseErr = err;
+                req.log.warn(
+                  {
+                    requestId,
+                    err: err instanceof Error ? err.message : String(err),
+                  },
+                  "openai upstream 2xx body was not valid JSON",
+                );
+              }
+
+              const translated = openaiResp
+                ? translateResponsesResponseToAnthropic(
+                    openaiResp as Parameters<
+                      typeof translateResponsesResponseToAnthropic
+                    >[0],
+                  )
+                : null;
+
+              // Forensic-row contract: emitUsageLog runs BEFORE the
+              // parse-failure throw so a malformed-2xx attempt leaves
+              // a zero-cost row recording which account misbehaved.
+              // With N accounts all returning malformed 2xx we'd
+              // write N rows + 1 final 503 — intentional, lets ops
+              // count "how many of my accounts are returning bad
+              // data" via dashboards. Mirrors PR 9b/9d/9e.
+              await emitUsageLog({
+                app,
+                req,
+                requestedModel,
+                accountId: account.id,
+                upstreamResponse: translated,
+                // `platform` is the inbound URL space (anthropic for
+                // /v1/messages), NOT the upstream provider. The
+                // upstream OpenAI account can be pivoted via
+                // `accountId` joined to `account.platform`.
+                platform: usageLogInboundPlatformForSurface("messages"),
+                surface: "messages",
+                statusCode: 200,
+                durationMs: Date.now() - startedAtMs,
+              });
+              await emitBodyCapture({
+                app,
+                req,
+                requestId,
+                requestBodyJson: upstreamBodyBuf.toString("utf8"),
+                responseBody: translated,
+                stream: false,
+              });
+
+              if (parseErr !== null) {
+                throw { status: 502, message: "upstream_malformed_json" };
+              }
+
+              return translated;
+            },
+          ),
+      });
+
+      reply
+        .code(200)
+        .header("content-type", "application/json")
+        .send(anthropicResp);
+    } catch (err) {
+      if (err instanceof AllUpstreamsFailed) {
+        reply.code(503).send({
+          error: "all_upstreams_failed",
+          attempted_count: err.attemptedIds.length,
+          request_id: requestId,
+        });
+        return;
+      }
+      if (err instanceof FatalUpstreamError) {
+        reply.code(err.statusCode).send({
+          error: err.reason,
+          request_id: requestId,
+        });
+        return;
+      }
+      throw err;
+    } finally {
+      req.raw.off("close", onClose);
+    }
   };
 }

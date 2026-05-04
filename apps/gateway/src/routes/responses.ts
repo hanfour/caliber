@@ -645,6 +645,14 @@ async function runOpenaiResponsesPassthroughFailover(
   const startedAtMs = Date.now();
   const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
 
+  // Wire AbortSignal from client disconnect → upstream cancel.
+  // Same plumbing as the streaming helpers; without this, a hung
+  // OpenAI call holds upstream resources for up to 60s after the
+  // client gives up.
+  const ac = new AbortController();
+  const onClose = () => ac.abort();
+  req.raw.once("close", onClose);
+
   try {
     const responsesResp = await runFailover({
       db: app.db,
@@ -664,6 +672,7 @@ async function runOpenaiResponsesPassthroughFailover(
                 baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
                 body: upstreamBodyBuf,
                 credential,
+                signal: ac.signal,
               }),
             );
 
@@ -750,6 +759,8 @@ async function runOpenaiResponsesPassthroughFailover(
       return;
     }
     throw err;
+  } finally {
+    req.raw.off("close", onClose);
   }
 }
 

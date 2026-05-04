@@ -176,6 +176,25 @@ export type UsageLogSurface = "messages" | "chat-completions" | "responses";
  */
 export type UsageLogInboundPlatform = "anthropic" | "openai";
 
+/**
+ * Map a `UsageLogSurface` (the client URL space) to its inbound
+ * platform value. This codifies the convention so route handlers
+ * stop guessing at the call site:
+ *   * /v1/messages          → anthropic (Anthropic Messages format)
+ *   * /v1/chat/completions  → openai    (OpenAI Chat format)
+ *   * /v1/responses         → openai    (OpenAI Responses format)
+ *
+ * Cross-format routes (e.g. Anthropic-format /v1/messages dispatched
+ * to an OpenAI upstream) still use the *inbound* surface here — the
+ * upstream provider can be inferred from `account.platform` for
+ * dashboards that want the upstream pivot.
+ */
+export function usageLogInboundPlatformForSurface(
+  surface: UsageLogSurface,
+): UsageLogInboundPlatform {
+  return surface === "messages" ? "anthropic" : "openai";
+}
+
 export interface BuildUsageLogPayloadInput {
   req: FastifyRequest;
   /** Client-requested model (e.g., `body.model` from the inbound request). */
