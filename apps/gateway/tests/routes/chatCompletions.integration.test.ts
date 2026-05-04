@@ -19,6 +19,7 @@ import {
   apiKeys,
   upstreamAccounts,
   credentialVault,
+  accountGroups,
   type Database,
 } from "@aide/db";
 import { buildServer } from "../../src/server.js";
@@ -157,6 +158,10 @@ function buildEnv(connectionString: string): Record<string, unknown> {
     CREDENTIAL_ENCRYPTION_KEY: masterKey,
     API_KEY_HASH_PEPPER: pepper,
     UPSTREAM_ANTHROPIC_BASE_URL: fakeBaseUrl,
+    // Same fake server handles both Anthropic and OpenAI Responses
+    // upstream — the handler dispatches by `req.url` (`/v1/messages` vs
+    // `/v1/responses`).
+    UPSTREAM_OPENAI_BASE_URL: fakeBaseUrl,
   };
 }
 
@@ -181,6 +186,7 @@ async function seedApiKey(
   orgId: string,
   userId: string,
   rawKey: string,
+  groupId: string | null = null,
 ): Promise<void> {
   await db.insert(apiKeys).values({
     orgId,
@@ -188,7 +194,23 @@ async function seedApiKey(
     keyHash: hashApiKey(pepper, rawKey),
     keyPrefix: rawKey.slice(0, 8),
     name: "test-key",
+    groupId,
   });
+}
+
+async function seedGroup(
+  orgId: string,
+  platform: "anthropic" | "openai" = "openai",
+): Promise<string> {
+  const [group] = await db
+    .insert(accountGroups)
+    .values({
+      orgId,
+      name: `grp-${Math.random().toString(36).slice(2, 8)}`,
+      platform,
+    })
+    .returning();
+  return group!.id;
 }
 
 async function seedAccount(
@@ -618,6 +640,213 @@ describe("POST /v1/chat/completions", () => {
     const json = res.json();
     expect(json).toHaveProperty("error");
     expect(json).toHaveProperty("request_id");
+    await app.close();
+  });
+
+  // ── Plan 5A PR 9i — openai-platform branch (Chat ↔ Responses pivot) ────────
+
+  it("9. openai-platform group + non-stream → Chat → Responses → Chat round trip", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_chat_oai_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      { platform: "openai" },
+    );
+
+    // Upstream OpenAI Responses API responds with a Responses-shaped
+    // body; the handler must translate it back to OpenAI Chat shape
+    // (via the Anthropic intermediary).
+    nextUpstreamResponse = {
+      status: 200,
+      body: JSON.stringify({
+        id: "resp_chat_oai_test",
+        object: "response",
+        created_at: 1700000000,
+        model: "gpt-4o",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            id: "msg_chat_x",
+            role: "assistant",
+            status: "completed",
+            content: [
+              {
+                type: "output_text",
+                text: "hello from openai",
+                annotations: [],
+              },
+            ],
+          },
+        ],
+        usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
+        incomplete_details: null,
+      }),
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: openaiPayload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const json = res.json();
+    // Client sees an OpenAI Chat Completions-shaped response.
+    expect(json).toMatchObject({
+      object: "chat.completion",
+    });
+    expect(json.choices[0]).toMatchObject({
+      message: { role: "assistant", content: "hello from openai" },
+    });
+    // Upstream POST went to /v1/responses (not /v1/messages).
+    expect(lastUpstreamRequest).not.toBeNull();
+    expect(lastUpstreamRequest!.url).toBe("/v1/responses");
+    await app.close();
+  });
+
+  it("10. openai-platform group + stream=true → Responses SSE translated to Chat chunks + [DONE]", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_chat_oai_strm_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      { platform: "openai" },
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: "",
+      sseChunks: [
+        `event: response.created\ndata: ${JSON.stringify({
+          type: "response.created",
+          response: { id: "resp_chat_strm_1", model: "gpt-4o", created_at: 1 },
+        })}\n\n`,
+        `event: response.output_item.added\ndata: ${JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_chat_1", role: "assistant" },
+        })}\n\n`,
+        `event: response.content_part.added\ndata: ${JSON.stringify({
+          type: "response.content_part.added",
+          output_index: 0,
+          content_index: 0,
+          part: { type: "output_text", text: "" },
+        })}\n\n`,
+        `event: response.output_text.delta\ndata: ${JSON.stringify({
+          type: "response.output_text.delta",
+          output_index: 0,
+          content_index: 0,
+          delta: "Hello world",
+        })}\n\n`,
+        `event: response.output_item.done\ndata: ${JSON.stringify({
+          type: "response.output_item.done",
+          output_index: 0,
+        })}\n\n`,
+        `event: response.completed\ndata: ${JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp_chat_strm_1",
+            status: "completed",
+            incomplete_details: null,
+            usage: { input_tokens: 9, output_tokens: 2, total_tokens: 11 },
+          },
+        })}\n\n`,
+      ],
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { ...openaiPayload, stream: true },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    const body = res.body;
+    // Chat-shaped chunks (data lines, not event-named) — the Chat
+    // streaming format predates SSE event names.
+    expect(body).toContain('"object":"chat.completion.chunk"');
+    expect(body).toContain('"role":"assistant"');
+    expect(body).toContain("Hello world");
+    // Terminal DONE marker is present.
+    expect(body).toContain("data: [DONE]");
+    // No raw OpenAI Responses event names leaked.
+    expect(body).not.toContain("event: response.completed");
+    expect(body).not.toContain("event: response.output_text.delta");
+    // Upstream got stream=true and was POSTed to /v1/responses.
+    expect(lastUpstreamRequest).not.toBeNull();
+    expect(lastUpstreamRequest!.url).toBe("/v1/responses");
+    const upstreamBody = JSON.parse(lastUpstreamRequest!.body!);
+    expect(upstreamBody.stream).toBe(true);
+    await app.close();
+  });
+
+  it("11. openai-platform group + stream=true with malformed mid-stream event → continues (lenient)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_chat_oai_strm_mal_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      { platform: "openai" },
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: "",
+      sseChunks: [
+        `event: response.created\ndata: ${JSON.stringify({
+          type: "response.created",
+          response: { id: "resp_chat_mal", model: "gpt-4o", created_at: 1 },
+        })}\n\n`,
+        // Single malformed event in the middle.
+        `event: response.output_text.delta\ndata: not-json-at-all\n\n`,
+        `event: response.completed\ndata: ${JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp_chat_mal",
+            status: "completed",
+            incomplete_details: null,
+            usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 },
+          },
+        })}\n\n`,
+      ],
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { ...openaiPayload, stream: true },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.body;
+    // Surrounding events translate; final [DONE] terminator still emitted.
+    expect(body).toContain("data: [DONE]");
+    // The malformed payload was dropped, not echoed verbatim.
+    expect(body).not.toContain("not-json-at-all");
     await app.close();
   });
 });
