@@ -1,0 +1,86 @@
+# Caddy config for aide.
+#
+# Caddy auto-provisions Let's Encrypt certs for any hostname you
+# declare; just point DNS A/AAAA records at the Caddy host.
+#
+# Two public origins:
+#   - aide.example.com         → web (admin UI, NextAuth)
+#   - gateway.example.com      → gateway (customer SDK target)
+#
+# api stays internal. The web container reverse-proxies /trpc and
+# /api/v1 to api over the docker-compose internal network — Caddy
+# never talks to api directly.
+
+# Replace the hostnames before deploying.
+
+aide.example.com {
+    # web (Next.js, internal port 3000)
+    reverse_proxy aide-web:3000
+
+    # Aggressive timeouts for SSE / streaming admin pages.
+    request_body {
+        max_size 10MB
+    }
+    timeouts {
+        read 5m
+        write 5m
+        idle 10m
+    }
+
+    # Security headers — adjust CSP for your bundled assets.
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Standard access logs.
+    log {
+        output file /var/log/caddy/aide-web.log {
+            roll_size 100mb
+            roll_keep 14
+        }
+    }
+}
+
+gateway.example.com {
+    # gateway (Fastify, internal port 3002)
+    reverse_proxy aide-gateway:3002 {
+        # gateway emits SSE for /v1/messages stream:true and
+        # /v1/chat/completions stream:true. Disable Caddy's response
+        # buffering so chunks land at the client immediately.
+        flush_interval -1
+    }
+
+    # Streaming responses can run long; raise idle timeout.
+    timeouts {
+        read 5m
+        write 5m
+        idle 10m
+    }
+
+    # Customer SDKs send big request bodies (tool definitions etc.).
+    # Match GATEWAY_MAX_BODY_BYTES (default 10 MiB).
+    request_body {
+        max_size 10MB
+    }
+
+    # Security headers — gateway is API-only so no CSP needed.
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+    }
+
+    log {
+        output file /var/log/caddy/aide-gateway.log {
+            roll_size 100mb
+            roll_keep 14
+        }
+    }
+}
+
+# Optional: redirect bare apex to www, or vice versa. Uncomment + edit.
+# example.com {
+#     redir https://aide.example.com{uri} permanent
+# }

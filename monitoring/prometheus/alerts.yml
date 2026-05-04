@@ -1,0 +1,222 @@
+# Prometheus alerting rules for aide.
+#
+# Each alert maps to a runbook under docs/runbooks/. Severity tiers:
+#   critical — pages on-call immediately
+#   warning  — notifies during business hours
+#   info     — dashboard-only, no notification (default Alertmanager
+#              routing usually drops these)
+#
+# Labels:
+#   service    — which aide component (gateway / api)
+#   runbook    — relative path under docs/runbooks/ (Alertmanager
+#                templates can render this into the notification)
+
+groups:
+
+# ── Liveness ───────────────────────────────────────────────────────────────
+- name: aide-liveness
+  interval: 30s
+  rules:
+    - alert: GatewayDown
+      expr: up{job="aide-gateway"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        service: gateway
+      annotations:
+        summary: "aide-gateway is unreachable"
+        description: "Prometheus has been unable to scrape aide-gateway for 2+ minutes. /v1/* traffic is failing."
+        runbook: "(none — check container / infra)"
+
+    - alert: ApiDown
+      expr: up{job="aide-api"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        service: api
+      annotations:
+        summary: "aide-api is unreachable"
+        description: "Prometheus has been unable to scrape aide-api for 2+ minutes. Admin UI tRPC calls are failing."
+        runbook: "(none — check container / infra)"
+
+# ── Rate limiting (PR #56) ────────────────────────────────────────────────
+- name: aide-rate-limit
+  interval: 1m
+  rules:
+    - alert: GatewayRateLimitTripping
+      # Sustained 429 rate above 1 rps on the gateway = something hot
+      # is hitting the RPM cap.
+      expr: |
+        sum(rate(http_requests_total{job="aide-gateway", status_code="429"}[5m])) > 1
+      for: 5m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "Gateway returning 429 Rate Limited at >1 rps for 5+ min"
+        description: "Either a single client is exceeding GATEWAY_APIKEY_RPM_LIMIT, or the limit is set too low for current traffic shape."
+        runbook: "docs/runbooks/rpm-limit-triggered.md"
+
+    - alert: GatewayRateLimitFailingOpen
+      # The plugin fails open on Redis errors. If we see warnings of
+      # rate_limit_check_failed (no metric today; would need to add one)
+      # — for now alert on Redis latency as a proxy.
+      expr: |
+        histogram_quantile(0.95, sum(rate(gw_redis_latency_seconds_bucket[5m])) by (le)) > 0.5
+      for: 3m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "Redis p95 latency >500ms — rate limiter may be failing open"
+        description: "Sustained Redis slowness affects rate limiting (fail-open path lets traffic through), idempotency, sticky sessions, and slot management. Check Redis health."
+        runbook: "docs/runbooks/rpm-limit-triggered.md (last section)"
+
+# ── Failover loop / scheduler ─────────────────────────────────────────────
+- name: aide-failover
+  interval: 1m
+  rules:
+    - alert: GatewayAllUpstreamsFailed
+      expr: |
+        sum(rate(http_requests_total{job="aide-gateway", status_code="503"}[5m])) > 0.5
+      for: 5m
+      labels:
+        severity: critical
+        service: gateway
+      annotations:
+        summary: "Gateway returning 503 (all_upstreams_failed) at >0.5 rps for 5+ min"
+        description: "Either every upstream account is rate-limited / OAuth-invalid / revoked, or the scheduler can't pick any. Check accounts table for status='active' rows; inspect oauth_invalid count."
+        runbook: "(check upstream_accounts.status; rotate / re-onboard if needed)"
+
+    - alert: GatewaySlotAcquireFailures
+      expr: |
+        sum(rate(gw_slot_acquire_total{result="rejected"}[5m])) > 5
+      for: 5m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "Slot-acquire rejected >5/sec — accounts saturated"
+        description: "Every selected upstream account hit its concurrency cap. Either raise per-account `concurrency`, add more accounts, or lower client RPS."
+
+# ── OAuth refresh (Plan 5A) ───────────────────────────────────────────────
+- name: aide-oauth
+  interval: 1m
+  rules:
+    - alert: GatewayOAuthAccountDead
+      expr: |
+        increase(gw_oauth_refresh_dead_total[15m]) > 0
+      for: 1m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "An upstream account hit GATEWAY_OAUTH_MAX_FAIL and was parked"
+        description: "An OAuth account reached the refresh-failure threshold and is now status='oauth_invalid'. Check upstream_accounts.error_message; re-authorize via the admin UI's manual probe / re-onboarding flow."
+        runbook: "(check upstream_accounts WHERE status='oauth_invalid'; re-onboard via Admin UI)"
+
+# ── BullMQ workers ────────────────────────────────────────────────────────
+- name: aide-workers
+  interval: 1m
+  rules:
+    - alert: GatewayQueueSaturated
+      expr: |
+        gw_queue_depth > 4500
+      for: 5m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "BullMQ usage-log queue near saturation threshold"
+        description: "Queue depth has been above 4500 for 5+ min. Default GATEWAY_QUEUE_SATURATE_THRESHOLD is 5000 — once crossed in strict mode, new requests get 503. Check the worker process is up; investigate db_log writes if it's the persistence step that's slow."
+
+    - alert: GatewayQueueDlqGrowing
+      expr: |
+        increase(gw_queue_dlq_count[1h]) > 10
+      for: 5m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "Queue DLQ growing — work is failing repeatedly"
+        description: "More than 10 jobs landed in the DLQ in the last hour. Inspect failed job payloads; the worker code is throwing on something it can't handle gracefully."
+
+    - alert: EvaluatorDlqGrowing
+      expr: |
+        increase(gw_eval_dlq_count[1h]) > 5
+      for: 5m
+      labels:
+        severity: info
+        service: gateway
+      annotations:
+        summary: "Evaluator DLQ growing"
+        description: "Some evaluator jobs are failing terminally. Usually this is rubric / facet config drift; check `gw_eval_llm_failed_total` for clues."
+        runbook: "docs/runbooks/evaluator-dlq.md"
+
+# ── Billing / cost ledger ─────────────────────────────────────────────────
+- name: aide-billing
+  interval: 5m
+  rules:
+    - alert: GatewayPricingMissing
+      expr: |
+        sum(increase(gw_pricing_miss_total[1h])) > 100
+      for: 10m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: ">100 pricing-miss events in last hour — model_pricing table out of date"
+        description: "An upstream model returned in usage logs lacks a row in model_pricing. Cost will under-count. Add the model to packages/db/src/seed/modelPricingSnapshot*.ts and run the next pricing migration."
+        runbook: "docs/runbooks/cost-ledger-mismatch.md"
+
+    - alert: GatewayBillingDrift
+      expr: |
+        sum(increase(gw_billing_drift_total[24h])) > 0
+      for: 5m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "Billing drift detected — usage_logs / cost_ledger diverging"
+        description: "The billing audit worker found a drift between usage_logs cost computation and cost_ledger. Investigate before the discrepancy compounds."
+        runbook: "docs/runbooks/cost-ledger-mismatch.md"
+
+    - alert: GatewayLlmBudgetExceeded
+      expr: |
+        sum(rate(gw_llm_budget_exceeded_total[5m])) > 0
+      for: 1m
+      labels:
+        severity: info
+        service: gateway
+      annotations:
+        summary: "An org crossed its evaluator LLM monthly budget"
+        description: "Either degrade or halt behaviour was applied. Customer success may need to negotiate a budget bump."
+        runbook: "docs/runbooks/llm-budget.md"
+
+# ── GDPR / retention ──────────────────────────────────────────────────────
+- name: aide-gdpr
+  interval: 5m
+  rules:
+    - alert: GatewayBodyPurgeLagging
+      expr: |
+        gw_body_purge_lag_hours > 48
+      for: 30m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "Body-purge cron is >48 hours behind"
+        description: "Old request_bodies / response_bodies aren't being deleted on schedule. Retention SLA at risk. Check the cron handle."
+        runbook: "docs/runbooks/body-purge-lag.md"
+
+    - alert: GatewayGdprFailures
+      expr: |
+        sum(increase(gw_gdpr_failures_total[1h])) > 0
+      for: 5m
+      labels:
+        severity: critical
+        service: gateway
+      annotations:
+        summary: "GDPR delete request failed — SLA at risk"
+        description: "A user-initiated delete request failed during execution. The user may be inside the regulatory deadline; investigate immediately."
+        runbook: "docs/runbooks/gdpr-sla.md"

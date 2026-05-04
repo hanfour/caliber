@@ -12,6 +12,15 @@ infrastructure using the published Docker images. For CLI mode, see the root
 > but skip the Docker-compose plumbing. **Vercel is not supported** —
 > the gateway is a long-running Fastify server with BullMQ workers and
 > doesn't fit Vercel's serverless model.
+>
+> **Reverse proxy + TLS**: sample Caddy / nginx configs live in
+> [`deploy/proxy/`](../deploy/proxy/). They handle SSE streaming,
+> trusted-proxy IP forwarding, and body-size limits matched to
+> `GATEWAY_MAX_BODY_BYTES`.
+>
+> **Monitoring + alerting**: Prometheus alert rules wired to the
+> runbooks live in [`monitoring/prometheus/alerts.yml`](../monitoring/prometheus/alerts.yml);
+> wiring guide in [`monitoring/README.md`](../monitoring/README.md).
 
 ## 1. Prerequisites
 

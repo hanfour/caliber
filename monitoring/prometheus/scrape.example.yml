@@ -1,0 +1,30 @@
+# Sample Prometheus scrape config for aide.
+#
+# Drop into your existing prometheus.yml under `scrape_configs:`.
+# For docker-compose self-hosting, the targets resolve via Docker's
+# internal DNS — both services join the `default` network of the
+# `aide_default` compose project.
+
+scrape_configs:
+  - job_name: aide-gateway
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          # Replace with your gateway's host:port. For docker-compose:
+          - "gateway:3002"
+          # For Render / Fly / Railway: use the service's internal
+          # network address (Render: aide-gateway:3002 within the
+          # blueprint's network; Fly: aide-gateway.flycast:3002;
+          # Railway: aide-gateway.railway.internal:3002).
+
+  - job_name: aide-api
+    metrics_path: /metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - "api:3001"
+
+  # Optional — if you run Prometheus's node-exporter, blackbox-exporter,
+  # or cadvisor, add them here. The aide alert rules don't depend on
+  # them but a healthy ops setup typically includes them.
