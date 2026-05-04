@@ -189,6 +189,73 @@ describe("accounts router", () => {
     expect(vault2!.oauthExpiresAt!.toISOString()).toBe(expiresIso);
   });
 
+  it("create: openai platform with api_key persists row + decrypts roundtrip", async () => {
+    // API-key migration plan Phase 1 — verify the openai platform widening
+    // accepts `sk-...` keys end-to-end. The gateway upstreamCallOpenai
+    // already authenticates api_key creds via Authorization: Bearer, so no
+    // gateway-side change is needed for this to function at runtime.
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor(t.db, admin.id);
+
+    const acct = await caller.accounts.create({
+      orgId: org.id,
+      name: "openai-prod-1",
+      platform: "openai",
+      type: "api_key",
+      credentials: "sk-proj-test-12345",
+    });
+    expect(acct.platform).toBe("openai");
+    expect(acct.type).toBe("api_key");
+
+    const [vault] = await t.db
+      .select()
+      .from(credentialVault)
+      .where(eq(credentialVault.accountId, acct.id));
+    expect(vault).toBeDefined();
+    expect(vault!.oauthExpiresAt).toBeNull();
+    const plain = decryptCredential({
+      masterKeyHex: defaultTestEnv.CREDENTIAL_ENCRYPTION_KEY!,
+      accountId: acct.id,
+      sealed: {
+        nonce: vault!.nonce,
+        ciphertext: vault!.ciphertext,
+        authTag: vault!.authTag,
+      },
+    });
+    expect(JSON.parse(plain)).toEqual({
+      type: "api_key",
+      api_key: "sk-proj-test-12345",
+    });
+  });
+
+  it("create: rejects unknown platform values at the validation layer", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor(t.db, admin.id);
+
+    await expect(
+      caller.accounts.create({
+        orgId: org.id,
+        name: "rogue",
+        // @ts-expect-error — assertion: Zod rejects unrecognized platforms.
+        platform: "gemini",
+        type: "api_key",
+        credentials: "x",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("create: teamId from a different org → FORBIDDEN (team-org binding guard)", async () => {
     // org_admin in orgA passes RBAC for creating an account in orgA but
     // pins teamId belonging to orgB. Without the team-org check the row
