@@ -153,7 +153,11 @@ export async function tryCacheRead(
 export async function maybeCacheStore(
   deps: ResponseCacheDeps,
   cacheKey: string,
-  response: { status: number; headers: Record<string, string | string[] | undefined>; body: Buffer },
+  response: {
+    status: number;
+    headers: Record<string, string | string[] | undefined>;
+    body: Buffer;
+  },
   now: () => number = Date.now,
 ): Promise<boolean> {
   if (deps.ttlSec === 0) return false;
@@ -172,6 +176,86 @@ export async function maybeCacheStore(
   } catch {
     return false;
   }
+}
+
+/**
+ * Route-level helper: check the cache, replay on hit, or set the
+ * `x-cache: miss` header and return the cacheKey for the caller to
+ * pass into a post-success store.
+ *
+ * Behaviour:
+ *   - ttlSec === 0 → no-op, returns `{ hit: false, cacheKey: null }`.
+ *     Caller proceeds to upstream; no `x-cache` header is emitted.
+ *   - Cache hit → writes status / headers / body to `reply` (with
+ *     `x-cache: hit`), returns `{ hit: true, cacheKey }`. Caller MUST
+ *     return early without further reply emission.
+ *   - Cache miss → sets `x-cache: miss` header on `reply` (preserved
+ *     when the caller later sends the upstream response), returns
+ *     `{ hit: false, cacheKey }`. Caller proceeds to upstream and
+ *     calls `tryStoreOnSuccess(...)` after a successful response.
+ *
+ * Reply body: when hitting, this writes via `reply.send(body)`. The
+ * caller's flow-control needs to bail out — typically `if (hit) return`.
+ */
+export interface CheckRouteCacheDeps {
+  redis: Pick<Redis, "get" | "set">;
+  ttlSec: number;
+  orgId: string;
+  scope: string;
+  bodyBuf: Buffer;
+  reply: {
+    code(s: number): unknown;
+    header(k: string, v: string): unknown;
+    send(b: Buffer): unknown;
+  };
+}
+
+export interface CheckRouteCacheResult {
+  hit: boolean;
+  cacheKey: string | null;
+}
+
+export async function checkRouteCache(
+  deps: CheckRouteCacheDeps,
+): Promise<CheckRouteCacheResult> {
+  if (deps.ttlSec === 0) {
+    return { hit: false, cacheKey: null };
+  }
+  const cacheKey = computeCacheKey(deps.orgId, deps.scope, deps.bodyBuf);
+  const cached = await tryCacheRead(
+    { redis: deps.redis, ttlSec: deps.ttlSec },
+    cacheKey,
+  );
+  if (cached) {
+    deps.reply.code(cached.status);
+    for (const [k, v] of Object.entries(cached.headers)) {
+      deps.reply.header(k, v);
+    }
+    deps.reply.header("x-cache", "hit");
+    deps.reply.send(decodeCachedBody(cached));
+    return { hit: true, cacheKey };
+  }
+  deps.reply.header("x-cache", "miss");
+  return { hit: false, cacheKey };
+}
+
+/**
+ * Fire-and-forget cache write. Caller invokes after a successful
+ * upstream response has been emitted (or about to be); this never
+ * blocks the user-visible path or throws — eligibility checks +
+ * Redis errors are absorbed into a boolean return.
+ */
+export function tryStoreOnSuccess(
+  deps: ResponseCacheDeps,
+  cacheKey: string | null,
+  response: {
+    status: number;
+    headers: Record<string, string | string[] | undefined>;
+    body: Buffer;
+  },
+): void {
+  if (cacheKey === null) return;
+  void maybeCacheStore(deps, cacheKey, response);
 }
 
 /**

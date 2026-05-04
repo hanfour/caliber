@@ -42,6 +42,10 @@ import {
 } from "../runtime/failoverLoop.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
+import {
+  checkRouteCache,
+  tryStoreOnSuccess,
+} from "../runtime/responseCache.js";
 import { emitUsageLog } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
 import { buildSyntheticAnthropicUsage } from "../runtime/syntheticUsageShapes.js";
@@ -142,6 +146,25 @@ export function makeResponsesRouteHandler(
     }
     const body = parsed.data;
 
+    // Phase 3 #2 — cache scope `v1/responses` keyed on the Zod-
+    // validated client body. Shared across the openai-platform
+    // passthrough and the anthropic-platform translator branches so a
+    // group reconfigure preserves cache hits.
+    const clientBodyBuf = Buffer.from(JSON.stringify(body));
+    let cacheKey: string | null = null;
+    if (body.stream !== true) {
+      const result = await checkRouteCache({
+        redis: app.redis,
+        ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+        orgId: req.gwOrg.id,
+        scope: "v1/responses",
+        bodyBuf: clientBodyBuf,
+        reply,
+      });
+      if (result.hit) return;
+      cacheKey = result.cacheKey;
+    }
+
     if (ctx.platform === "openai") {
       // OpenAI upstream is the same format as the inbound — body
       // passthrough on both the request and the response.  Stream +
@@ -167,6 +190,7 @@ export function makeResponsesRouteHandler(
         body,
         req.id,
         body.model,
+        cacheKey,
       );
       return;
     }
@@ -302,10 +326,20 @@ export function makeResponsesRouteHandler(
           ),
       });
 
+      const responseBuf = Buffer.from(JSON.stringify(responsesResp));
       reply
         .code(200)
         .header("content-type", "application/json")
-        .send(responsesResp);
+        .send(responseBuf);
+      tryStoreOnSuccess(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        cacheKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
     } catch (err) {
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
@@ -557,6 +591,7 @@ async function runOpenaiResponsesPassthroughFailover(
   body: ResponsesRequest,
   requestId: string,
   requestedModel: string,
+  cacheKey: string | null,
 ): Promise<void> {
   const startedAtMs = Date.now();
   const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
@@ -654,10 +689,20 @@ async function runOpenaiResponsesPassthroughFailover(
         ),
     });
 
+    const responseBuf = Buffer.from(JSON.stringify(responsesResp));
     reply
       .code(200)
       .header("content-type", "application/json")
-      .send(responsesResp);
+      .send(responseBuf);
+    tryStoreOnSuccess(
+      { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+      cacheKey,
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: responseBuf,
+      },
+    );
   } catch (err) {
     if (err instanceof AllUpstreamsFailed) {
       reply.code(503).send({

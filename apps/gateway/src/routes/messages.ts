@@ -40,10 +40,8 @@ import {
 } from "../runtime/sseErrorEvents.js";
 import { autoRoute } from "./dispatch.js";
 import {
-  computeCacheKey,
-  decodeCachedBody,
-  maybeCacheStore,
-  tryCacheRead,
+  checkRouteCache,
+  tryStoreOnSuccess,
 } from "../runtime/responseCache.js";
 
 export interface MessagesRouteOptions {
@@ -110,27 +108,21 @@ export function makeMessagesAnthropicHandler(
     const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
 
     // Phase 3 #2 — response cache for non-streaming requests. Disabled
-    // when GATEWAY_CACHE_TTL_SEC=0 (default).
-    const cacheTtlSec = opts.env.GATEWAY_CACHE_TTL_SEC;
-    let cacheKey: string | undefined;
-    if (!isStream && cacheTtlSec > 0) {
-      cacheKey = computeCacheKey(req.gwOrg.id, "anthropic", upstreamBodyBuf);
-      const cached = await tryCacheRead(
-        { redis: app.redis, ttlSec: cacheTtlSec },
-        cacheKey,
-      );
-      if (cached) {
-        reply.code(cached.status);
-        for (const [k, v] of Object.entries(cached.headers)) {
-          reply.header(k, v);
-        }
-        reply.header("x-cache", "hit");
-        reply.send(decodeCachedBody(cached));
-        return;
-      }
-      // Mark miss so clients can observe cache behaviour even on the
-      // upstream-served path; runNonStreamFailover stores on success.
-      reply.header("x-cache", "miss");
+    // when GATEWAY_CACHE_TTL_SEC=0 (default).  Scope `v1/messages`
+    // identifies the public endpoint so cached entries don't collide
+    // with bodies sent to other routes.
+    let cacheKey: string | null = null;
+    if (!isStream) {
+      const result = await checkRouteCache({
+        redis: app.redis,
+        ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+        orgId: req.gwOrg.id,
+        scope: "v1/messages",
+        bodyBuf: upstreamBodyBuf,
+        reply,
+      });
+      if (result.hit) return;
+      cacheKey = result.cacheKey;
     }
 
     // Wire AbortSignal from client disconnect.
@@ -232,7 +224,7 @@ async function runNonStreamFailover(
    * upfront after a cache-miss read. We store the upstream response
    * here on success so the next identical request can short-circuit.
    */
-  cacheKey?: string,
+  cacheKey?: string | null,
 ): Promise<void> {
   // Capture start time BEFORE the failover loop so durationMs includes
   // credential resolve + slot acquire + failover switches. Sub-task B of
@@ -393,21 +385,18 @@ async function runNonStreamFailover(
     reply.header(k, v as string);
   }
 
-  // Phase 3 #2 — fire-and-forget cache write on success. Don't await
-  // (Redis SET is fast but no need to add it to the user-visible path).
-  // maybeCacheStore swallows its own errors and gates on status === 200
-  // + body size.
-  if (cacheKey !== undefined) {
-    void maybeCacheStore(
-      { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
-      cacheKey,
-      {
-        status: result.status,
-        headers: result.headers,
-        body: result.body,
-      },
-    );
-  }
+  // Phase 3 #2 — fire-and-forget cache write on success.  Helper
+  // gates on cacheKey presence + status===200 + body size + ttl>0;
+  // never throws.
+  tryStoreOnSuccess(
+    { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+    cacheKey ?? null,
+    {
+      status: result.status,
+      headers: result.headers,
+      body: result.body,
+    },
+  );
 
   reply.send(result.body);
 }
@@ -804,6 +793,26 @@ export function makeMessagesOpenaiHandler(
     const anthropicBody = body as unknown as AnthropicMessagesRequest;
     const isStream = body.stream === true;
 
+    // Phase 3 #2 — share cache scope `v1/messages` with the
+    // anthropic-platform handler. Both handlers see the same
+    // anthropic-shape client body and emit anthropic-shape responses,
+    // so a hit cached by either branch replays correctly through the
+    // other after a group reconfigure.
+    const clientBodyBuf = Buffer.from(JSON.stringify(body));
+    let cacheKey: string | null = null;
+    if (!isStream) {
+      const result = await checkRouteCache({
+        redis: app.redis,
+        ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+        orgId: req.gwOrg.id,
+        scope: "v1/messages",
+        bodyBuf: clientBodyBuf,
+        reply,
+      });
+      if (result.hit) return;
+      cacheKey = result.cacheKey;
+    }
+
     let openaiBody;
     try {
       openaiBody = translateAnthropicToResponses(anthropicBody);
@@ -938,10 +947,23 @@ export function makeMessagesOpenaiHandler(
           ),
       });
 
+      // Serialize once so the cache stores the exact bytes Fastify
+      // emits (no risk of cached version drifting due to key-order
+      // differences in JSON.stringify on the replay path).
+      const responseBuf = Buffer.from(JSON.stringify(anthropicResp));
       reply
         .code(200)
         .header("content-type", "application/json")
-        .send(anthropicResp);
+        .send(responseBuf);
+      tryStoreOnSuccess(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        cacheKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
     } catch (err) {
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
