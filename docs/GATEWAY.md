@@ -128,7 +128,8 @@ priority, per-account concurrency, rate-limit state, and team scope.
 
 **Shape stored per account** (see `packages/db/src/schema/accounts.ts`):
 
-- `name`, `notes`, `platform` (4A: `anthropic` only), `type` (`api_key` or `oauth`)
+- `name`, `notes`, `platform` (`anthropic` or `openai`), `type`
+  (`api_key` or `oauth` — OAuth path is Anthropic-only in the admin UI)
 - `org_id` (required), `team_id` (null = org-scoped, set = team override)
 - Scheduling: `priority` (lower = preferred), `concurrency` (per-account
   parallelism, default 3), `rate_multiplier`
@@ -146,11 +147,17 @@ The gateway decrypts on each failover attempt (cache: none in 4A).
 **Adding an account.**
 
 1. Open `/dashboard/organizations/[id]/accounts/new`
-2. Pick scope (org-wide or team override), platform (`anthropic`), type
+2. Pick scope (org-wide or team override), platform (`anthropic` or
+   `openai`), type
 3. Paste credentials:
-   - `type=api_key` → `sk-ant-...`
-   - `type=oauth` → JSON `{ "access_token", "refresh_token", "expires_at" }`
+   - `anthropic` + `type=api_key` → `sk-ant-...`
+   - `anthropic` + `type=oauth` → JSON `{ "access_token", "refresh_token", "expires_at" }`
      (extract from your own Claude Code install)
+   - `openai` + `type=api_key` → `sk-...` / `sk-proj-...` from a
+     compliant OpenAI org / project. See
+     [`admin/openai-account-setup.md`](./admin/openai-account-setup.md)
+     for the step-by-step including spend caps, key scoping, and
+     rotation.  The form intentionally hides `oauth` for OpenAI.
 4. Submit. Backend inserts `credential_vault` + `upstream_accounts` in one
    transaction. Credentials never appear in logs.
 

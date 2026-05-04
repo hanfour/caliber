@@ -12,7 +12,12 @@ import {
 import { assertTeamBelongsToOrg } from "./_shared.js";
 
 const uuid = z.string().uuid();
-const platformEnum = z.enum(["anthropic"]);
+// API-key migration plan Phase 1 — `openai` joins as a first-class
+// `accounts.create` platform. The gateway-side runtime (resolveCredential
+// / scheduler / upstreamCallOpenai) is already type-agnostic; this only
+// adds the validation surface so admins can onboard `sk-` keys obtained
+// from a compliant OpenAI org / project.
+const platformEnum = z.enum(["anthropic", "openai"]);
 const typeEnum = z.enum(["api_key", "oauth"]);
 
 function ensureGatewayEnabled(env: { ENABLE_GATEWAY: boolean }) {
