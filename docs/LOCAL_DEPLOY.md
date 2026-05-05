@@ -120,6 +120,13 @@ docker compose --profile gateway down -v         # also wipe pg_data + redis_dat
 
 Build on Mode 1. The stack is already up.
 
+> **Want to use your Claude.ai (Pro / Max / Team) subscription instead
+> of paying per-token for an OpenAI key?** See
+> [`MULTI_DEVICE.md`](./MULTI_DEVICE.md) for the Anthropic OAuth path —
+> extracts the bundle from Claude Code's keychain, onboards via the same
+> admin UI form, and walks the cross-device setup so other laptops /
+> phones can route through your subscription quota.
+
 ### 1. Provision an OpenAI project key
 
 Follow the full walkthrough in
