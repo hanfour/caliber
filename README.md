@@ -150,6 +150,12 @@ the deploy/ READMEs for what does work.
 
 CLI mode and platform mode share no runtime state; pick whichever fits.
 
+> **First time trying platform mode?** Start with
+> [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — a 30-minute
+> end-to-end walkthrough that takes a fresh checkout to a working
+> personal AI gateway sharing your Claude.ai Pro/Max subscription
+> across all your devices.
+
 ---
 
 ## Data Sources / 資料來源

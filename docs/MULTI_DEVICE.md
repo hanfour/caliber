@@ -1,5 +1,10 @@
 # Multi-device personal use — share your Claude Max via aide gateway
 
+> **First time?** Read [`GETTING_STARTED.md`](./GETTING_STARTED.md)
+> first — it's the linear walkthrough from "fresh git clone" to
+> "Claude Code on a second device working". This doc is the deeper
+> reference the tutorial cross-links to.
+
 The killer use case for self-hosted aide isn't a multi-tenant SaaS — it's
 **you, on multiple of your own devices, all proxying through one gateway
 that's wired to your personal Claude Max / Pro subscription**. This guide

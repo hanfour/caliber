@@ -1,5 +1,12 @@
 # Local deployment guide
 
+> **Looking for an end-to-end "from zero to working personal AI
+> gateway" tutorial?** See
+> [`GETTING_STARTED.md`](./GETTING_STARTED.md) — it walks through
+> Mode 1 + Mode 2 (Anthropic OAuth) + cross-device wiring as one
+> linear ~30-minute path, with workarounds inline. This doc remains
+> the deeper reference for each mode in isolation.
+
 Three escalating modes for running aide on your own machine — pick
 the lowest one that fits your goal:
 
