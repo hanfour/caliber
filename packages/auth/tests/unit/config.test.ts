@@ -78,6 +78,25 @@ describe("buildAuthConfig — shape", () => {
     expect(typeof cfg.events?.createUser).toBe("function");
     expect(cfg.adapter).toBeTruthy();
   });
+
+  it("defaults trustHost=true when AUTH_TRUST_HOST is not provided", () => {
+    const cfg = buildAuthConfig(db as never, env);
+    expect(cfg.trustHost).toBe(true);
+  });
+
+  it("honours an explicit AUTH_TRUST_HOST=false", () => {
+    const cfg = buildAuthConfig(db as never, { ...env, AUTH_TRUST_HOST: false });
+    expect(cfg.trustHost).toBe(false);
+  });
+
+  it("registers only configured providers", () => {
+    const githubOnly = buildAuthConfig(db as never, {
+      ...env,
+      GOOGLE_CLIENT_ID: undefined,
+      GOOGLE_CLIENT_SECRET: undefined,
+    });
+    expect(githubOnly.providers).toHaveLength(1);
+  });
 });
 
 describe("buildAuthConfig — callbacks.signIn", () => {

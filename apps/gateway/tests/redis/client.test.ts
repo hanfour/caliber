@@ -10,6 +10,7 @@ function makeEnv(overrides: Partial<ServerEnv> = {}): ServerEnv {
     DATABASE_URL: "postgresql://u:p@localhost/db",
     AUTH_SECRET: "a".repeat(32),
     NEXTAUTH_URL: "http://localhost:3000",
+    AUTH_TRUST_HOST: true,
     GOOGLE_CLIENT_ID: "g",
     GOOGLE_CLIENT_SECRET: "g",
     GITHUB_CLIENT_ID: "gh",

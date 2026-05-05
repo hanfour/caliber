@@ -34,10 +34,24 @@ export const serverEnvSchema = z
       .string()
       .min(32, "AUTH_SECRET must be at least 32 characters"),
     NEXTAUTH_URL: z.string().url(),
-    GOOGLE_CLIENT_ID: z.string().min(1),
-    GOOGLE_CLIENT_SECRET: z.string().min(1),
-    GITHUB_CLIENT_ID: z.string().min(1),
-    GITHUB_CLIENT_SECRET: z.string().min(1),
+    /**
+     * Auth.js v5 requires `trustHost` to accept requests on hosts other than
+     * its compile-time allowlist. For self-hosted compose deploys (where the
+     * operator owns NEXTAUTH_URL and the reverse proxy) the host is trusted
+     * by definition, so default to `true`. Operators sitting behind an
+     * untrusted edge can flip to `false` and rely on the AUTH_URL fallback.
+     */
+    AUTH_TRUST_HOST: booleanUnion.default(true),
+    /**
+     * OAuth provider creds are optional individually — operators can ship
+     * Google-only, GitHub-only, or both. The runtime check in `buildProviders`
+     * registers whichever pair is non-empty; `superRefine` below enforces that
+     * at least one provider is configured so the sign-in page isn't dead.
+     */
+    GOOGLE_CLIENT_ID: emptyAsUndefined(z.string().min(1).optional()),
+    GOOGLE_CLIENT_SECRET: emptyAsUndefined(z.string().min(1).optional()),
+    GITHUB_CLIENT_ID: emptyAsUndefined(z.string().min(1).optional()),
+    GITHUB_CLIENT_SECRET: emptyAsUndefined(z.string().min(1).optional()),
     BOOTSTRAP_SUPER_ADMIN_EMAIL: z.string().email(),
     BOOTSTRAP_DEFAULT_ORG_SLUG: z
       .string()
@@ -130,6 +144,51 @@ export const serverEnvSchema = z
     ),
   })
   .superRefine((data, ctx) => {
+    // OAuth provider validity: each pair must be set together (id + secret),
+    // and at least one fully configured pair must exist. The half-set check
+    // catches typos / missed copy-paste; without it, `buildProviders` would
+    // silently drop the half-set provider and operators would scratch their
+    // heads at a missing sign-in button.
+    const googleId = !!data.GOOGLE_CLIENT_ID;
+    const googleSecret = !!data.GOOGLE_CLIENT_SECRET;
+    if (googleId !== googleSecret) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: googleId ? ["GOOGLE_CLIENT_SECRET"] : ["GOOGLE_CLIENT_ID"],
+        message:
+          "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together (or both empty to disable Google OAuth).",
+      });
+    }
+    const githubId = !!data.GITHUB_CLIENT_ID;
+    const githubSecret = !!data.GITHUB_CLIENT_SECRET;
+    if (githubId !== githubSecret) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: githubId ? ["GITHUB_CLIENT_SECRET"] : ["GITHUB_CLIENT_ID"],
+        message:
+          "GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set together (or both empty to disable GitHub OAuth).",
+      });
+    }
+    const hasGoogle = googleId && googleSecret;
+    const hasGitHub = githubId && githubSecret;
+    if (!hasGoogle && !hasGitHub) {
+      // Emit on both provider fields so the operator sees the error next to
+      // whichever block they're trying to configure — the message itself
+      // names both providers, so directionality of `path` isn't load-bearing.
+      const message =
+        "At least one OAuth provider must be configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET (or both).";
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["GOOGLE_CLIENT_ID"],
+        message,
+      });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["GITHUB_CLIENT_ID"],
+        message,
+      });
+    }
+
     if (!data.ENABLE_GATEWAY) {
       return;
     }

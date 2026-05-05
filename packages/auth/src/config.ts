@@ -8,17 +8,24 @@ import { makeAdapter } from "./drizzle-adapter.js";
 import { decideSignUp, type BootstrapConfig } from "./bootstrap.js";
 
 export interface AuthEnv extends BootstrapConfig {
-  GOOGLE_CLIENT_ID: string;
-  GOOGLE_CLIENT_SECRET: string;
-  GITHUB_CLIENT_ID: string;
-  GITHUB_CLIENT_SECRET: string;
+  GOOGLE_CLIENT_ID?: string | undefined;
+  GOOGLE_CLIENT_SECRET?: string | undefined;
+  GITHUB_CLIENT_ID?: string | undefined;
+  GITHUB_CLIENT_SECRET?: string | undefined;
   AUTH_SECRET: string;
+  /**
+   * Auth.js v5 rejects requests on hosts outside its compile-time allowlist
+   * unless trustHost is true. Defaults to true for self-hosted compose
+   * deploys; operators behind an untrusted edge can pass false.
+   */
+  AUTH_TRUST_HOST?: boolean | undefined;
 }
 
 export function buildAuthConfig(db: Database, env: AuthEnv): NextAuthConfig {
   return {
     adapter: makeAdapter(db),
     secret: env.AUTH_SECRET,
+    trustHost: env.AUTH_TRUST_HOST ?? true,
     session: { strategy: "database", maxAge: 30 * 24 * 60 * 60 },
     providers: buildProviders(env),
     callbacks: {

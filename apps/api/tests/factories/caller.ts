@@ -40,6 +40,7 @@ export const defaultTestEnv: ServerEnv = {
   DATABASE_URL: "postgres://test:test@localhost:5432/test",
   AUTH_SECRET: "test-auth-secret-must-be-at-least-32-chars-long",
   NEXTAUTH_URL: "http://localhost:3000",
+  AUTH_TRUST_HOST: true,
   GOOGLE_CLIENT_ID: "test-google-id",
   GOOGLE_CLIENT_SECRET: "test-google-secret",
   GITHUB_CLIENT_ID: "test-github-id",

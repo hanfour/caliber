@@ -12,6 +12,7 @@ function resolveAuthConfig(): NextAuthConfig {
   if (!cachedDb) cachedDb = createDb(env.DATABASE_URL);
   return buildAuthConfig(cachedDb.db, {
     AUTH_SECRET: env.AUTH_SECRET,
+    AUTH_TRUST_HOST: env.AUTH_TRUST_HOST,
     GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
     GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID,

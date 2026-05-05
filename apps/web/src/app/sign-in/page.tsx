@@ -1,4 +1,6 @@
+import { configuredProviderIds } from '@aide/auth'
 import { signIn } from '@/auth'
+import { getEnv } from '@/env'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 
@@ -34,6 +36,9 @@ export default async function SignInPage({
   const errorKey = params.error
   const error = errorKey ? (ERROR_MESSAGES[errorKey] ?? ERROR_MESSAGES.Default) : null
   const callbackUrl = params.callbackUrl ?? '/dashboard'
+  const providers = configuredProviderIds(getEnv())
+  const showGoogle = providers.includes('google')
+  const showGitHub = providers.includes('github')
 
   async function signInGoogle() {
     'use server'
@@ -64,16 +69,20 @@ export default async function SignInPage({
               <p className="mt-1 text-destructive/80">{error.description}</p>
             </div>
           )}
-          <form action={signInGoogle}>
-            <Button type="submit" variant="outline" className="w-full" size="lg">
-              Sign in with Google
-            </Button>
-          </form>
-          <form action={signInGitHub}>
-            <Button type="submit" variant="outline" className="w-full" size="lg">
-              Sign in with GitHub
-            </Button>
-          </form>
+          {showGoogle && (
+            <form action={signInGoogle}>
+              <Button type="submit" variant="outline" className="w-full" size="lg">
+                Sign in with Google
+              </Button>
+            </form>
+          )}
+          {showGitHub && (
+            <form action={signInGitHub}>
+              <Button type="submit" variant="outline" className="w-full" size="lg">
+                Sign in with GitHub
+              </Button>
+            </form>
+          )}
         </CardContent>
         <CardFooter className="flex-col gap-1 text-center text-xs text-muted-foreground">
           <p>僅受邀請的 Email 可以註冊與登入。</p>

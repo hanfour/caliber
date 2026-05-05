@@ -107,4 +107,106 @@ describe("parseServerEnv", () => {
       expect(env.GATEWAY_APIKEY_RPM_LIMIT).toBe(0);
     });
   });
+
+  // ── OAuth provider optionality ─────────────────────────────────────────────
+  // PR fix-mode1: each pair is independently optional, but at least one must
+  // be configured. Empty strings are treated as unset (compose interpolation).
+
+  describe("OAuth provider optionality", () => {
+    it("accepts GitHub-only (Google blank)", () => {
+      const env = parseServerEnv({
+        ...valid,
+        GOOGLE_CLIENT_ID: "",
+        GOOGLE_CLIENT_SECRET: "",
+      });
+      expect(env.GOOGLE_CLIENT_ID).toBeUndefined();
+      expect(env.GITHUB_CLIENT_ID).toBe("gh-id");
+    });
+
+    it("accepts Google-only (GitHub blank)", () => {
+      const env = parseServerEnv({
+        ...valid,
+        GITHUB_CLIENT_ID: "",
+        GITHUB_CLIENT_SECRET: "",
+      });
+      expect(env.GITHUB_CLIENT_ID).toBeUndefined();
+      expect(env.GOOGLE_CLIENT_ID).toBe("g-id");
+    });
+
+    it("rejects when both providers are blank (sign-in would be dead)", () => {
+      expect(() =>
+        parseServerEnv({
+          ...valid,
+          GOOGLE_CLIENT_ID: "",
+          GOOGLE_CLIENT_SECRET: "",
+          GITHUB_CLIENT_ID: "",
+          GITHUB_CLIENT_SECRET: "",
+        }),
+      ).toThrow(/At least one OAuth provider/);
+    });
+
+    // Half-set pairs are a common typo: copy GOOGLE_CLIENT_ID, forget the
+    // secret. Without an explicit reject, buildProviders silently drops the
+    // half-set provider and the operator gets a missing sign-in button with
+    // no boot-time signal.
+
+    it("rejects half-set Google pair (id without secret)", () => {
+      expect(() =>
+        parseServerEnv({
+          ...valid,
+          GOOGLE_CLIENT_ID: "g-id",
+          GOOGLE_CLIENT_SECRET: "",
+        }),
+      ).toThrow(/GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together/);
+    });
+
+    it("rejects half-set Google pair (secret without id)", () => {
+      expect(() =>
+        parseServerEnv({
+          ...valid,
+          GOOGLE_CLIENT_ID: "",
+          GOOGLE_CLIENT_SECRET: "g-secret",
+        }),
+      ).toThrow(/GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together/);
+    });
+
+    it("rejects half-set GitHub pair (id without secret)", () => {
+      expect(() =>
+        parseServerEnv({
+          ...valid,
+          GITHUB_CLIENT_ID: "gh-id",
+          GITHUB_CLIENT_SECRET: "",
+        }),
+      ).toThrow(/GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set together/);
+    });
+
+    it("accepts half-set Google + valid GitHub doesn't help — half-set still rejects", () => {
+      // Even with GitHub valid, the half-set Google is still a config error
+      // worth surfacing; we don't want to silently drop the typo.
+      expect(() =>
+        parseServerEnv({
+          ...valid,
+          GOOGLE_CLIENT_ID: "g-id",
+          GOOGLE_CLIENT_SECRET: "",
+        }),
+      ).toThrow(/GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together/);
+    });
+  });
+
+  // ── AUTH_TRUST_HOST default ────────────────────────────────────────────────
+  // Auth.js v5 defaults trustHost=false in production, which rejects every
+  // request on self-hosted compose deploys. We default to true so the typical
+  // operator path "just works"; opt-out is still possible.
+
+  describe("AUTH_TRUST_HOST", () => {
+    it("defaults to true when unset", () => {
+      const env = parseServerEnv(valid);
+      expect(env.AUTH_TRUST_HOST).toBe(true);
+    });
+
+    it('honours explicit "false"', () => {
+      const env = parseServerEnv({ ...valid, AUTH_TRUST_HOST: "false" });
+      expect(env.AUTH_TRUST_HOST).toBe(false);
+    });
+  });
 });

@@ -6,10 +6,14 @@ x-app-env: &app-env
   DATABASE_URL: postgresql://${DB_USER:-aide}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-aide}
   AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
   NEXTAUTH_URL: ${NEXTAUTH_URL:?NEXTAUTH_URL is required}
-  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is required}
-  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET is required}
-  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?GITHUB_CLIENT_ID is required}
-  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?GITHUB_CLIENT_SECRET is required}
+  # OAuth providers — at least ONE pair (Google or GitHub) must be filled in
+  # `.env`; the env-schema check enforces it at boot. Empty fields are passed
+  # through as "" and skipped by `buildProviders`, so operators can ship
+  # Google-only, GitHub-only, or both.
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
   BOOTSTRAP_SUPER_ADMIN_EMAIL: ${BOOTSTRAP_SUPER_ADMIN_EMAIL:?required}
   BOOTSTRAP_DEFAULT_ORG_SLUG: ${BOOTSTRAP_DEFAULT_ORG_SLUG:?required}
   BOOTSTRAP_DEFAULT_ORG_NAME: ${BOOTSTRAP_DEFAULT_ORG_NAME:?required}
@@ -90,6 +94,11 @@ services:
       # Web proxies /trpc and /api/v1 to this internal URL via Next rewrites.
       # Browser only ever talks to the web origin, so cookies stay same-origin.
       API_INTERNAL_URL: http://api:3001
+      # Auth.js v5 rejects any host outside its allowlist when NODE_ENV=production
+      # unless trustHost is on. For self-hosted compose deploys (where the operator
+      # owns NEXTAUTH_URL) the host *is* trusted by definition, so default to on
+      # and let operators flip it off if they ever sit behind an untrusted proxy.
+      AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
     ports:
       - "${WEB_PORT:-3000}:3000"
 
