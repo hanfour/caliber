@@ -27,10 +27,14 @@ export const authPlugin = fp<AuthPluginOptions>(async (fastify, opts) => {
   fastify.decorateRequest("perm", null);
   fastify.decorate("db", db);
 
-  const cookieName =
-    opts.env.NODE_ENV === "production"
-      ? "__Secure-authjs.session-token"
-      : "authjs.session-token";
+  // Auth.js v5 derives the `__Secure-` prefix from the URL scheme
+  // (`useSecureCookies = url.startsWith("https://")`), NOT from NODE_ENV.
+  // Self-hosted deploys on http://localhost (Mode 1 of LOCAL_DEPLOY.md) get
+  // a non-prefixed cookie even though NODE_ENV=production. Mirror that rule
+  // here so api can find the session cookie that web actually set.
+  const cookieName = opts.env.NEXTAUTH_URL.startsWith("https://")
+    ? "__Secure-authjs.session-token"
+    : "authjs.session-token";
 
   fastify.addHook("onRequest", async (req) => {
     const token = req.cookies[cookieName];

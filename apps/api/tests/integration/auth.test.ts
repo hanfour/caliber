@@ -115,4 +115,62 @@ describe("authPlugin", () => {
     expect(res.json().assignments).toBe(0); // beforeAll didn't insert any role_assignments
     await app.close();
   });
+
+  // Cookie-name selection should mirror Auth.js v5's URL-scheme rule, NOT
+  // NODE_ENV. Without this the http://localhost self-hosted path returns
+  // 401 on every tRPC call because web sets `authjs.session-token` and api
+  // looks for `__Secure-authjs.session-token`.
+
+  it("reads the non-prefixed cookie when NEXTAUTH_URL is http://", async () => {
+    const app = Fastify();
+    await app.register(cookiesPlugin);
+    await app.register(authPlugin, {
+      env: env({ NEXTAUTH_URL: "http://localhost:3000" }),
+    });
+    app.get("/who", async (req) => ({ user: req.user }));
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/who",
+      cookies: { "authjs.session-token": "test-token" },
+    });
+    expect(res.json().user).toMatchObject({ email: "u@test.com" });
+    await app.close();
+  });
+
+  it("reads the __Secure- prefixed cookie when NEXTAUTH_URL is https://", async () => {
+    const app = Fastify();
+    await app.register(cookiesPlugin);
+    await app.register(authPlugin, {
+      env: env({ NEXTAUTH_URL: "https://aide.example.com" }),
+    });
+    app.get("/who", async (req) => ({ user: req.user }));
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/who",
+      cookies: { "__Secure-authjs.session-token": "test-token" },
+    });
+    expect(res.json().user).toMatchObject({ email: "u@test.com" });
+    await app.close();
+  });
+
+  it("ignores the wrong cookie name (https build sees http cookie)", async () => {
+    // If api looks for the Secure-prefixed name, a non-prefixed cookie is
+    // silently dropped — confirms the selector isn't trying both names.
+    const app = Fastify();
+    await app.register(cookiesPlugin);
+    await app.register(authPlugin, {
+      env: env({ NEXTAUTH_URL: "https://aide.example.com" }),
+    });
+    app.get("/who", async (req) => ({ user: req.user }));
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/who",
+      cookies: { "authjs.session-token": "test-token" },
+    });
+    expect(res.json().user).toBeNull();
+    await app.close();
+  });
 });

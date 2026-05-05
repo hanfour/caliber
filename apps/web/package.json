@@ -6,7 +6,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev -p 3000",
-    "start": "next start -p 3000",
+    "start": "node scripts/substitute-api-url.mjs && next start -p 3000",
     "lint": "next lint --dir src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
