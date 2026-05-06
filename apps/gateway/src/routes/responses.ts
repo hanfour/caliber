@@ -11,12 +11,16 @@
 //     `/v1/messages` and `/v1/chat/completions` routes use, then
 //     translates the upstream Anthropic response back to Responses
 //     shape.
-//   * `group.platform === "openai"`: 503 with a clear "not yet wired"
-//     error.  Will be replaced when the OpenAI handlers ship in PR 9c.
+//   * `group.platform === "openai"`: body passthrough through
+//     `runOpenaiResponsesPassthroughFailover` (non-stream) or
+//     `runOpenaiResponsesStreamingPassthrough` (stream=true). Wired in
+//     by PR #45 and verified end-to-end against an OpenAI-compat
+//     upstream in v0.4.2 (curl + codex CLI both green).
 //
-// Streaming (`stream: true`) is rejected with 501 in this PR; the
-// streaming path lands in PR 9c when the openai handlers go in
-// alongside `makeAnthropicToResponsesStream` wired into the route.
+// Streaming for the openai-platform passthrough is supported (see
+// `runOpenaiResponsesStreamingPassthrough` below). The Anthropic-platform
+// translator branch is also streaming-capable via
+// `makeAnthropicToResponsesStream`.
 //
 // Per design §A6 the schema explicitly accepts `previous_response_id`
 // (we use it for sticky scheduling — Layer 1 in the scheduler) but
@@ -574,8 +578,11 @@ function syntheticAnthropicFromResponsesUsage(
 // so we use `callUpstreamResponses`.  Reuses the same failover loop /
 // scheduler / slot semantics.
 //
-// Streaming is deferred to PR 9e (parses OpenAI Responses SSE upstream
-// and re-emits it; current PR returns 501 for stream=true).
+// Streaming for the openai-platform passthrough is implemented in
+// `runOpenaiResponsesStreamingPassthrough` below — it reads the SSE
+// chunks from the upstream and pipes them straight back to the client,
+// observing the terminal `response.completed` event to harvest usage
+// for the post-stream pricing path.
 //
 // Usage extraction: OpenAI's Responses non-stream response shape
 // surfaces `usage.input_tokens` + `output_tokens` (+ optional
