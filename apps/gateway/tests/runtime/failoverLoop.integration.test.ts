@@ -17,7 +17,12 @@ import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { eq } from "drizzle-orm";
-import { organizations, upstreamAccounts } from "@aide/db";
+import {
+  organizations,
+  upstreamAccounts,
+  accountGroups,
+  accountGroupMembers,
+} from "@aide/db";
 import {
   runFailover,
   AllUpstreamsFailed,
@@ -419,6 +424,90 @@ describe("runFailover", () => {
     });
 
     // Only one attempt made (maxSwitches=1 means only one outer iteration)
+    expect(attempt).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression for #81 — pre-fix runFailover dropped the api-key's
+  // groupId before reaching the scheduler, so an org with mixed-platform
+  // accounts (Anthropic OAuth + OpenAI api_key) would silently route a
+  // /v1/messages call to whichever upstream the legacy fallback picked
+  // first, often the wrong-platform one.
+  it("regression #81: forwards groupId so scheduler filters by platform", async () => {
+    const [anthrAcct] = await db
+      .insert(upstreamAccounts)
+      .values({
+        ...baseAccount,
+        orgId,
+        name: "anthr-oauth",
+        platform: "anthropic",
+        type: "oauth",
+        priority: 50,
+      })
+      .returning();
+    const [openaiAcct] = await db
+      .insert(upstreamAccounts)
+      .values({
+        ...baseAccount,
+        orgId,
+        name: "openai-key",
+        platform: "openai",
+        type: "api_key",
+        priority: 50,
+      })
+      .returning();
+
+    const [grp] = await db
+      .insert(accountGroups)
+      .values({ orgId, name: "anthropic-only", platform: "anthropic" })
+      .returning();
+    await db
+      .insert(accountGroupMembers)
+      .values({ accountId: anthrAcct!.id, groupId: grp!.id });
+
+    const seenAccountIds: string[] = [];
+    const attempt = vi.fn().mockImplementation(async (account) => {
+      seenAccountIds.push(account.id);
+      return "ok";
+    });
+
+    const out = await runFailover({
+      db: db as never,
+      orgId,
+      teamId: null,
+      groupId: grp!.id,
+      maxSwitches: 5,
+      attempt,
+    });
+
+    expect(out).toBe("ok");
+    expect(seenAccountIds).toEqual([anthrAcct!.id]);
+    expect(seenAccountIds).not.toContain(openaiAcct!.id);
+  });
+
+  it("regression #81: groupId omitted preserves legacy org-wide path", async () => {
+    await db
+      .insert(upstreamAccounts)
+      .values({
+        ...baseAccount,
+        orgId,
+        name: "legacy-anthropic",
+        platform: "anthropic",
+        type: "oauth",
+        priority: 1,
+      });
+
+    const attempt = vi.fn().mockResolvedValue("legacy-ok");
+
+    const out = await runFailover({
+      db: db as never,
+      orgId,
+      teamId: null,
+      // groupId omitted on purpose
+      maxSwitches: 5,
+      attempt,
+    });
+
+    expect(out).toBe("legacy-ok");
     expect(attempt).toHaveBeenCalledTimes(1);
   });
 });

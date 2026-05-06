@@ -60,6 +60,19 @@ export interface RunFailoverInput<T> {
   db: Database;
   orgId: string;
   teamId: string | null;
+  /**
+   * AccountGroup the inbound api-key is bound to. When set, scheduler
+   * `select` joins via `account_group_members` and filters to the
+   * group's platform — preventing cross-platform credential leaks
+   * (e.g. `/v1/messages` on an anthropic key picking an OpenAI account
+   * because the legacy fallback didn't filter by platform).
+   *
+   * `null` is a real value (not a missing-context sentinel): legacy
+   * api-keys without `group_id` opt into org-wide selection. Routes
+   * that want strict platform isolation should ensure the api-key
+   * has a group binding before reaching here.
+   */
+  groupId?: string | null;
   maxSwitches: number;
   attempt: (account: SelectedAccount) => Promise<T>;
   /** Inject for tests so we can fast-forward backoffs. Defaults to setTimeout. */
@@ -101,6 +114,7 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
       scheduled = await scheduler.select({
         orgId: input.orgId,
         teamId: input.teamId,
+        groupId: input.groupId ?? undefined,
         excludedAccountIds: failedSet,
       });
     } catch (err) {

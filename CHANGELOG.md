@@ -5,6 +5,27 @@ All notable changes to aide are documented here. Format loosely follows
 releases are tagged `vX.Y.Z`; each tag publishes multi-arch images to
 `ghcr.io/hanfour/aide-{api,web,gateway}`.
 
+## Unreleased — pending v0.4.3
+
+### Bug fixes (gateway)
+
+- **#83** — `runFailover` now forwards the api-key's `groupId` to
+  `scheduler.select`, plugging a missing wiring that caused
+  cross-platform credential leaks. In a mixed-platform org (Anthropic
+  OAuth + OpenAI api_key), an `ak_…` key bound to the anthropic group
+  could end up dispatched against the OpenAI account because the
+  legacy fallback selected by priority only, not by platform. Symptom
+  was Anthropic 401 `invalid x-api-key` from `/v1/messages` even when
+  the OAuth token was valid (the OpenAI key got sent in the x-api-key
+  header to api.anthropic.com). Closes #81.
+  - All 12 route call-sites in `messages.ts`, `chatCompletions.ts`,
+    `responses.ts` updated to pass `groupId: req.apiKey.groupId ?? null`
+  - 2 regression tests added in `failoverLoop.integration.test.ts`
+  - Back-compat preserved: `groupId` omitted = legacy org-wide selection
+  - Operators with mixed-platform orgs SHOULD bind every api-key to a
+    group via the admin UI to avoid the legacy fallback, which is still
+    vulnerable when `groupId` is null
+
 ## Unreleased — Plan 4C: cost budget + facet enrichment (v0.5.0 candidate)
 
 All Plan 4C code is on `main` but not yet tagged. v0.5.0 will be cut once

@@ -168,6 +168,7 @@ export function makeChatCompletionsAnthropicHandler(
         db: app.db,
         orgId: req.apiKey.orgId,
         teamId: req.apiKey.teamId,
+        groupId: req.apiKey?.groupId ?? null,
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         attempt: async (account) => {
@@ -358,6 +359,7 @@ async function runChatCompletionsStreamingFailover(
       db: app.db,
       orgId: req.apiKey!.orgId,
       teamId: req.apiKey!.teamId,
+      groupId: req.apiKey?.groupId ?? null,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       attempt: async (account) => {
@@ -648,6 +650,7 @@ export function makeChatCompletionsOpenaiHandler(
         db: app.db,
         orgId: req.apiKey.orgId,
         teamId: req.apiKey.teamId,
+        groupId: req.apiKey?.groupId ?? null,
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         attempt: async (account) =>
@@ -796,6 +799,7 @@ async function runChatCompletionsOpenaiStreamingFailover(
       db: app.db,
       orgId: req.apiKey!.orgId,
       teamId: req.apiKey!.teamId,
+      groupId: req.apiKey?.groupId ?? null,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       attempt: async (account) =>
