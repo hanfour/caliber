@@ -33,6 +33,14 @@ x-app-env: &app-env
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
   API_KEY_HASH_PEPPER: ${API_KEY_HASH_PEPPER:-}
+  # Evaluator pipeline (Plan 4B/4C). Off by default — opting in
+  # enables the body-capture queue (gateway), the evaluator cron,
+  # the org `Evaluator` admin pages, and (if FACET_EXTRACTION too)
+  # LLM-based facet enrichment of captured bodies. Per-org capture
+  # toggle still requires an admin to flip `contentCaptureEnabled`
+  # on the org via the Evaluator → Settings page after these are on.
+  ENABLE_EVALUATOR: ${ENABLE_EVALUATOR:-false}
+  ENABLE_FACET_EXTRACTION: ${ENABLE_FACET_EXTRACTION:-false}
 
 services:
   postgres:
