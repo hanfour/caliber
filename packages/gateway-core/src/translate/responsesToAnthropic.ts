@@ -45,8 +45,10 @@ import type {
 //     uses it) but the field has no Anthropic counterpart and is dropped
 //     here.  The route handler is the layer that observes it for the
 //     scheduler before invoking translation.
-//   - `store=true` is now rejected by `ResponsesRequestSchema.strict()`
-//     at the schema layer, so the translator never sees it.
+//   - `store` is silently dropped by the route handler before Zod
+//     parsing (see SILENTLY_DROPPED_FIELDS in routes/responses.ts) so
+//     the translator never sees it. aide doesn't honour OpenAI's
+//     server-side response storage either way.
 
 const DEFAULT_MAX_TOKENS = 4096;
 

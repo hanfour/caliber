@@ -366,31 +366,40 @@ describe("/v1/responses", () => {
     await app.close();
   });
 
-  it("3. unsupported feature `store` → 400", async () => {
-    const orgId = await seedOrg();
-    const userId = await seedUser();
-    const rawKey = `ak_resp_store_${Math.random().toString(36).slice(2)}`;
-    await seedApiKey(orgId, userId, rawKey);
-    await seedAccount(
-      orgId,
-      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test" }),
-    );
+  it("3. `store` is silently dropped (codex CLI compat) — 200, not forwarded upstream", async () => {
+    // codex CLI / openai SDK send `store` unconditionally; aide doesn't
+    // honour OpenAI's server-side response storage either way, so the
+    // route strips the field before Zod parsing rather than 400-ing.
+    // Both true/false should pass through; neither should appear in
+    // the translated Anthropic body sent upstream.
+    for (const storeValue of [true, false]) {
+      const orgId = await seedOrg();
+      const userId = await seedUser();
+      const rawKey = `ak_resp_store_${storeValue}_${Math.random().toString(36).slice(2)}`;
+      await seedApiKey(orgId, userId, rawKey);
+      await seedAccount(
+        orgId,
+        JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test" }),
+      );
 
-    const redis = makeRedisMock();
-    const app = await makeApp(redis, container.getConnectionUri());
+      const redis = makeRedisMock();
+      const app = await makeApp(redis, container.getConnectionUri());
 
-    const res = await app.inject({
-      method: "POST",
-      url: "/v1/responses",
-      headers: { authorization: `Bearer ${rawKey}` },
-      payload: { ...validResponsesPayload, store: true },
-    });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({
-      error: "unsupported_feature",
-      field: "store",
-    });
-    await app.close();
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/responses",
+        headers: { authorization: `Bearer ${rawKey}` },
+        payload: { ...validResponsesPayload, store: storeValue },
+      });
+      expect(res.statusCode).toBe(200);
+
+      // Upstream Anthropic body must not carry the dropped field —
+      // translator never sees it, so it can't slip through.
+      expect(lastUpstreamRequest).not.toBeNull();
+      const upstreamBody = JSON.parse(lastUpstreamRequest!.body!);
+      expect(upstreamBody).not.toHaveProperty("store");
+      await app.close();
+    }
   });
 
   it("4. unsupported feature `parallel_tool_calls` → 400", async () => {

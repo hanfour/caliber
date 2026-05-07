@@ -85,13 +85,21 @@ export interface ResponsesRouteOptions {
  * so error messages name them, instead of "unrecognized_keys".
  */
 const EXPLICIT_UNSUPPORTED_FIELDS = [
-  "store",
   "parallel_tool_calls",
   "reasoning",
   "file_search",
   "code_interpreter",
   "computer_use",
 ] as const;
+
+/**
+ * Fields the gateway accepts for client compatibility but ignores
+ * before forwarding upstream. `store` is OpenAI's 30-day response
+ * storage flag — a server-side concern aide never honours either way,
+ * but codex CLI / openai SDK send it unconditionally. Stripping pre-
+ * Zod keeps `.strict()` from 400-ing on a no-op flag.
+ */
+const SILENTLY_DROPPED_FIELDS = ["store"] as const;
 
 /**
  * Core handler for the OpenAI Responses surface — exported so the
@@ -124,10 +132,19 @@ export function makeResponsesRouteHandler(
       return;
     }
 
+    // Strip no-op fields some clients send unconditionally (codex CLI's
+    // `store`) before they hit `.strict()`. Done first so the explicit
+    // reject list and Zod see the same body the gateway will actually
+    // process.
+    const sanitizedBody: Record<string, unknown> = { ...rawBody };
+    for (const key of SILENTLY_DROPPED_FIELDS) {
+      delete sanitizedBody[key];
+    }
+
     // Surface the design-A6 reject list with clear field names before
     // Zod's "unrecognized_keys" — friendlier for curl users.
     for (const key of EXPLICIT_UNSUPPORTED_FIELDS) {
-      if (rawBody[key] !== undefined) {
+      if (sanitizedBody[key] !== undefined) {
         reply.code(400).send({
           error: "unsupported_feature",
           field: key,
@@ -136,7 +153,7 @@ export function makeResponsesRouteHandler(
       }
     }
 
-    const parsed = ResponsesRequestSchema.safeParse(rawBody);
+    const parsed = ResponsesRequestSchema.safeParse(sanitizedBody);
     if (!parsed.success) {
       reply.code(400).send({
         error: "invalid_request",
