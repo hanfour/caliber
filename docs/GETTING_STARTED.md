@@ -477,6 +477,61 @@ docker compose --profile gateway down -v   # stop + WIPE DB (forces full re-onbo
 > Lock Screen*, or run `caffeinate -d -i &` in any terminal — both keep
 > the host awake (at the cost of battery if not plugged in).
 
+### Quality of life: lifecycle aliases
+
+Typing the multi-step `cd … && docker compose …` chain every time gets
+old. Drop these three helpers into the host Mac's `~/.zshrc` (or
+`~/.bashrc`) so day-2 collapses to a single `aide-up`:
+
+```bash
+# ── aide gateway lifecycle ─────────────────────────────────────────
+export AIDE_DIR="$HOME/path/to/aide/docker"     # ← edit to your checkout
+
+aide-up() {
+  (cd "$AIDE_DIR" && docker compose --profile gateway up -d) && \
+  sleep 6 && \
+  curl -sS -o /dev/null -w "gateway: HTTP %{http_code}\n" \
+    http://localhost:3002/health && \
+  pgrep -qf 'caffeinate -d -i' || (caffeinate -d -i &) && \
+  echo "✅ aide up + caffeinate keeping mac awake"
+}
+
+aide-down() {
+  pkill -f 'caffeinate -d -i' 2>/dev/null
+  (cd "$AIDE_DIR" && docker compose --profile gateway down)
+  echo "✅ aide down + caffeinate killed (mac can sleep again)"
+}
+
+aide-status() {
+  (cd "$AIDE_DIR" && docker compose ps \
+    --format 'table {{.Name}}\t{{.Status}}')
+  echo
+  curl -sS -o /dev/null -w "gateway: HTTP %{http_code}\n" \
+    http://localhost:3002/health 2>&1
+  pgrep -qf 'caffeinate -d -i' \
+    && echo "caffeinate: running" \
+    || echo "caffeinate: not running"
+}
+```
+
+`source ~/.zshrc` once, then:
+
+| Command | Behaviour |
+|---|---|
+| `aide-up` | Boots the stack, waits ~6s, prints gateway health, ensures `caffeinate` is running so other devices stay reachable |
+| `aide-down` | Stops the stack (keeps DB volume) and kills `caffeinate` so the Mac can sleep |
+| `aide-status` | Prints container state + gateway HTTP code + caffeinate status |
+
+DB volume is preserved across `aide-down`/`aide-up` cycles, so user,
+org, OAuth account, and `ak_…` keys all stay intact — no re-onboarding.
+
+> **Want auto-start on Mac login** instead of typing `aide-up` after
+> every reboot? Add a launchd agent at
+> `~/Library/LaunchAgents/com.<you>.aide.plist` that invokes
+> `aide-up`. Most operators find the explicit alias more intuitive
+> (you control when the stack runs) but the LaunchAgent path is there
+> if you want the gateway always available.
+
 ---
 
 ## Troubleshooting
