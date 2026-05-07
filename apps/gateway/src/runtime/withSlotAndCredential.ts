@@ -75,6 +75,7 @@ export async function withSlotAndCredential<T>(
           masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
           leadMinutes: opts.env.GATEWAY_OAUTH_REFRESH_LEAD_MIN,
           maxFail: opts.env.GATEWAY_OAUTH_MAX_FAIL,
+          tokenUrl: opts.env.GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL,
         },
       );
     }

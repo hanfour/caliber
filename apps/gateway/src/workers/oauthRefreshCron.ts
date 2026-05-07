@@ -18,7 +18,9 @@ const LOCK_TTL_SEC = 30;
 /** Hardcoded per design §5.2 — cron polls more aggressively than inline refresh. */
 const LEAD_MINUTES_CRON = 10;
 const DEFAULT_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const DEFAULT_TOKEN_URL = "https://api.anthropic.com/oauth/token";
+// Keep in sync with runtime/oauthRefresh.ts. Override via env
+// GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL.
+const DEFAULT_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
 
 export interface CronOptions extends Pick<
   OAuthRefreshOptions,

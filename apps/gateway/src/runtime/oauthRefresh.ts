@@ -15,8 +15,14 @@ const LOCK_TTL_SEC = 30;
 const POLL_INTERVAL_MS = 200;
 const POLL_MAX_MS = 30_000;
 
-const DEFAULT_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const DEFAULT_TOKEN_URL = "https://api.anthropic.com/oauth/token";
+export const DEFAULT_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+// Default refresh endpoint for Claude Max OAuth bundles. Anthropic has
+// shuffled this between api.anthropic.com → console.anthropic.com → in
+// some recent docs platform.claude.com; the path also gained a `/v1/`.
+// Operators can override via env GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL when
+// it moves again. Wrong URL surfaces as upstream 404 not_found_error
+// → fail_count increments → account auto-paused on the third failure.
+export const DEFAULT_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
 
 export class OAuthRefreshError extends Error {
   constructor(

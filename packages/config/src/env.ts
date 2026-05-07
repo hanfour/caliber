@@ -124,6 +124,20 @@ export const serverEnvSchema = z
     GATEWAY_OAUTH_MAX_FAIL: emptyAsUndefined(
       z.coerce.number().int().min(1).default(3),
     ),
+    /**
+     * OAuth token-refresh endpoint for anthropic (Claude Max / Claude.ai
+     * subscription bundles). Anthropic has historically moved this URL
+     * around (api.anthropic.com vs console.anthropic.com vs platform.
+     * claude.com, with/without /v1/ prefix), so it's an env knob to
+     * avoid needing a code change + redeploy when they pivot again.
+     * Default points at the currently-working endpoint as of mid-2026.
+     */
+    GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL: emptyAsUndefined(
+      z
+        .string()
+        .url()
+        .default("https://console.anthropic.com/v1/oauth/token"),
+    ),
     GATEWAY_QUEUE_SATURATE_THRESHOLD: emptyAsUndefined(
       z.coerce.number().int().min(1).default(5000),
     ),
