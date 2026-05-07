@@ -37,6 +37,7 @@ import {
 import {
   serializeAnthropicSseError,
   respondStreamFailoverCollapse,
+  fatalUpstreamReplyBody,
 } from "../runtime/sseErrorEvents.js";
 import { autoRoute } from "./dispatch.js";
 import {
@@ -78,6 +79,15 @@ class CapacityError extends Error {
  * Body unchanged from the original inline handler; the only difference
  * is that it returns a closure instead of being registered directly.
  */
+/**
+ * Top-level fields client SDKs add for their own bookkeeping but the
+ * anthropic OAuth Messages API rejects with `Extra inputs are not
+ * permitted`. Stripped before forwarding upstream. Mirrors the
+ * SILENTLY_DROPPED_FIELDS pattern in routes/responses.ts (codex CLI
+ * compat). Override via env when anthropic adds support upstream.
+ */
+const ANTHROPIC_SILENTLY_DROPPED_FIELDS = ["context_management"] as const;
+
 export function makeMessagesAnthropicHandler(
   app: FastifyInstance,
   opts: MessagesRouteOptions,
@@ -105,7 +115,19 @@ export function makeMessagesAnthropicHandler(
 
     const isStream = body.stream === true;
     const requestId = req.id; // Fastify auto-generates UUID per request.
-    const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
+
+    // Strip client-side fields that the OAuth upstream rejects with
+    // `Extra inputs are not permitted`. claude code CLI sends
+    // `context_management` (its own context-window-trimming hint)
+    // unconditionally, but the anthropic Messages API doesn't accept
+    // it on the OAuth path. Without stripping, every claude code
+    // request → 400 invalid_request_error → unusable through aide.
+    // Mirrors the codex CLI compat strategy on /v1/responses.
+    const sanitizedBody: Record<string, unknown> = { ...body };
+    for (const key of ANTHROPIC_SILENTLY_DROPPED_FIELDS) {
+      delete sanitizedBody[key];
+    }
+    const upstreamBodyBuf = Buffer.from(JSON.stringify(sanitizedBody));
 
     // Phase 3 #2 — response cache for non-streaming requests. Disabled
     // when GATEWAY_CACHE_TTL_SEC=0 (default).  Scope `v1/messages`
@@ -179,10 +201,9 @@ export function makeMessagesAnthropicHandler(
         return;
       }
       if (err instanceof FatalUpstreamError) {
-        reply.code(err.statusCode).send({
-          error: err.reason,
-          request_id: requestId,
-        });
+        reply
+          .code(err.statusCode)
+          .send(fatalUpstreamReplyBody(err, requestId));
         return;
       }
       throw err;
@@ -699,14 +720,19 @@ async function runStreamingFailover(
         return;
       }
       const status = err instanceof FatalUpstreamError ? err.statusCode : 503;
-      const reason =
-        err instanceof FatalUpstreamError
-          ? err.reason
-          : err instanceof AllUpstreamsFailed && err.attemptedIds.length === 0
-            ? "no_upstream_available"
-            : "all_upstreams_failed";
       reply.raw.writeHead(status, { "content-type": "application/json" });
-      reply.raw.end(JSON.stringify({ error: reason, request_id: requestId }));
+      const body =
+        err instanceof FatalUpstreamError
+          ? fatalUpstreamReplyBody(err, requestId)
+          : {
+              error:
+                err instanceof AllUpstreamsFailed &&
+                err.attemptedIds.length === 0
+                  ? "no_upstream_available"
+                  : "all_upstreams_failed",
+              request_id: requestId,
+            };
+      reply.raw.end(JSON.stringify(body));
     } else {
       try {
         reply.raw.write(
@@ -979,10 +1005,9 @@ export function makeMessagesOpenaiHandler(
         return;
       }
       if (err instanceof FatalUpstreamError) {
-        reply.code(err.statusCode).send({
-          error: err.reason,
-          request_id: requestId,
-        });
+        reply
+          .code(err.statusCode)
+          .send(fatalUpstreamReplyBody(err, requestId));
         return;
       }
       throw err;

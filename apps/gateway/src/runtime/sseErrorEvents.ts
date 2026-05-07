@@ -27,6 +27,36 @@ import {
   FatalUpstreamError,
 } from "./failoverLoop.js";
 
+/**
+ * Pulls the upstream body off a FatalUpstreamError when failover
+ * preserved it on `cause`. Returns undefined for AllUpstreamsFailed
+ * (no single upstream's body to surface) or when cause was not set.
+ */
+function fatalUpstreamDetail(err: unknown): string | undefined {
+  if (err instanceof FatalUpstreamError && err.cause instanceof Error) {
+    return err.cause.message;
+  }
+  return undefined;
+}
+
+/**
+ * Build the JSON body the non-stream route catches send back when
+ * failover terminates with a FatalUpstreamError. Centralised so the
+ * `detail` (upstream body) is consistent across /v1/messages,
+ * /v1/chat/completions, /v1/responses.
+ */
+export function fatalUpstreamReplyBody(
+  err: FatalUpstreamError,
+  requestId: string,
+): { error: string; detail?: string; request_id: string } {
+  const detail = fatalUpstreamDetail(err);
+  return {
+    error: err.reason,
+    ...(detail !== undefined ? { detail } : {}),
+    request_id: requestId,
+  };
+}
+
 /** Anthropic Messages SSE error event (`/v1/messages` openai-stream). */
 export function serializeAnthropicSseError(
   errType: string,
@@ -75,7 +105,12 @@ export function failoverErrorPair(
   err: AllUpstreamsFailed | FatalUpstreamError,
 ): { kind: string; message: string } {
   if (err instanceof FatalUpstreamError) {
-    return { kind: err.reason, message: err.message };
+    // Prefer the upstream body (preserved on cause by failoverLoop) over
+    // the wrapper's synthetic "fatal upstream: …" message — clients
+    // need the actual `invalid_request_error` / `rate_limit_error`
+    // text to act on.
+    const detail = fatalUpstreamDetail(err);
+    return { kind: err.reason, message: detail ?? err.message };
   }
   return {
     kind: "all_upstreams_failed",
@@ -126,15 +161,11 @@ export function respondStreamFailoverCollapse(
         err instanceof FatalUpstreamError ? err.statusCode : 503,
         { "content-type": "application/json" },
       );
-      reply.raw.end(
-        JSON.stringify({
-          error:
-            err instanceof FatalUpstreamError
-              ? err.reason
-              : "all_upstreams_failed",
-          request_id: requestId,
-        }),
-      );
+      const body =
+        err instanceof FatalUpstreamError
+          ? fatalUpstreamReplyBody(err, requestId)
+          : { error: "all_upstreams_failed", request_id: requestId };
+      reply.raw.end(JSON.stringify(body));
     }
     return;
   }

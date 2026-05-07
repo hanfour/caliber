@@ -162,10 +162,24 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
             );
           }
           await giveUp(false);
+          // Preserve the upstream body / message on the cause so route
+          // catches can surface it to the client. The classifier strips
+          // it down to a generic `reason` label (e.g. "client_error"),
+          // which obscures actionable detail like anthropic's
+          // `invalid_request_error: stream is required for ...`.
+          const cause =
+            rawErr instanceof Error
+              ? rawErr
+              : (() => {
+                  const m = (rawErr as { message?: unknown })?.message;
+                  return new Error(
+                    typeof m === "string" ? m : String(rawErr),
+                  );
+                })();
           throw new FatalUpstreamError(
             action.statusCode,
             action.reason,
-            rawErr instanceof Error ? rawErr : undefined,
+            cause,
           );
         }
 

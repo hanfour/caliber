@@ -38,6 +38,7 @@ import { buildUpstreamHttpError } from "../runtime/upstreamErrorMapping.js";
 import {
   serializeChatSseError,
   respondStreamFailoverCollapse,
+  fatalUpstreamReplyBody,
 } from "../runtime/sseErrorEvents.js";
 import { autoRoute } from "./dispatch.js";
 
@@ -317,10 +318,9 @@ export function makeChatCompletionsAnthropicHandler(
         return;
       }
       if (err instanceof FatalUpstreamError) {
-        reply.code(err.statusCode).send({
-          error: err.reason,
-          request_id: requestId,
-        });
+        reply
+          .code(err.statusCode)
+          .send(fatalUpstreamReplyBody(err, requestId));
         return;
       }
       throw err; // unexpected — let Fastify default 500 handler take it
@@ -765,10 +765,9 @@ export function makeChatCompletionsOpenaiHandler(
         return;
       }
       if (err instanceof FatalUpstreamError) {
-        reply.code(err.statusCode).send({
-          error: err.reason,
-          request_id: requestId,
-        });
+        reply
+          .code(err.statusCode)
+          .send(fatalUpstreamReplyBody(err, requestId));
         return;
       }
       throw err;

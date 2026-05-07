@@ -57,6 +57,7 @@ import { buildUpstreamHttpError } from "../runtime/upstreamErrorMapping.js";
 import {
   serializeResponsesSseError,
   respondStreamFailoverCollapse,
+  fatalUpstreamReplyBody,
 } from "../runtime/sseErrorEvents.js";
 import type {
   NonStreamUpstreamResult,
@@ -419,10 +420,9 @@ export function makeResponsesRouteHandler(
         return;
       }
       if (err instanceof FatalUpstreamError) {
-        reply.code(err.statusCode).send({
-          error: err.reason,
-          request_id: requestId,
-        });
+        reply
+          .code(err.statusCode)
+          .send(fatalUpstreamReplyBody(err, requestId));
         return;
       }
       throw err;
@@ -787,10 +787,9 @@ async function runOpenaiResponsesPassthroughFailover(
       return;
     }
     if (err instanceof FatalUpstreamError) {
-      reply.code(err.statusCode).send({
-        error: err.reason,
-        request_id: requestId,
-      });
+      reply
+        .code(err.statusCode)
+        .send(fatalUpstreamReplyBody(err, requestId));
       return;
     }
     throw err;
