@@ -13,7 +13,7 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": ["dist", "pricing"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "tsc --noEmit",
