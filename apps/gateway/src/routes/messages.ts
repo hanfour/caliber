@@ -516,6 +516,7 @@ async function runStreamingFailover(
               masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
               leadMinutes: opts.env.GATEWAY_OAUTH_REFRESH_LEAD_MIN,
               maxFail: opts.env.GATEWAY_OAUTH_MAX_FAIL,
+              tokenUrl: opts.env.GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL,
             },
           );
         }
@@ -548,7 +549,16 @@ async function runStreamingFailover(
         // Tap the extractor BEFORE SmartBuffer so usage extraction runs on the
         // raw bytes regardless of buffer state (buffering vs passthrough).
         for await (const chunk of upstream.body) {
-          if (req.raw.destroyed) {
+          // Detect client disconnect via the *response* socket: in
+          // fastify under keep-alive, the parsed POST request's
+          // `req.raw` is destroyed as soon as the body finishes
+          // streaming in (handler runs *after* body parse), so
+          // `req.raw.destroyed` would be true on every streaming
+          // response — false-positive that aborts the very first
+          // chunk's flush. The reply's raw ServerResponse only goes
+          // destroyed when the underlying socket actually closes,
+          // which is the disconnect signal we actually want.
+          if (reply.raw.destroyed) {
             // Client disconnected mid-stream. We still emit a usage log so the
             // partial work is visible (forensic + quota semantics: upstream
             // consumed tokens, so the user pays). Status 499 reflects the

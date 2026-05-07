@@ -12,6 +12,15 @@
  * NOTE: Client-disconnect (AbortSignal) is not testable via app.inject because
  * inject does not expose a way to close mid-stream. Covered by SmartBuffer unit
  * tests and manual integration testing.
+ *
+ * NOTE (#88): app.inject also does not exercise the real `req.raw` /
+ * `reply.raw` socket pair — the disconnect-detection path inside the
+ * for-await stream loop is not reached during inject runs. The bug fixed
+ * by switching `req.raw.destroyed` → `reply.raw.destroyed` (every
+ * streaming request returned 0 bytes under fastify keep-alive) shipped
+ * green here. Until a listen-based regression test exists, reviewers
+ * should grep for `req.raw.destroyed` in stream paths — if it's back,
+ * the bug is back.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
