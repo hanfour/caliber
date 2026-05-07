@@ -486,17 +486,20 @@ old. Drop these three helpers into the host Mac's `~/.zshrc` (or
 ```bash
 # ── aide gateway lifecycle ─────────────────────────────────────────
 export AIDE_DIR="$HOME/path/to/aide/docker"     # ← edit to your checkout
+export AIDE_PORT="3002"                         # ← match GATEWAY_PORT in .env
 
 aide-up() {
-  (cd "$AIDE_DIR" && docker compose --profile gateway up -d) && \
-  sleep 6 && \
+  (cd "$AIDE_DIR" && docker compose --profile gateway up -d) || return 1
+  sleep 6
   curl -sS -o /dev/null -w "gateway: HTTP %{http_code}\n" \
-    http://localhost:3002/health && \
-  pgrep -qf 'caffeinate -d -i' || (caffeinate -d -i &) && \
+    "http://localhost:${AIDE_PORT}/health"
+  pgrep -qf 'caffeinate -d -i' >/dev/null 2>&1 || (caffeinate -d -i &)
   echo "✅ aide up + caffeinate keeping mac awake"
 }
 
 aide-down() {
+  # Kills ANY `caffeinate -d -i` — if you run caffeinate for another
+  # purpose, narrow this filter or stop that process separately.
   pkill -f 'caffeinate -d -i' 2>/dev/null
   (cd "$AIDE_DIR" && docker compose --profile gateway down)
   echo "✅ aide down + caffeinate killed (mac can sleep again)"
@@ -507,7 +510,7 @@ aide-status() {
     --format 'table {{.Name}}\t{{.Status}}')
   echo
   curl -sS -o /dev/null -w "gateway: HTTP %{http_code}\n" \
-    http://localhost:3002/health 2>&1
+    "http://localhost:${AIDE_PORT}/health" 2>&1
   pgrep -qf 'caffeinate -d -i' \
     && echo "caffeinate: running" \
     || echo "caffeinate: not running"
@@ -525,12 +528,11 @@ aide-status() {
 DB volume is preserved across `aide-down`/`aide-up` cycles, so user,
 org, OAuth account, and `ak_…` keys all stay intact — no re-onboarding.
 
-> **Want auto-start on Mac login** instead of typing `aide-up` after
-> every reboot? Add a launchd agent at
-> `~/Library/LaunchAgents/com.<you>.aide.plist` that invokes
-> `aide-up`. Most operators find the explicit alias more intuitive
-> (you control when the stack runs) but the LaunchAgent path is there
-> if you want the gateway always available.
+> **Auto-start on Mac login** is left as an exercise — launchd plists
+> invoke binaries (not zsh functions), so you'd wrap `aide-up` in a
+> standalone script and reference that script from the plist. Most
+> operators find the explicit alias more intuitive anyway: you control
+> when the stack (and its battery cost) is running.
 
 ---
 
