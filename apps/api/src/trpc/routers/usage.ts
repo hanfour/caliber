@@ -131,8 +131,15 @@ function resolveWindow(
 // Subset of usage_logs columns surfaced by `list`. PII columns (userAgent,
 // ipAddress) and the oversized failedAccountIds array are intentionally
 // omitted — they're useful only for incident response, not drill-down.
+//
+// `id` cast to text: drizzle returns Postgres `bigint` as a JS BigInt,
+// which the default JSON serializer in tRPC trips on with
+// `Do not know how to serialize a BigInt`. Cast at the SQL boundary
+// rather than wrapping every consumer in BigInt-aware serialization;
+// the id is only used as an opaque key on the client (drill-down,
+// React keys), so a string is fine.
 const listColumns = {
-  id: usageLogs.id,
+  id: sql<string>`${usageLogs.id}::text`.as("id"),
   requestId: usageLogs.requestId,
   userId: usageLogs.userId,
   apiKeyId: usageLogs.apiKeyId,

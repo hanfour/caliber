@@ -17,6 +17,22 @@ x-app-env: &app-env
   BOOTSTRAP_SUPER_ADMIN_EMAIL: ${BOOTSTRAP_SUPER_ADMIN_EMAIL:?required}
   BOOTSTRAP_DEFAULT_ORG_SLUG: ${BOOTSTRAP_DEFAULT_ORG_SLUG:?required}
   BOOTSTRAP_DEFAULT_ORG_NAME: ${BOOTSTRAP_DEFAULT_ORG_NAME:?required}
+  # Surfaces gateway-aware UI + tRPC routes (usage, accounts, api-keys,
+  # account-groups). Without this, api+web see ENABLE_GATEWAY=false and
+  # gateway-aware routers short-circuit to NOT_FOUND, leaving the
+  # dashboard pages mysteriously blank even when the gateway service
+  # is up and writing usage_logs rows. Default false so the api+web-only
+  # base profile still boots cleanly.
+  ENABLE_GATEWAY: ${ENABLE_GATEWAY:-false}
+  # When ENABLE_GATEWAY=true, parseServerEnv requires these four to be
+  # present on every service that imports @aide/config (api, web, and
+  # gateway), not just the gateway container. Defaults are empty so
+  # base-profile boots stay clean — when gateway is on, .env supplies
+  # real values.
+  GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+  API_KEY_HASH_PEPPER: ${API_KEY_HASH_PEPPER:-}
 
 services:
   postgres:
