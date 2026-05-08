@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge, deriveAccountStatus } from "./status";
+import { ReonboardDialog } from "./ReonboardDialog";
 
 type AccountRow = inferRouterOutputs<AppRouter>["accounts"]["list"][number];
 
@@ -32,6 +33,7 @@ interface AccountRowActionsProps {
   row: AccountRow;
   orgId: string;
   onDelete: (row: AccountRow) => void;
+  onReonboard: (row: AccountRow) => void;
   isDeleting: boolean;
 }
 
@@ -39,12 +41,14 @@ function AccountRowActions({
   row,
   orgId,
   onDelete,
+  onReonboard,
   isDeleting,
 }: AccountRowActionsProps) {
   const { can } = usePermissions();
   const canRotate = can({ type: "account.rotate", orgId, accountId: row.id });
   const canUpdate = can({ type: "account.update", orgId, accountId: row.id });
   const canDelete = can({ type: "account.delete", orgId, accountId: row.id });
+  const canReonboard = canRotate && row.type === "oauth";
 
   // If the caller has no row-level actions at all, render nothing rather than
   // a dead trigger.
@@ -72,11 +76,21 @@ function AccountRowActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {/* Re-onboard (OAuth-only): rotates a fresh Keychain bundle in *and*
+            resets failure state so the scheduler picks the account back up.
+            Use this when invalid_grant has auto-paused the account or just
+            to refresh expiring credentials. */}
+        {canReonboard && (
+          <DropdownMenuItem onSelect={() => onReonboard(row)}>
+            <Key className="h-4 w-4" />
+            Re-onboard from Keychain
+          </DropdownMenuItem>
+        )}
         {/* Rotate + Edit flows land in a follow-up PR. Kept disabled here so
             the eventual affordance has a stable slot and permissioned admins
             can see the feature is planned (rather than a toast that reads as
             user error). */}
-        {canRotate && (
+        {canRotate && row.type !== "oauth" && (
           <DropdownMenuItem disabled>
             <Key className="h-4 w-4" />
             Rotate credentials
@@ -124,6 +138,10 @@ export function AccountList({ orgId }: AccountListProps) {
     error,
   } = trpc.accounts.list.useQuery({ orgId });
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reonboardingAccount, setReonboardingAccount] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const del = trpc.accounts.delete.useMutation({
     onSuccess: () => {
@@ -227,18 +245,35 @@ export function AccountList({ orgId }: AccountListProps) {
         <Card className="shadow-card border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-700/60 dark:bg-amber-950/40">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 flex-none text-amber-600 dark:text-amber-400" />
-            <div className="space-y-1">
-              <p className="font-semibold text-amber-900 dark:text-amber-200">
-                {invalidGrantAccounts.length === 1
-                  ? `OAuth credentials for "${invalidGrantAccounts[0]!.name}" need re-onboarding`
-                  : `${invalidGrantAccounts.length} OAuth accounts need re-onboarding`}
-              </p>
-              <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
-                The refresh token was rotated by another process (the Claude
-                Code app on the host, or another aide instance). aide cannot
-                refresh on its own — extract a fresh bundle from your
-                Keychain and rotate the credential to recover.
-              </p>
+            <div className="flex-1 space-y-2">
+              <div className="space-y-1">
+                <p className="font-semibold text-amber-900 dark:text-amber-200">
+                  {invalidGrantAccounts.length === 1
+                    ? `OAuth credentials for "${invalidGrantAccounts[0]!.name}" need re-onboarding`
+                    : `${invalidGrantAccounts.length} OAuth accounts need re-onboarding`}
+                </p>
+                <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
+                  The refresh token was rotated by another process (the
+                  Claude Code app on the host, or another aide instance).
+                  aide cannot refresh on its own — extract a fresh bundle
+                  from your Keychain and rotate the credential to recover.
+                </p>
+              </div>
+              {invalidGrantAccounts.length === 1 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-amber-400 bg-amber-100/40 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/30 dark:hover:bg-amber-900/40"
+                  onClick={() =>
+                    setReonboardingAccount({
+                      id: invalidGrantAccounts[0]!.id,
+                      name: invalidGrantAccounts[0]!.name,
+                    })
+                  }
+                >
+                  Re-onboard from Keychain
+                </Button>
+              )}
             </div>
           </div>
         </Card>
@@ -309,6 +344,9 @@ export function AccountList({ orgId }: AccountListProps) {
                       row={row}
                       orgId={orgId}
                       onDelete={handleDelete}
+                      onReonboard={(r) =>
+                        setReonboardingAccount({ id: r.id, name: r.name })
+                      }
                       isDeleting={deletingId === row.id}
                     />
                   </td>
@@ -318,6 +356,11 @@ export function AccountList({ orgId }: AccountListProps) {
           </tbody>
         </table>
       </Card>
+      <ReonboardDialog
+        account={reonboardingAccount}
+        orgId={orgId}
+        onClose={() => setReonboardingAccount(null)}
+      />
     </div>
   );
 }
