@@ -280,7 +280,11 @@ describe("maybeRefreshOAuth", () => {
     expect(acctRow!.lastError).toBeNull();
   });
 
-  it("3. winner: token endpoint returns 400 → recordFailure increments fail_count + last_error set; throws OAuthRefreshError; lock released", async () => {
+  it("3. winner: token endpoint returns 400 invalid_grant → immediate auto-pause regardless of fail_count (issue #92)", async () => {
+    // Issue #92 sub-task 2: invalid_grant means the refresh_token has been
+    // rotated externally (Claude Code app on the same host, etc.) and is
+    // unrecoverable until operator re-onboards. One strike → status=error,
+    // schedulable=false, no point counting toward maxFail gradually.
     const acct = await seedAccount({ failCount: 0 });
     const expiresAt = staleExpiresAt();
     await seedVault(acct.id, {
@@ -316,17 +320,125 @@ describe("maybeRefreshOAuth", () => {
         failCount: upstreamAccounts.oauthRefreshFailCount,
         lastError: upstreamAccounts.oauthRefreshLastError,
         status: upstreamAccounts.status,
+        schedulable: upstreamAccounts.schedulable,
+        tempUnschedulableReason: upstreamAccounts.tempUnschedulableReason,
       })
       .from(upstreamAccounts)
       .where(eq(upstreamAccounts.id, acct.id));
-    expect(acctRow!.failCount).toBe(1);
+    // Auto-paused immediately
+    expect(acctRow!.status).toBe("error");
+    expect(acctRow!.schedulable).toBe(false);
+    expect(acctRow!.tempUnschedulableReason).toBe("oauth_invalid_grant");
+    // failCount bumped to maxFail for audit visibility ("3+ failures" badge)
+    expect(acctRow!.failCount).toBeGreaterThanOrEqual(3);
     expect(acctRow!.lastError).toBeTruthy();
-    expect(acctRow!.status).toBe("active"); // under maxFail threshold
 
-    // Lock must be released
+    // Refresh lock must be released
     const lockKey = `oauth-refresh:${acct.id}`;
     const exists = await redis.exists(lockKey);
     expect(exists).toBe(0);
+    // Backoff lock must be set so subsequent attempts skip
+    const backoffExists = await redis.exists(`oauth-backoff:${acct.id}`);
+    expect(backoffExists).toBe(1);
+  });
+
+  it("3a. 429 rate_limited → does NOT increment fail_count, sets exponential-backoff lock (issue #92)", async () => {
+    const acct = await seedAccount({ failCount: 0 });
+    const expiresAt = staleExpiresAt();
+    await seedVault(acct.id, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      expiresAt,
+    });
+
+    nextTokenResponse = {
+      status: 429,
+      body: JSON.stringify({
+        error: { type: "rate_limit_error", message: "slow down" },
+      }),
+    };
+
+    const redis = makeRedis();
+    const currentCredential: Extract<ResolvedCredential, { type: "oauth" }> = {
+      type: "oauth",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      expiresAt,
+    };
+
+    await expect(
+      maybeRefreshOAuth(db as never, redis, acct.id, currentCredential, {
+        masterKeyHex: MASTER_KEY,
+        leadMinutes: 10,
+        maxFail: 3,
+        tokenUrl: tokenBaseUrl,
+      }),
+    ).rejects.toBeInstanceOf(OAuthRefreshError);
+
+    const [acctRow] = await db
+      .select({
+        failCount: upstreamAccounts.oauthRefreshFailCount,
+        status: upstreamAccounts.status,
+        schedulable: upstreamAccounts.schedulable,
+      })
+      .from(upstreamAccounts)
+      .where(eq(upstreamAccounts.id, acct.id));
+    // Account stays active — anthropic throttling is not the account's fault
+    expect(acctRow!.failCount).toBe(0);
+    expect(acctRow!.status).toBe("active");
+    expect(acctRow!.schedulable).toBe(true);
+    // But backoff lock must hold the next attempt off
+    const backoffTtl = await redis.ttl(`oauth-backoff:${acct.id}`);
+    expect(backoffTtl).toBeGreaterThan(0);
+    expect(backoffTtl).toBeLessThanOrEqual(120); // base 60s, may grow
+  });
+
+  it("3b. backoff lock held → maybeRefreshOAuth short-circuits, returns currentCredential unchanged (issue #92)", async () => {
+    const acct = await seedAccount({ failCount: 0 });
+    const expiresAt = staleExpiresAt();
+    await seedVault(acct.id, {
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      expiresAt,
+    });
+
+    const redis = makeRedis();
+    // Pre-set the lock as if a recent failure happened
+    await redis.set(`oauth-backoff:${acct.id}`, "1", "EX", 60);
+
+    // If anthropic were called this would 200 with a new token — but
+    // the backoff lock should prevent that.
+    nextTokenResponse = {
+      status: 200,
+      body: JSON.stringify({
+        access_token: "WOULD-NOT-SEE-THIS",
+        refresh_token: "ignored",
+        expires_in: 3600,
+      }),
+    };
+
+    const currentCredential: Extract<ResolvedCredential, { type: "oauth" }> = {
+      type: "oauth",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      expiresAt,
+    };
+
+    const got = await maybeRefreshOAuth(
+      db as never,
+      redis,
+      acct.id,
+      currentCredential,
+      {
+        masterKeyHex: MASTER_KEY,
+        leadMinutes: 10,
+        maxFail: 3,
+        tokenUrl: tokenBaseUrl,
+      },
+    );
+    // Returned the original credential, didn't touch the upstream
+    expect(got.accessToken).toBe("old-access");
+    expect(got.refreshToken).toBe("old-refresh");
   });
 
   it("4. 3 consecutive failures → fail_count=3 >= maxFail=3 → account marked status='error', schedulable=false", async () => {
