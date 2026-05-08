@@ -26,9 +26,9 @@
  * via SQL booleans and only formats the offending values as strings for
  * logging.
  *
- * Cron lifecycle mirrors `OAuthRefreshCron`: per-instance `start()` arms
- * a jittered first run, each tick re-arms with `intervalMs` (default 1h),
- * `runOnce()` is exposed for tests so the timer is not in the loop.
+ * Cron lifecycle: per-instance `start()` arms a jittered first run, each
+ * tick re-arms with `intervalMs` (default 1h), `runOnce()` is exposed
+ * for tests so the timer is not in the loop.
  */
 
 import { sql, type SQL } from "drizzle-orm";
@@ -57,8 +57,8 @@ const MAX_SAMPLE_RATIO = 100;
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /**
- * Pino-style logger surface used by the audit.  Mirrors `OAuthRefreshCron`
- * so we can pass `fastify.log` directly.
+ * Pino-style logger surface used by the audit, structurally compatible
+ * with `fastify.log` so we can pass it directly.
  */
 export interface BillingAuditLogger {
   info: (obj: unknown, msg?: string) => void;
