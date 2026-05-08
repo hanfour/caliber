@@ -12,7 +12,24 @@ import {
   type OAuthRefreshOptions,
 } from "../runtime/oauthRefresh.js";
 
-const CRON_INTERVAL_MS = 60_000;
+/**
+ * Adaptive cron tick rates (issue #92 sub-task 3).
+ *
+ * The original 60s fixed interval polls the DB and (potentially)
+ * anthropic regardless of how far away the next account expiry is.
+ * In a typical deployment with 1 account whose token lasts ~24h, that's
+ * 1380 redundant ticks per day. Worse: when the cron has nothing to
+ * do but logs every tick, operators get noise that makes real failures
+ * harder to spot.
+ *
+ * The new policy: peek at the next-expiring account's oauthExpiresAt
+ * before scheduling the next tick. If we're more than 30min away
+ * from the lead window, sleep up to MAX_TICK_MS. Otherwise stay at
+ * MIN_TICK_MS so we don't miss a refresh by undersleeping.
+ */
+const MIN_TICK_MS = 60_000; // when work is imminent
+const MAX_TICK_MS = 600_000; // when nothing is due for a long time
+const FAR_AWAY_THRESHOLD_MS = 30 * 60 * 1000;
 const JITTER_MAX_MS = 10_000;
 const LOCK_TTL_SEC = 30;
 /** Hardcoded per design §5.2 — cron polls more aggressively than inline refresh. */
@@ -123,6 +140,19 @@ export class OAuthRefreshCron {
     },
     now: () => number,
   ): Promise<"refreshed" | "skipped" | "failed"> {
+    // Issue #92 sub-task 4: respect the inline post-failure backoff
+    // lock too. Otherwise cron would keep retrying while inline path
+    // is correctly waiting (especially on 429 where failCount stays 0
+    // and the failCount-based backoff below never engages).
+    const inBackoff = await this.#redis.exists(keys.oauthBackoff(row.id));
+    if (inBackoff === 1) {
+      this.#opts.logger?.info(
+        { accountId: row.id },
+        "oauth refresh cron: post-failure backoff lock held — skipping",
+      );
+      return "skipped";
+    }
+
     // Exponential backoff: skip if too soon after last failure (2^fail_count * 60s)
     if (row.failCount > 0 && row.lastRunAt !== null) {
       const backoffMs = Math.pow(2, row.failCount) * 60 * 1000;
@@ -182,7 +212,14 @@ export class OAuthRefreshCron {
       );
       return "refreshed";
     } catch (err) {
-      await recordFailure(this.#db, row.id, err, this.#opts.maxFail, now);
+      await recordFailure(
+        this.#db,
+        this.#redis,
+        row.id,
+        err,
+        this.#opts.maxFail,
+        now,
+      );
       this.#opts.logger?.error(
         {
           accountId: row.id,
@@ -196,6 +233,72 @@ export class OAuthRefreshCron {
     }
   }
 
+  /**
+   * Compute the next tick delay (issue #92 sub-task 3). Reads the
+   * earliest oauthExpiresAt across schedulable oauth accounts and
+   * returns:
+   * - MIN_TICK_MS if any account is already inside / past the lead window
+   * - MIN_TICK_MS if the next expiry is within FAR_AWAY_THRESHOLD_MS
+   *   of the lead window (so we don't oversleep through it)
+   * - MAX_TICK_MS otherwise (idle-safe interval)
+   *
+   * Always with [0, JITTER_MAX_MS) jitter applied. Returns MIN_TICK_MS
+   * + jitter on any DB error (defensive — better to over-tick than
+   * miss a refresh).
+   */
+  async #computeNextTickMs(now: () => number): Promise<number> {
+    const jitter = (this.#opts.jitter ?? defaultJitter)();
+    try {
+      const [minRow] = await this.#db
+        .select({ oauthExpiresAt: credentialVault.oauthExpiresAt })
+        .from(upstreamAccounts)
+        .innerJoin(
+          credentialVault,
+          eq(credentialVault.accountId, upstreamAccounts.id),
+        )
+        .where(
+          and(
+            eq(upstreamAccounts.type, "oauth"),
+            eq(upstreamAccounts.schedulable, true),
+            isNull(upstreamAccounts.deletedAt),
+          ),
+        )
+        .orderBy(credentialVault.oauthExpiresAt)
+        .limit(1);
+
+      if (!minRow?.oauthExpiresAt) {
+        // No schedulable oauth accounts at all — sleep long.
+        return MAX_TICK_MS + jitter;
+      }
+
+      const leadWindowStart =
+        minRow.oauthExpiresAt.getTime() - LEAD_MINUTES_CRON * 60 * 1000;
+      const msUntilLeadWindow = leadWindowStart - now();
+      if (msUntilLeadWindow <= 0) {
+        // Already inside the lead window — tick min.
+        return MIN_TICK_MS + jitter;
+      }
+      if (msUntilLeadWindow <= FAR_AWAY_THRESHOLD_MS) {
+        // Approaching the lead window — tick min so we don't miss it.
+        return MIN_TICK_MS + jitter;
+      }
+      // Far away — sleep long, but cap at the time-to-lead-window so
+      // we wake up exactly at FAR_AWAY_THRESHOLD_MS before the window
+      // (modulo jitter).
+      const sleepMs = Math.min(
+        MAX_TICK_MS,
+        msUntilLeadWindow - FAR_AWAY_THRESHOLD_MS,
+      );
+      return Math.max(MIN_TICK_MS, sleepMs) + jitter;
+    } catch (err) {
+      this.#opts.logger?.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "oauth refresh cron: failed to compute next tick — defaulting to MIN",
+      );
+      return MIN_TICK_MS + jitter;
+    }
+  }
+
   async #tickAndSchedule(): Promise<void> {
     try {
       await this.runOnce();
@@ -206,9 +309,10 @@ export class OAuthRefreshCron {
       );
     }
     if (this.#handle !== null) {
+      const nextMs = await this.#computeNextTickMs(this.#opts.now ?? Date.now);
       this.#handle = setTimeout(() => {
         void this.#tickAndSchedule();
-      }, CRON_INTERVAL_MS);
+      }, nextMs);
     }
   }
 }

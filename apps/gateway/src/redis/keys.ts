@@ -14,6 +14,13 @@ export const keys = {
     `sticky:session:${groupId}:${sessionHash}`,
   state: (accountId: string) => `state:account:${accountId}`,
   oauthRefresh: (accountId: string) => `oauth-refresh:${accountId}`,
+  // Issue #92 sub-task 4 — per-account post-failure lock. SET on
+  // recordFailure with TTL = backoff seconds; checked at top of
+  // maybeRefreshOAuth. While present, the inline path skips refresh
+  // and treats the credential as "still fresh enough" (sends current
+  // access_token through; if upstream 401s, it'll be classified as
+  // a real failure rather than as a stale-token symptom).
+  oauthBackoff: (accountId: string) => `oauth-backoff:${accountId}`,
   // Phase 3 #4-b — fixed-bucket sliding-window rate limit on per-apiKey
   // request rate. `minuteBucket = floor(Date.now() / 60_000)`; the key
   // implicitly rotates every 60s, so we don't need cleanup.

@@ -375,6 +375,106 @@ export const accountsRouter = router({
       return { id: existing.id, rotatedAt };
     }),
 
+  /**
+   * Re-onboard an OAuth account after it was auto-paused by
+   * `oauth_invalid_grant` (issue #92 sub-task 2). Behaves like
+   * `rotate`, but additionally:
+   *
+   * - Resets oauth_refresh_fail_count to 0
+   * - Clears oauth_refresh_last_error / temp_unschedulable_reason /
+   *   temp_unschedulable_until
+   * - Sets status='active', schedulable=true
+   *
+   * Same RBAC + payload as rotate. Frontend uses this when surfacing
+   * the "OAuth bundle rotated externally" banner so operators have a
+   * one-click recovery instead of editing rows by hand.
+   */
+  reonboard: protectedProcedure
+    .input(
+      z.object({
+        id: uuid,
+        credentials: z.string().min(1).max(100_000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      ensureGatewayEnabled(ctx.env);
+      const masterKeyHex = requireMasterKeyHex(ctx.env);
+
+      const [existing] = await ctx.db
+        .select({
+          id: upstreamAccounts.id,
+          orgId: upstreamAccounts.orgId,
+          type: upstreamAccounts.type,
+        })
+        .from(upstreamAccounts)
+        .where(
+          and(
+            eq(upstreamAccounts.id, input.id),
+            isNull(upstreamAccounts.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      if (existing.type !== "oauth") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "reonboard only applies to oauth-type accounts",
+        });
+      }
+      if (
+        !can(ctx.perm, {
+          type: "account.rotate",
+          orgId: existing.orgId,
+          accountId: existing.id,
+        })
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      const oauthExpiresAt = parseOauthExpiresAt(input.credentials);
+      const sealed = encryptCredential({
+        masterKeyHex,
+        accountId: existing.id,
+        plaintext: buildCredentialPlaintext("oauth", input.credentials),
+      });
+
+      const rotatedAt = new Date();
+      const updated = await ctx.db
+        .update(credentialVault)
+        .set({
+          nonce: sealed.nonce,
+          ciphertext: sealed.ciphertext,
+          authTag: sealed.authTag,
+          oauthExpiresAt,
+          rotatedAt,
+        })
+        .where(eq(credentialVault.accountId, existing.id))
+        .returning({ id: credentialVault.id });
+      if (updated.length !== 1) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "credential_vault row missing for account",
+        });
+      }
+
+      // Reset failure state so the scheduler can pick this account
+      // back up immediately.
+      await ctx.db
+        .update(upstreamAccounts)
+        .set({
+          status: "active",
+          schedulable: true,
+          oauthRefreshFailCount: 0,
+          oauthRefreshLastError: null,
+          tempUnschedulableUntil: null,
+          tempUnschedulableReason: null,
+          updatedAt: rotatedAt,
+        })
+        .where(eq(upstreamAccounts.id, existing.id));
+
+      return { id: existing.id, rotatedAt };
+    }),
+
   delete: protectedProcedure
     .input(z.object({ id: uuid }))
     .mutation(async ({ ctx, input }) => {

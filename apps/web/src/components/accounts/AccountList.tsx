@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { MoreHorizontal, Key, Plus, ShieldAlert } from "lucide-react";
+import {
+  MoreHorizontal,
+  Key,
+  Plus,
+  ShieldAlert,
+  AlertTriangle,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
@@ -205,9 +211,38 @@ export function AccountList({ orgId }: AccountListProps) {
     );
   }
 
+  // Issue #92 sub-task 2: surface accounts auto-paused by
+  // `oauth_invalid_grant`. The refresh_token rotated externally
+  // (Claude Code app, another aide instance, …) and aide can no
+  // longer refresh on its own. Direct operator to re-onboard from
+  // Keychain instead of leaving the account silently dead.
+  const invalidGrantAccounts = accounts.filter(
+    (r) => r.tempUnschedulableReason === "oauth_invalid_grant",
+  );
+
   return (
     <div className="space-y-4">
       {headerCta}
+      {invalidGrantAccounts.length > 0 && (
+        <Card className="shadow-card border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-700/60 dark:bg-amber-950/40">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-none text-amber-600 dark:text-amber-400" />
+            <div className="space-y-1">
+              <p className="font-semibold text-amber-900 dark:text-amber-200">
+                {invalidGrantAccounts.length === 1
+                  ? `OAuth credentials for "${invalidGrantAccounts[0]!.name}" need re-onboarding`
+                  : `${invalidGrantAccounts.length} OAuth accounts need re-onboarding`}
+              </p>
+              <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
+                The refresh token was rotated by another process (the Claude
+                Code app on the host, or another aide instance). aide cannot
+                refresh on its own — extract a fresh bundle from your
+                Keychain and rotate the credential to recover.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
       <Card className="shadow-card overflow-hidden">
         <table className="w-full text-sm">
           <thead>
