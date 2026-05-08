@@ -12,6 +12,7 @@ import {
   router,
 } from "../procedures.js";
 import { assertTeamBelongsToOrg } from "./_shared.js";
+import { writeAudit } from "../../services/audit.js";
 
 const uuid = z.string().uuid();
 
@@ -179,6 +180,15 @@ export const apiKeysRouter = router({
       });
     }
 
+    await writeAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "api_key.issued_own",
+      targetType: "api_key",
+      targetId: row.id,
+      orgId,
+      metadata: { name: input.name, prefix: row.prefix, teamId: input.teamId ?? null },
+    });
+
     return { id: row.id, prefix: row.prefix, raw };
   }),
 
@@ -286,6 +296,20 @@ export const apiKeysRouter = router({
       });
     }
 
+    await writeAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "api_key.issued_for_user",
+      targetType: "api_key",
+      targetId: row.id,
+      orgId: input.orgId,
+      metadata: {
+        targetUserId: input.targetUserId,
+        name: input.name,
+        prefix: row.prefix,
+        teamId: input.teamId ?? null,
+      },
+    });
+
     return {
       id: row.id,
       prefix: row.prefix,
@@ -311,6 +335,7 @@ export const apiKeysRouter = router({
           id: apiKeys.id,
           prefix: apiKeys.keyPrefix,
           name: apiKeys.name,
+          orgId: apiKeys.orgId,
         })
         .from(apiKeys)
         .where(
@@ -354,6 +379,15 @@ export const apiKeysRouter = router({
       // Best-effort: drop the stash so the URL can't even hit the cache
       // again. The CAS above is the authoritative single-use guard.
       await ctx.redis.del(revealKey(input.token)).catch(() => {});
+
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "api_key.revealed",
+        targetType: "api_key",
+        targetId: row.id,
+        orgId: row.orgId,
+        metadata: { name: row.name, prefix: row.prefix },
+      });
 
       return { id: row.id, prefix: row.prefix, raw, name: row.name };
     }),
@@ -438,6 +472,16 @@ export const apiKeysRouter = router({
       if (updated.length === 0) {
         throw new TRPCError({ code: "NOT_FOUND" });
       }
+
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "api_key.revoked",
+        targetType: "api_key",
+        targetId: input.id,
+        orgId: existing.orgId,
+        metadata: { ownerUserId: existing.ownerUserId },
+      });
+
       return { ok: true as const };
     }),
 });

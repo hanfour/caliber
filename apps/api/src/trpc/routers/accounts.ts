@@ -10,6 +10,7 @@ import {
   router,
 } from "../procedures.js";
 import { assertTeamBelongsToOrg } from "./_shared.js";
+import { writeAudit } from "../../services/audit.js";
 
 const uuid = z.string().uuid();
 // API-key migration plan Phase 1 — `openai` joins as a first-class
@@ -249,6 +250,20 @@ export const accountsRouter = router({
         oauthExpiresAt,
       });
 
+      await writeAudit(tx, {
+        actorUserId: ctx.user.id,
+        action: "account.created",
+        targetType: "upstream_account",
+        targetId: account.id,
+        orgId: account.orgId,
+        metadata: {
+          name: account.name,
+          platform: account.platform,
+          type: account.type,
+          teamId: account.teamId,
+        },
+      });
+
       return account;
     });
 
@@ -308,6 +323,16 @@ export const accountsRouter = router({
         .where(eq(upstreamAccounts.id, input.id))
         .returning();
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account.updated",
+        targetType: "upstream_account",
+        targetId: row.id,
+        orgId: row.orgId,
+        metadata: { fields: Object.keys(patch).filter((k) => k !== "updatedAt") },
+      });
+
       return row;
     }),
 
@@ -385,6 +410,15 @@ export const accountsRouter = router({
           message: "credential_vault row missing for account",
         });
       }
+
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account.rotated",
+        targetType: "upstream_account",
+        targetId: existing.id,
+        orgId: existing.orgId,
+        metadata: { type: existing.type },
+      });
 
       return { id: existing.id, rotatedAt };
     }),
@@ -489,6 +523,15 @@ export const accountsRouter = router({
         })
         .where(eq(upstreamAccounts.id, existing.id));
 
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account.reonboarded",
+        targetType: "upstream_account",
+        targetId: existing.id,
+        orgId: existing.orgId,
+        metadata: {},
+      });
+
       return { id: existing.id, rotatedAt };
     }),
 
@@ -525,6 +568,16 @@ export const accountsRouter = router({
           updatedAt: sql`NOW()`,
         })
         .where(eq(upstreamAccounts.id, input.id));
+
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account.deleted",
+        targetType: "upstream_account",
+        targetId: existing.id,
+        orgId: existing.orgId,
+        metadata: {},
+      });
+
       return { ok: true as const };
     }),
 });

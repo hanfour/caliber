@@ -13,6 +13,7 @@ import {
   permissionProcedure,
   router,
 } from "../procedures.js";
+import { writeAudit } from "../../services/audit.js";
 
 // API-key migration plan Phase 3 #1 — admin CRUD for account groups, the
 // scheduler-side abstraction that load-balances upstream accounts under a
@@ -155,6 +156,14 @@ export const accountGroupsRouter = router({
           message: "failed to insert account group",
         });
       }
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account_group.created",
+        targetType: "account_group",
+        targetId: group.id,
+        orgId: group.orgId,
+        metadata: { name: group.name, platform: group.platform },
+      });
       return group;
     } catch (err) {
       if (isUniqueViolation(err, CONSTRAINT_GROUP_NAME)) {
@@ -215,6 +224,14 @@ export const accountGroupsRouter = router({
           .where(eq(accountGroups.id, input.id))
           .returning();
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        await writeAudit(ctx.db, {
+          actorUserId: ctx.user.id,
+          action: "account_group.updated",
+          targetType: "account_group",
+          targetId: row.id,
+          orgId: row.orgId,
+          metadata: { fields: Object.keys(patch).filter((k) => k !== "updatedAt") },
+        });
         return row;
       } catch (err) {
         if (isUniqueViolation(err, CONSTRAINT_GROUP_NAME)) {
@@ -267,6 +284,14 @@ export const accountGroupsRouter = router({
             updatedAt: sql`NOW()`,
           })
           .where(eq(accountGroups.id, input.id));
+        await writeAudit(tx, {
+          actorUserId: ctx.user.id,
+          action: "account_group.deleted",
+          targetType: "account_group",
+          targetId: existing.id,
+          orgId: existing.orgId,
+          metadata: {},
+        });
       });
       return { ok: true as const };
     }),
@@ -363,6 +388,14 @@ export const accountGroupsRouter = router({
         }
         throw err;
       }
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account_group.member_added",
+        targetType: "account_group",
+        targetId: group.id,
+        orgId: group.orgId,
+        metadata: { accountId: account.id, priority: input.priority ?? 50 },
+      });
       return { ok: true as const };
     }),
 
@@ -406,6 +439,14 @@ export const accountGroupsRouter = router({
           message: "account is not a member of this group",
         });
       }
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account_group.member_removed",
+        targetType: "account_group",
+        targetId: group.id,
+        orgId: group.orgId,
+        metadata: { accountId: input.accountId },
+      });
       return { ok: true as const };
     }),
 
@@ -456,6 +497,14 @@ export const accountGroupsRouter = router({
           message: "account is not a member of this group",
         });
       }
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "account_group.member_priority_set",
+        targetType: "account_group",
+        targetId: group.id,
+        orgId: group.orgId,
+        metadata: { accountId: input.accountId, priority: input.priority },
+      });
       return { ok: true as const };
     }),
 });
