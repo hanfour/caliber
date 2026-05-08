@@ -1127,4 +1127,172 @@ describe("maybeRefreshOAuth", () => {
     expect(readerCalled).toBe(false);
     expect(lastTokenRequest).not.toBeNull();
   });
+
+  // ── Issue #93 Phase 2.6: write-back to keychain ─────────────────────
+
+  it("12. anthropic refresh succeeds → write-back to keychain triggered with the new bundle", async () => {
+    const acct = await seedAccount();
+    const expiresAt = staleExpiresAt();
+    await seedVault(acct.id, {
+      accessToken: "stale",
+      refreshToken: "stale-refresh",
+      expiresAt,
+    });
+
+    nextTokenResponse = {
+      status: 200,
+      body: JSON.stringify({
+        access_token: "fresh-from-anthropic",
+        refresh_token: "fresh-refresh-from-anthropic",
+        expires_in: 3600,
+      }),
+    };
+
+    // Keychain re-read returns null so we fall through to anthropic.
+    const fakeReader = async () => null;
+
+    // Capture what writer was called with.
+    let writerCalled = false;
+    let writerBundle: { accessToken: string; refreshToken: string } | null =
+      null;
+    const fakeWriter = async (opts: {
+      endpoint: string;
+      bundle: { accessToken: string; refreshToken: string };
+    }) => {
+      writerCalled = true;
+      writerBundle = opts.bundle;
+      return true;
+    };
+
+    const redis = makeRedis();
+    const currentCredential: Extract<ResolvedCredential, { type: "oauth" }> = {
+      type: "oauth",
+      accessToken: "stale",
+      refreshToken: "stale-refresh",
+      expiresAt,
+    };
+
+    const got = await maybeRefreshOAuth(
+      db as never,
+      redis,
+      acct.id,
+      currentCredential,
+      {
+        masterKeyHex: MASTER_KEY,
+        leadMinutes: 10,
+        maxFail: 3,
+        tokenUrl: tokenBaseUrl,
+        keychainEndpoint: "/dev/null", // any non-empty triggers paths
+        keychainReader: fakeReader,
+        keychainWriter: fakeWriter,
+      },
+    );
+
+    // Sanity: the refresh actually ran via anthropic
+    expect(got.accessToken).toBe("fresh-from-anthropic");
+    expect(lastTokenRequest).not.toBeNull();
+
+    // Write-back was called with the new bundle
+    expect(writerCalled).toBe(true);
+    expect(writerBundle).not.toBeNull();
+    expect(writerBundle!.accessToken).toBe("fresh-from-anthropic");
+    expect(writerBundle!.refreshToken).toBe("fresh-refresh-from-anthropic");
+  });
+
+  it("13. keychain re-read hit → write-back NOT called (no point writing what we just read)", async () => {
+    const acct = await seedAccount();
+    const expiresAt = staleExpiresAt();
+    await seedVault(acct.id, {
+      accessToken: "stale",
+      refreshToken: "stale-refresh",
+      expiresAt,
+    });
+
+    // Reader returns a fresh bundle → triggers keychain short-circuit
+    const fakeReader = async () => ({
+      accessToken: "fresh-from-keychain",
+      refreshToken: "fresh-refresh-from-keychain",
+      expiresAt: freshExpiresAt(),
+    });
+
+    let writerCalled = false;
+    const fakeWriter = async () => {
+      writerCalled = true;
+      return true;
+    };
+
+    nextTokenResponse = {
+      status: 500,
+      body: '{"error":"should-not-be-called"}',
+    };
+
+    const redis = makeRedis();
+    const currentCredential: Extract<ResolvedCredential, { type: "oauth" }> = {
+      type: "oauth",
+      accessToken: "stale",
+      refreshToken: "stale-refresh",
+      expiresAt,
+    };
+
+    await maybeRefreshOAuth(db as never, redis, acct.id, currentCredential, {
+      masterKeyHex: MASTER_KEY,
+      leadMinutes: 10,
+      maxFail: 3,
+      tokenUrl: tokenBaseUrl,
+      keychainEndpoint: "/dev/null",
+      keychainReader: fakeReader,
+      keychainWriter: fakeWriter,
+    });
+
+    expect(lastTokenRequest).toBeNull(); // anthropic never hit
+    expect(writerCalled).toBe(false); // and writer never called
+  });
+
+  it("14. write-back fails → still returns the fresh bundle (best-effort)", async () => {
+    const acct = await seedAccount();
+    const expiresAt = staleExpiresAt();
+    await seedVault(acct.id, {
+      accessToken: "stale",
+      refreshToken: "stale-refresh",
+      expiresAt,
+    });
+
+    nextTokenResponse = {
+      status: 200,
+      body: JSON.stringify({
+        access_token: "fresh-from-anthropic",
+        refresh_token: "fresh-refresh-from-anthropic",
+        expires_in: 3600,
+      }),
+    };
+
+    const fakeReader = async () => null;
+    // Writer fails — should not break the user request.
+    const fakeWriter = async () => false;
+
+    const redis = makeRedis();
+    const got = await maybeRefreshOAuth(
+      db as never,
+      redis,
+      acct.id,
+      {
+        type: "oauth",
+        accessToken: "stale",
+        refreshToken: "stale-refresh",
+        expiresAt,
+      },
+      {
+        masterKeyHex: MASTER_KEY,
+        leadMinutes: 10,
+        maxFail: 3,
+        tokenUrl: tokenBaseUrl,
+        keychainEndpoint: "/dev/null",
+        keychainReader: fakeReader,
+        keychainWriter: fakeWriter,
+      },
+    );
+
+    // Vault was still written, fresh bundle still returned to caller.
+    expect(got.accessToken).toBe("fresh-from-anthropic");
+  });
 });

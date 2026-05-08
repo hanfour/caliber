@@ -277,3 +277,136 @@ export const readKeychainBundle: KeychainReader = async (
     });
   });
 };
+
+// ─────────────────────────────────────────────────────────────────────
+// Write side (issue #93 Phase 2.6)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface WriteKeychainOptions {
+  endpoint: string;
+  tokenPath?: string;
+  bundle: KeychainBundle;
+  timeoutMs?: number;
+  logger?: { warn: (obj: unknown, msg?: string) => void };
+}
+
+export type KeychainWriter = (opts: WriteKeychainOptions) => Promise<boolean>;
+
+/**
+ * Push a freshly-refreshed bundle into the host Keychain so the
+ * Claude Code app on the same host inherits it on its next read.
+ *
+ * Returns true on success, false on any failure (helper unavailable,
+ * token missing, helper returned ok:false). Never throws — caller
+ * (oauthRefresh.persistRefresh) treats this as best-effort
+ * housekeeping; aide's own DB vault is the source of truth either
+ * way.
+ *
+ * Same TCP/token plumbing as readKeychainBundle; both call the same
+ * helper daemon.
+ */
+export const writeKeychainBundle: KeychainWriter = async (
+  opts: WriteKeychainOptions,
+): Promise<boolean> => {
+  const log = opts.logger ?? { warn: (o: unknown, m?: string) =>
+    process.stderr.write(JSON.stringify({ msg: m, ...((o as object) ?? {}) }) + "\n") };
+  const timeoutMs = opts.timeoutMs ?? 3_000;
+
+  const isTcp = opts.endpoint.includes(":") && !opts.endpoint.startsWith("/");
+  let token: string | null = null;
+  if (isTcp) {
+    if (!opts.tokenPath) {
+      log.warn(
+        { endpoint: opts.endpoint },
+        "keychain helper TCP endpoint requires tokenPath — disabled",
+      );
+      return false;
+    }
+    token = await readTokenCached(opts.tokenPath, log);
+    if (!token) return false;
+  }
+
+  const payload = {
+    op: "write" as const,
+    ...(isTcp ? { auth: token } : {}),
+    bundle: {
+      access_token: opts.bundle.accessToken,
+      refresh_token: opts.bundle.refreshToken,
+      expires_at: opts.bundle.expiresAt.toISOString(),
+    },
+  };
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    let sock;
+    if (isTcp) {
+      const colon = opts.endpoint.lastIndexOf(":");
+      const host = opts.endpoint.slice(0, colon);
+      const port = parseInt(opts.endpoint.slice(colon + 1), 10);
+      sock = connect(port, host);
+    } else {
+      sock = connect(opts.endpoint);
+    }
+    let buffer = "";
+
+    const timer = setTimeout(() => {
+      log.warn(
+        { endpoint: opts.endpoint, timeoutMs },
+        "keychain helper write timed out",
+      );
+      sock.destroy();
+      settle(false);
+    }, timeoutMs);
+
+    sock.on("connect", () => {
+      sock.write(JSON.stringify(payload) + "\n");
+    });
+
+    sock.on("data", (chunk) => {
+      if (settled) return;
+      buffer += chunk.toString("utf8");
+      const nl = buffer.indexOf("\n");
+      if (nl === -1) return;
+      const line = buffer.slice(0, nl);
+      sock.end();
+      clearTimeout(timer);
+
+      let parsed: { ok?: unknown; error?: unknown };
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        log.warn(
+          { line: line.slice(0, 200) },
+          "keychain helper write response not valid JSON",
+        );
+        settle(false);
+        return;
+      }
+      if (parsed.ok !== true) {
+        log.warn(
+          { error: String(parsed.error ?? "unknown") },
+          "keychain helper write returned error",
+        );
+        settle(false);
+        return;
+      }
+      settle(true);
+    });
+
+    sock.on("error", (err) => {
+      if (settled) return;
+      clearTimeout(timer);
+      log.warn(
+        { err: err.message, endpoint: opts.endpoint },
+        "keychain helper unavailable for write",
+      );
+      settle(false);
+    });
+  });
+};

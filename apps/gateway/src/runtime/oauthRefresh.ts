@@ -12,8 +12,10 @@ import { keys } from "../redis/keys.js";
 import type { ResolvedCredential } from "./resolveCredential.js";
 import {
   readKeychainBundle as defaultKeychainReader,
+  writeKeychainBundle as defaultKeychainWriter,
   type KeychainBundle,
   type KeychainReader,
+  type KeychainWriter,
 } from "./keychainReader.js";
 
 const LOCK_TTL_SEC = 30;
@@ -165,6 +167,13 @@ export interface OAuthRefreshOptions {
    * `readKeychainBundle` function gets used.
    */
   keychainReader?: KeychainReader;
+  /**
+   * Test-only injection: replace the keychain writer (Phase 2.6).
+   * Production code passes `keychainEndpoint` and the default
+   * `writeKeychainBundle` function gets used after each successful
+   * anthropic refresh.
+   */
+  keychainWriter?: KeychainWriter;
   /** Sleep injection for tests. */
   sleep?: (ms: number) => Promise<void>;
   /** Time source for tests. */
@@ -268,6 +277,35 @@ export async function maybeRefreshOAuth(
         now,
         prevRotatedAt,
       );
+
+      // Issue #93 Phase 2.6: push the bundle we just got from
+      // anthropic into the host keychain so the Claude Code app on
+      // the same host inherits it on its next read. Without this,
+      // anthropic's refresh-token rotation will invalidate Claude
+      // Code app's bundle the moment it tries to refresh — and
+      // we're back to the original race that #93 set out to solve.
+      //
+      // Only attempted when keychainEndpoint is wired (helper opt-in).
+      // Always best-effort — DB vault is the source of truth either
+      // way; aide doesn't fail the user request because keychain
+      // sync hiccupped.
+      if (opts.keychainEndpoint) {
+        const ok = await maybeWriteKeychainBundle({
+          opts,
+          bundle: {
+            accessToken: fresh.accessToken,
+            refreshToken: fresh.refreshToken,
+            expiresAt: fresh.expiresAt,
+          },
+        });
+        if (ok) {
+          opts.logger?.info?.(
+            { accountId },
+            "oauth refresh: pushed fresh bundle to host keychain",
+          );
+        }
+      }
+
       return fresh;
     } catch (err) {
       await recordFailure(db, redis, accountId, err, opts.maxFail, now);
@@ -605,6 +643,43 @@ export async function maybeUseKeychainBundle(input: {
     refreshToken: bundle.refreshToken,
     expiresAt: bundle.expiresAt,
   };
+}
+
+/**
+ * Issue #93 Phase 2.6 helper. Best-effort push of a freshly-refreshed
+ * bundle into the host keychain so the Claude Code app inherits it.
+ *
+ * Returns true on success, false on any failure (helper unavailable,
+ * write rejected, etc.). Caller treats false as a no-op — DB vault
+ * is the source of truth.
+ *
+ * Pre-conditions checked by caller (`maybeRefreshOAuth`):
+ * - `opts.keychainEndpoint` is set
+ * - bundle is the one we just got from anthropic (not the one we
+ *   just inherited from keychain — pointless to write back what we
+ *   read)
+ */
+export async function maybeWriteKeychainBundle(input: {
+  opts: Pick<
+    OAuthRefreshOptions,
+    "keychainEndpoint" | "keychainTokenPath" | "keychainWriter" | "logger"
+  >;
+  bundle: KeychainBundle;
+}): Promise<boolean> {
+  const { opts, bundle } = input;
+  if (!opts.keychainEndpoint) return false;
+
+  const writer = opts.keychainWriter ?? defaultKeychainWriter;
+  try {
+    return await writer({
+      endpoint: opts.keychainEndpoint,
+      tokenPath: opts.keychainTokenPath,
+      bundle,
+      logger: opts.logger,
+    });
+  } catch {
+    return false;
+  }
 }
 
 /**
