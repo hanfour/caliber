@@ -201,6 +201,9 @@ export function makeChatCompletionsAnthropicHandler(
                   masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
                   leadMinutes: opts.env.GATEWAY_OAUTH_REFRESH_LEAD_MIN,
                   maxFail: opts.env.GATEWAY_OAUTH_MAX_FAIL,
+                  keychainEndpoint: opts.env.GATEWAY_KEYCHAIN_HELPER_ENDPOINT,
+                  keychainTokenPath: opts.env.GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH,
+                  logger: app.log,
                 },
               );
             }
@@ -391,6 +394,9 @@ async function runChatCompletionsStreamingFailover(
                 masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
                 leadMinutes: opts.env.GATEWAY_OAUTH_REFRESH_LEAD_MIN,
                 maxFail: opts.env.GATEWAY_OAUTH_MAX_FAIL,
+                keychainEndpoint: opts.env.GATEWAY_KEYCHAIN_HELPER_ENDPOINT,
+                keychainTokenPath: opts.env.GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH,
+                logger: app.log,
               },
             );
           }
