@@ -76,10 +76,20 @@ function buildCredentialPlaintext(
       message: "oauth credentials must be a JSON object",
     });
   }
-  return JSON.stringify({
+  // Closes #73: the form hint is permissive about expires_at format
+  // (ISO string OR unix ms OR unix seconds), but the gateway runtime's
+  // `resolveCredential` only accepts ISO. Normalize at insert time so
+  // the stored shape is always ISO regardless of what the operator
+  // pasted.
+  const merged: Record<string, unknown> = {
     ...(parsed as Record<string, unknown>),
     type: "oauth",
-  });
+  };
+  const canonicalExpiresAt = parseOauthExpiresAt(input);
+  if (canonicalExpiresAt !== null) {
+    merged.expires_at = canonicalExpiresAt.toISOString();
+  }
+  return JSON.stringify(merged);
 }
 
 function parseOauthExpiresAt(credentialsJson: string): Date | null {

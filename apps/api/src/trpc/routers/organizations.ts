@@ -34,6 +34,47 @@ export const organizationsRouter = router({
     return row
   }),
 
+  /**
+   * Resolve a URL identifier (slug OR UUID) to the canonical org row.
+   * Lets pages with `[id]` dynamic segments accept either form without
+   * each tRPC mutation needing to swallow both shapes.
+   *
+   * Closes #70: previously the New Account form passed `params.id`
+   * (often the slug like `local`) directly to mutations whose schemas
+   * required `z.string().uuid()`, so the BAD_REQUEST surfaced as a
+   * useless toast. Pages now resolve via this query before calling
+   * any orgId-typed mutation.
+   *
+   * `protectedProcedure` (no permission gate) intentionally — the
+   * lookup itself is harmless (returns NOT_FOUND for orgs the caller
+   * can't see, identical to the no-such-slug path), and downstream
+   * mutations still apply their own RBAC against the resolved UUID.
+   */
+  resolveIdentifier: protectedProcedure
+    .input(z.object({ identifier: z.string().min(1).max(128) }))
+    .query(async ({ ctx, input }) => {
+      const isUuid = uuid.safeParse(input.identifier).success
+      const cond = isUuid
+        ? eq(organizations.id, input.identifier)
+        : eq(organizations.slug, input.identifier)
+      const [row] = await ctx.db
+        .select({
+          id: organizations.id,
+          slug: organizations.slug,
+          name: organizations.name
+        })
+        .from(organizations)
+        .where(and(cond, isNull(organizations.deletedAt)))
+        .limit(1)
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND' })
+      // Hide existence from callers without permission to read this
+      // org — match the same surface as `get` above.
+      if (!ctx.perm.coveredOrgs.has(row.id)) {
+        throw new TRPCError({ code: 'NOT_FOUND' })
+      }
+      return row
+    }),
+
   create: protectedProcedure
     .input(z.object({ slug, name: z.string().min(1).max(255) }))
     .mutation(async ({ ctx, input }) => {

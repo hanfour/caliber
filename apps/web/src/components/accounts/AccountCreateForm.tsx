@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -148,19 +148,46 @@ export function AccountCreateForm({ orgId }: Props) {
         ? "sk-proj-..."
         : "sk-ant-...";
 
-  const onSubmit = handleSubmit((v) =>
-    create.mutateAsync({
+  // Defensive submit-time check (closes #72): RHF's register() attaches
+  // its own onChange, but under some click-then-submit-in-same-tick
+  // sequences (browser automation, very fast keyboard navigation) the
+  // synthetic event ordering can swallow the radio's state update —
+  // the DOM shows the new selection but RHF's `v.type` still has the
+  // previous value, silently submitting the wrong type. Read the
+  // live DOM truth at submit and prefer it over RHF when they
+  // disagree.
+  //
+  // formRef gives us a stable scope to query so we don't pick up
+  // hypothetical other `name="type"` radios elsewhere on the page.
+  const formRef = useRef<HTMLFormElement | null>(null);
+
+  const readDomCheckedType = (): "api_key" | "oauth" | null => {
+    const el = formRef.current?.querySelector<HTMLInputElement>(
+      'input[name="type"]:checked',
+    );
+    const v = el?.value;
+    return v === "api_key" || v === "oauth" ? v : null;
+  };
+
+  const onSubmit = handleSubmit((v) => {
+    const domType = readDomCheckedType();
+    const finalType = domType ?? v.type;
+    if (domType && domType !== v.type) {
+      // Sync RHF for the next render so the UI reflects what we sent.
+      setValue("type", domType);
+    }
+    return create.mutateAsync({
       orgId,
       teamId: v.scopeType === "team" ? v.teamId || undefined : null,
       name: v.name,
       platform: v.platform,
-      type: v.type,
+      type: finalType,
       credentials: v.credentials,
-    }),
-  );
+    });
+  });
 
   return (
-    <form onSubmit={onSubmit} className="space-y-5">
+    <form ref={formRef} onSubmit={onSubmit} className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="name">Name</Label>
         <Input

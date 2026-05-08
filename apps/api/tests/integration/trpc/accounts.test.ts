@@ -223,6 +223,104 @@ describe("accounts router", () => {
     expect(vault2!.oauthExpiresAt!.toISOString()).toBe(expiresIso);
   });
 
+  it("create: oauth expires_at as unix-ms gets normalised to ISO before encryption (closes #73)", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor(t.db, admin.id);
+
+    // Operator pastes the bundle exactly as it comes out of the
+    // claude-code keychain extract one-liner — `expires_at` as a
+    // unix-millisecond integer (the form hint historically didn't
+    // require ISO). Pre-#73, the gateway rejected this at runtime
+    // with `CredentialFormatError`.
+    const expiresMs = Date.now() + 3600_000;
+    const expectedIso = new Date(expiresMs).toISOString();
+
+    const acct = await caller.accounts.create({
+      orgId: org.id,
+      name: "oauth-acct-unix-ms",
+      platform: "anthropic",
+      type: "oauth",
+      credentials: JSON.stringify({
+        access_token: "sk-ant-oat01-test",
+        refresh_token: "sk-ant-ort01-test",
+        expires_at: expiresMs,
+      }),
+    });
+
+    const [vault] = await t.db
+      .select()
+      .from(credentialVault)
+      .where(eq(credentialVault.accountId, acct.id));
+
+    // Column-side normalisation: vault.oauthExpiresAt is the parsed Date.
+    expect(vault!.oauthExpiresAt!.getTime()).toBe(expiresMs);
+
+    // Encrypted-payload normalisation (the actual #73 regression).
+    const plain = decryptCredential({
+      masterKeyHex: defaultTestEnv.CREDENTIAL_ENCRYPTION_KEY!,
+      accountId: acct.id,
+      sealed: {
+        nonce: vault!.nonce,
+        ciphertext: vault!.ciphertext,
+        authTag: vault!.authTag,
+      },
+    });
+    const decoded = JSON.parse(plain);
+    // Stored as ISO, not as the unix-ms integer the user pasted —
+    // matches what gateway/runtime/resolveCredential expects.
+    expect(decoded.expires_at).toBe(expectedIso);
+    expect(decoded.type).toBe("oauth");
+  });
+
+  it("create: oauth expires_at as unix-seconds also gets normalised (closes #73)", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor(t.db, admin.id);
+
+    // Same path, seconds variant — parseOauthExpiresAt's heuristic
+    // treats values < 1e12 as seconds.
+    const expiresSec = Math.floor(Date.now() / 1000) + 3600;
+    const expectedIso = new Date(expiresSec * 1000).toISOString();
+
+    const acct = await caller.accounts.create({
+      orgId: org.id,
+      name: "oauth-acct-unix-sec",
+      platform: "anthropic",
+      type: "oauth",
+      credentials: JSON.stringify({
+        access_token: "x",
+        refresh_token: "y",
+        expires_at: expiresSec,
+      }),
+    });
+
+    const [vault] = await t.db
+      .select()
+      .from(credentialVault)
+      .where(eq(credentialVault.accountId, acct.id));
+    const plain = decryptCredential({
+      masterKeyHex: defaultTestEnv.CREDENTIAL_ENCRYPTION_KEY!,
+      accountId: acct.id,
+      sealed: {
+        nonce: vault!.nonce,
+        ciphertext: vault!.ciphertext,
+        authTag: vault!.authTag,
+      },
+    });
+    expect(JSON.parse(plain).expires_at).toBe(expectedIso);
+  });
+
   it("create: openai platform with api_key persists row + decrypts roundtrip", async () => {
     // API-key migration plan Phase 1 — verify the openai platform widening
     // accepts `sk-...` keys end-to-end. The gateway upstreamCallOpenai

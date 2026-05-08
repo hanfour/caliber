@@ -81,4 +81,62 @@ describe('organizations router', () => {
       caller.organizations.get({ id: '00000000-0000-0000-0000-000000000000' })
     ).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
+
+  // ── resolveIdentifier (closes #70) ──────────────────────────────
+
+  it('resolveIdentifier: accepts UUID', async () => {
+    const org = await makeOrg(t.db)
+    const admin = await makeUser(t.db, {
+      role: 'org_admin',
+      scopeType: 'organization',
+      scopeId: org.id,
+      orgId: org.id,
+    })
+    const caller = await callerFor(t.db, admin.id)
+    const got = await caller.organizations.resolveIdentifier({ identifier: org.id })
+    expect(got.id).toBe(org.id)
+    expect(got.slug).toBe(org.slug)
+  })
+
+  it('resolveIdentifier: accepts slug', async () => {
+    const org = await makeOrg(t.db)
+    const admin = await makeUser(t.db, {
+      role: 'org_admin',
+      scopeType: 'organization',
+      scopeId: org.id,
+      orgId: org.id,
+    })
+    const caller = await callerFor(t.db, admin.id)
+    const got = await caller.organizations.resolveIdentifier({ identifier: org.slug })
+    expect(got.id).toBe(org.id)
+    expect(got.slug).toBe(org.slug)
+  })
+
+  it('resolveIdentifier: NOT_FOUND for unknown slug', async () => {
+    const admin = await makeUser(t.db, { role: 'super_admin', scopeType: 'global' })
+    const caller = await callerFor(t.db, admin.id)
+    await expect(
+      caller.organizations.resolveIdentifier({ identifier: 'no-such-org-slug' })
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('resolveIdentifier: NOT_FOUND for unauthorized org (hides existence)', async () => {
+    const visible = await makeOrg(t.db)
+    const hidden = await makeOrg(t.db)
+    const admin = await makeUser(t.db, {
+      role: 'org_admin',
+      scopeType: 'organization',
+      scopeId: visible.id,
+      orgId: visible.id,
+    })
+    const caller = await callerFor(t.db, admin.id)
+    // Caller has no role at hidden org → NOT_FOUND, not FORBIDDEN.
+    // Mirrors `get`'s behaviour — don't leak which orgs exist.
+    await expect(
+      caller.organizations.resolveIdentifier({ identifier: hidden.slug })
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(
+      caller.organizations.resolveIdentifier({ identifier: hidden.id })
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
 })
