@@ -20,6 +20,7 @@ import {
   upstreamAccounts,
   credentialVault,
   accountGroups,
+  accountGroupMembers,
   type Database,
 } from "@aide/db";
 import { buildServer } from "../../src/server.js";
@@ -182,6 +183,7 @@ async function seedAccount(
   orgId: string,
   plaintextCredential: string,
   platform: "anthropic" | "openai" = "openai",
+  groupId?: string,
 ): Promise<string> {
   const [acct] = await db
     .insert(upstreamAccounts)
@@ -205,6 +207,11 @@ async function seedAccount(
     ciphertext: sealed.ciphertext,
     authTag: sealed.authTag,
   });
+  if (groupId) {
+    await db
+      .insert(accountGroupMembers)
+      .values({ accountId: acct!.id, groupId, priority: 50 });
+  }
   return acct!.id;
 }
 
@@ -259,6 +266,7 @@ describe("/backend-api/codex/responses (Codex CLI alias)", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -369,6 +377,7 @@ describe("/backend-api/codex/responses (Codex CLI alias)", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -416,6 +425,7 @@ describe("/backend-api/codex/responses (Codex CLI alias)", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {

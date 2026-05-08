@@ -20,6 +20,7 @@ import {
   upstreamAccounts,
   credentialVault,
   accountGroups,
+  accountGroupMembers,
   type Database,
 } from "@aide/db";
 import { acquireSlot } from "../../src/redis/slots.js";
@@ -192,6 +193,7 @@ async function seedAccount(
   orgId: string,
   plaintextCredential: string,
   overrides: Partial<typeof upstreamAccounts.$inferInsert> = {},
+  groupId?: string,
 ): Promise<string> {
   const [acct] = await db
     .insert(upstreamAccounts)
@@ -218,6 +220,12 @@ async function seedAccount(
     ciphertext: sealed.ciphertext,
     authTag: sealed.authTag,
   });
+
+  if (groupId) {
+    await db
+      .insert(accountGroupMembers)
+      .values({ accountId: acct!.id, groupId, priority: 50 });
+  }
 
   return acct!.id;
 }
@@ -575,6 +583,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     // Upstream OpenAI Responses API responds with a Responses-shaped
@@ -654,6 +663,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -735,6 +745,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -828,6 +839,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -895,6 +907,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -1016,6 +1029,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
     nextUpstreamResponse = {
       status: 503,
@@ -1052,6 +1066,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
     nextUpstreamResponse = {
       status: 401,
@@ -1090,6 +1105,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
     nextUpstreamResponse = {
       status: 200,
@@ -1127,6 +1143,7 @@ describe("POST /v1/messages", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
     nextUpstreamResponse = {
       status: 200,

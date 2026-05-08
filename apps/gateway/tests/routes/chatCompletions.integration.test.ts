@@ -20,6 +20,7 @@ import {
   upstreamAccounts,
   credentialVault,
   accountGroups,
+  accountGroupMembers,
   type Database,
 } from "@aide/db";
 import { buildServer } from "../../src/server.js";
@@ -217,6 +218,7 @@ async function seedAccount(
   orgId: string,
   plaintextCredential: string,
   overrides: Partial<typeof upstreamAccounts.$inferInsert> = {},
+  groupId?: string,
 ): Promise<string> {
   const [acct] = await db
     .insert(upstreamAccounts)
@@ -243,6 +245,12 @@ async function seedAccount(
     ciphertext: sealed.ciphertext,
     authTag: sealed.authTag,
   });
+
+  if (groupId) {
+    await db
+      .insert(accountGroupMembers)
+      .values({ accountId: acct!.id, groupId, priority: 50 });
+  }
 
   return acct!.id;
 }
@@ -655,6 +663,7 @@ describe("POST /v1/chat/completions", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     // Upstream OpenAI Responses API responds with a Responses-shaped
@@ -723,6 +732,7 @@ describe("POST /v1/chat/completions", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -807,6 +817,7 @@ describe("POST /v1/chat/completions", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       { platform: "openai" },
+      groupId,
     );
 
     nextUpstreamResponse = {

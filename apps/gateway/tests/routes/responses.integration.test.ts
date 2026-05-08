@@ -20,6 +20,7 @@ import {
   upstreamAccounts,
   credentialVault,
   accountGroups,
+  accountGroupMembers,
   type Database,
 } from "@aide/db";
 import { buildServer } from "../../src/server.js";
@@ -208,6 +209,7 @@ async function seedAccount(
   orgId: string,
   plaintextCredential: string,
   platform: "anthropic" | "openai" = "anthropic",
+  groupId?: string,
 ): Promise<string> {
   const [acct] = await db
     .insert(upstreamAccounts)
@@ -231,6 +233,11 @@ async function seedAccount(
     ciphertext: sealed.ciphertext,
     authTag: sealed.authTag,
   });
+  if (groupId) {
+    await db
+      .insert(accountGroupMembers)
+      .values({ accountId: acct!.id, groupId, priority: 50 });
+  }
   return acct!.id;
 }
 
@@ -666,6 +673,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     const openaiResponse = {
@@ -733,6 +741,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -766,6 +775,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     // Synthesize a 6-event OpenAI Responses SSE stream.
@@ -860,6 +870,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -919,6 +930,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -967,6 +979,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-secret" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -1018,6 +1031,7 @@ describe("/v1/responses", () => {
         expires_at: futureIso,
       }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -1063,6 +1077,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -1112,6 +1127,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
@@ -1142,6 +1158,7 @@ describe("/v1/responses", () => {
       orgId,
       JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
       "openai",
+      groupId,
     );
 
     nextUpstreamResponse = {
