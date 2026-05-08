@@ -306,7 +306,7 @@ export async function maybeRefreshOAuth(
 
 /**
  * Calls the OAuth token endpoint with the given refresh token and returns the new credential.
- * Shared with the cron worker (oauthRefreshCron.ts).
+ *
  */
 export async function performRefresh(input: {
   currentRefreshToken: string;
@@ -385,7 +385,7 @@ export async function performRefresh(input: {
 /**
  * Encrypts and persists a refreshed credential to the vault; resets fail counters on the account.
  * Uses Compare-And-Swap on rotated_at to prevent concurrent writers from overwriting a newer token.
- * Shared with the cron worker (oauthRefreshCron.ts).
+ *
  */
 export async function persistRefresh(
   db: Database,
@@ -463,7 +463,7 @@ export async function persistRefresh(
  *   auto-pauses at maxFail. Also sets a 60s backoff lock to prevent
  *   inline-refresh hammering.
  *
- * Shared with the cron worker (oauthRefreshCron.ts).
+ *
  *
  * Note: signature changed in #92 to accept `redis` for the backoff
  * lock. Cron worker callers also updated.
@@ -610,7 +610,6 @@ export async function maybeUseKeychainBundle(input: {
 /**
  * Reads the rotated_at timestamp from the credential vault for a given account.
  * Used to establish the CAS baseline before calling persistRefresh.
- * Exported so the cron worker can use it without a separate query.
  */
 export async function readVaultRotatedAt(
   db: Database,
@@ -627,7 +626,7 @@ export async function readVaultRotatedAt(
 
 /**
  * Reads and decrypts the credential vault row for a given account.
- * Shared with the cron worker (oauthRefreshCron.ts).
+ *
  */
 export async function readCredential(
   db: Database,

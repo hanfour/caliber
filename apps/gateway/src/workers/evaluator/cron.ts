@@ -11,7 +11,7 @@
  *
  * Design notes:
  *   - Uses interval-based scheduling (setInterval) to match the repo's existing
- *     cron patterns (oauthRefreshCron, bodyPurge). No cron-expression parser.
+ *     cron patterns (bodyPurge, billingAudit). No cron-expression parser.
  *   - Runs immediately on start, then every 24h. UTC alignment is best-effort:
  *     if the server starts outside the 00:05 UTC window, the cron handles the
  *     prior day's data on first tick. Idempotency via jobId dedup ensures no

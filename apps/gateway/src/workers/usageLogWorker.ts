@@ -56,8 +56,8 @@ const DEFAULT_FLUSH_INTERVAL_MS = 1_000;
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /**
- * Pino-style logger surface used by the worker.  Mirrors the shape used by
- * `OAuthRefreshCron` so we can pass `fastify.log` directly.
+ * Pino-style logger surface used by the worker, structurally compatible
+ * with `fastify.log` so we can pass it directly.
  */
 export interface UsageLogWorkerLogger {
   info: (obj: unknown, msg?: string) => void;
