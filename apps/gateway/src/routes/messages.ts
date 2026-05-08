@@ -265,6 +265,7 @@ async function runNonStreamFailover(
     orgId: req.apiKey!.orgId,
     teamId: req.apiKey!.teamId,
     groupId: req.apiKey?.groupId ?? null,
+    platform: req.gwGroupContext!.platform,
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
     scheduler: app.gwScheduler,
     attempt: async (account: SelectedAccount) => {
@@ -450,6 +451,7 @@ async function runStreamingFailover(
     orgId: req.apiKey!.orgId,
     teamId: req.apiKey!.teamId,
     groupId: req.apiKey?.groupId ?? null,
+    platform: req.gwGroupContext!.platform,
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
     attempt: async (account: SelectedAccount) => {
       const acquired = await acquireSlot(
@@ -904,6 +906,7 @@ export function makeMessagesOpenaiHandler(
         orgId: req.apiKey.orgId,
         teamId: req.apiKey.teamId,
         groupId: req.apiKey?.groupId ?? null,
+        platform: req.gwGroupContext!.platform,
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         attempt: async (account) =>
@@ -1081,6 +1084,7 @@ async function runMessagesOpenaiStreamingFailover(
       orgId: req.apiKey!.orgId,
       teamId: req.apiKey!.teamId,
       groupId: req.apiKey?.groupId ?? null,
+      platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       attempt: async (account) =>

@@ -26,6 +26,7 @@ import type { Redis } from "ioredis";
 import {
   classifyUpstreamError,
   type AccountStateUpdate,
+  type Platform,
   type UpstreamError,
 } from "@aide/gateway-core";
 import {
@@ -61,16 +62,20 @@ export interface RunFailoverInput<T> {
   orgId: string;
   teamId: string | null;
   /**
+   * Platform of the inbound api-key's resolved group context. Required:
+   * the scheduler uses it to filter the legacy candidate query so an
+   * anthropic-routed request can't pick an OpenAI account (and vice
+   * versa). Legacy api-keys without `group_id` get a synthetic
+   * `"anthropic"` from groupContext, preserving 4A behaviour while
+   * still preventing the cross-platform leak.
+   */
+  platform: Platform;
+  /**
    * AccountGroup the inbound api-key is bound to. When set, scheduler
    * `select` joins via `account_group_members` and filters to the
-   * group's platform — preventing cross-platform credential leaks
-   * (e.g. `/v1/messages` on an anthropic key picking an OpenAI account
-   * because the legacy fallback didn't filter by platform).
-   *
-   * `null` is a real value (not a missing-context sentinel): legacy
-   * api-keys without `group_id` opt into org-wide selection. Routes
-   * that want strict platform isolation should ensure the api-key
-   * has a group binding before reaching here.
+   * group's platform. `null` is a real value (legacy api-keys without
+   * `group_id` opt into org-wide selection); platform isolation is
+   * enforced via the `platform` field above either way.
    */
   groupId?: string | null;
   maxSwitches: number;
@@ -114,6 +119,7 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
       scheduled = await scheduler.select({
         orgId: input.orgId,
         teamId: input.teamId,
+        groupPlatform: input.platform,
         groupId: input.groupId ?? undefined,
         excludedAccountIds: failedSet,
       });

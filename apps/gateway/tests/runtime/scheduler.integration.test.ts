@@ -381,6 +381,62 @@ describe("scheduler.select — legacy (no groupId) behaviour", () => {
     expect(r2.account.id).toBe(acctA.id);
     expect(r1.decision.layer).toBe("load_balance");
   });
+
+  // Regression guard: legacy api keys (no group_id) synthesise a platform
+  // via groupContext (`anthropic` fallback). Before this fix the legacy
+  // candidate query ignored platform, so an anthropic-routed request
+  // could pick an OpenAI account and get marked `status='error'` for an
+  // `invalid x-api-key` that was actually our own routing bug.
+  it("filters out cross-platform candidates when groupPlatform=anthropic", async () => {
+    const anthAcct = await seedAccount({
+      name: "anth",
+      priority: 50,
+      platform: "anthropic",
+    });
+    // Lower priority number = higher preference; without the filter the
+    // OpenAI account would win.
+    await seedAccount({ name: "oai", priority: 1, platform: "openai" });
+
+    const scheduler = buildScheduler();
+    const result = await scheduler.select({
+      orgId,
+      teamId: null,
+      groupPlatform: "anthropic",
+    });
+    expect(result.account.id).toBe(anthAcct.id);
+    expect(result.account.platform).toBe("anthropic");
+  });
+
+  it("filters out cross-platform candidates when groupPlatform=openai", async () => {
+    await seedAccount({ name: "anth", priority: 1, platform: "anthropic" });
+    const oaiAcct = await seedAccount({
+      name: "oai",
+      priority: 50,
+      platform: "openai",
+    });
+
+    const scheduler = buildScheduler();
+    const result = await scheduler.select({
+      orgId,
+      teamId: null,
+      groupPlatform: "openai",
+    });
+    expect(result.account.id).toBe(oaiAcct.id);
+    expect(result.account.platform).toBe("openai");
+  });
+
+  it("throws NoSchedulableAccountsError when only cross-platform accounts exist", async () => {
+    await seedAccount({ name: "oai", priority: 1, platform: "openai" });
+
+    const scheduler = buildScheduler();
+    await expect(
+      scheduler.select({
+        orgId,
+        teamId: null,
+        groupPlatform: "anthropic",
+      }),
+    ).rejects.toBeInstanceOf(NoSchedulableAccountsError);
+  });
 });
 
 describe("scheduler.select — review gap coverage", () => {

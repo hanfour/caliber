@@ -323,6 +323,7 @@ export function makeResponsesRouteHandler(
         orgId: req.apiKey.orgId,
         teamId: req.apiKey.teamId,
         groupId: req.apiKey?.groupId ?? null,
+        platform: req.gwGroupContext!.platform,
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         attempt: async (account) =>
@@ -474,6 +475,7 @@ async function runResponsesStreamingFailover(
       orgId: req.apiKey!.orgId,
       teamId: req.apiKey!.teamId,
       groupId: req.apiKey?.groupId ?? null,
+      platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       attempt: async (account) =>
@@ -683,6 +685,7 @@ async function runOpenaiResponsesPassthroughFailover(
       orgId: req.apiKey!.orgId,
       teamId: req.apiKey!.teamId,
       groupId: req.apiKey?.groupId ?? null,
+      platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       attempt: async (account) =>
@@ -839,6 +842,7 @@ async function runOpenaiResponsesStreamingPassthrough(
       orgId: req.apiKey!.orgId,
       teamId: req.apiKey!.teamId,
       groupId: req.apiKey?.groupId ?? null,
+      platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       attempt: async (account) =>

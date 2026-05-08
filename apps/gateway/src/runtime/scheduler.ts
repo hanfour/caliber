@@ -497,6 +497,16 @@ async function listSchedulableCandidates(
   if (excluded.size > 0) {
     baseConditions.push(notInArray(upstreamAccounts.id, [...excluded]));
   }
+  // Cross-platform isolation. The group branch below is implicitly
+  // platform-bound by the account_group_members join; this predicate is
+  // load-bearing for the legacy branch (no groupId) where an anthropic-
+  // routed request would otherwise pick an OpenAI account and corrupt
+  // it with an `invalid x-api-key` we generated ourselves. Applying it
+  // to both branches also defends against a group whose members drift
+  // from its declared platform.
+  if (req.groupPlatform) {
+    baseConditions.push(eq(upstreamAccounts.platform, req.groupPlatform));
+  }
 
   if (req.groupId) {
     // Group-based selection: join via account_group_members; the group's
@@ -582,6 +592,10 @@ async function loadSchedulableAccount(
     eq(upstreamAccounts.orgId, req.orgId),
     ...buildSchedulablePredicates(nowDate),
   ];
+  // Mirrors listSchedulableCandidates — see comment there.
+  if (req.groupPlatform) {
+    conditions.push(eq(upstreamAccounts.platform, req.groupPlatform));
+  }
 
   if (req.groupId) {
     // Validate membership in the requested group.
