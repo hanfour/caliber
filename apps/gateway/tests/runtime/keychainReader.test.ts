@@ -3,7 +3,10 @@ import { createServer, type Server, type Socket } from "node:net";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { readKeychainBundle } from "../../src/runtime/keychainReader.js";
+import {
+  readKeychainBundle,
+  writeKeychainBundle,
+} from "../../src/runtime/keychainReader.js";
 
 /**
  * Each test spins up a tiny unix-socket server in tmpdir that mimics
@@ -145,6 +148,87 @@ describe("readKeychainBundle", () => {
       logger: silentLogger,
     });
     expect(got).toBeNull();
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+});
+
+describe("writeKeychainBundle", () => {
+  const sampleBundle = {
+    accessToken: "sk-ant-oat01-AAA",
+    refreshToken: "sk-ant-ort01-BBB",
+    expiresAt: new Date("2026-12-31T00:00:00Z"),
+  };
+
+  it("happy path → returns true; helper receives op:write payload", async () => {
+    let receivedLine = "";
+    server = createServer((conn) => {
+      trackConn(conn);
+      let buffer = "";
+      conn.on("data", (chunk) => {
+        buffer += chunk.toString("utf8");
+        const nl = buffer.indexOf("\n");
+        if (nl === -1) return;
+        receivedLine = buffer.slice(0, nl);
+        conn.write(JSON.stringify({ ok: true }) + "\n");
+        conn.end();
+      });
+    });
+    await new Promise<void>((r) => server!.listen(socketPath, () => r()));
+
+    const ok = await writeKeychainBundle({
+      endpoint: socketPath,
+      bundle: sampleBundle,
+      logger: silentLogger,
+    });
+    expect(ok).toBe(true);
+
+    const parsed = JSON.parse(receivedLine);
+    expect(parsed.op).toBe("write");
+    expect(parsed.bundle).toEqual({
+      access_token: "sk-ant-oat01-AAA",
+      refresh_token: "sk-ant-ort01-BBB",
+      expires_at: "2026-12-31T00:00:00.000Z",
+    });
+  });
+
+  it("helper returns ok:false → returns false", async () => {
+    server = createServer((conn) => {
+      trackConn(conn);
+      conn.on("data", () => {
+        conn.write(JSON.stringify({ ok: false, error: "boom" }) + "\n");
+        conn.end();
+      });
+    });
+    await new Promise<void>((r) => server!.listen(socketPath, () => r()));
+
+    const ok = await writeKeychainBundle({
+      endpoint: socketPath,
+      bundle: sampleBundle,
+      logger: silentLogger,
+    });
+    expect(ok).toBe(false);
+  });
+
+  it("socket missing → returns false (never throws)", async () => {
+    const ok = await writeKeychainBundle({
+      endpoint: "/tmp/this-socket-does-not-exist-zzz.sock",
+      bundle: sampleBundle,
+      logger: silentLogger,
+    });
+    expect(ok).toBe(false);
+  });
+
+  it("server holds connection open → timeout → returns false", async () => {
+    server = createServer((conn) => trackConn(conn));
+    await new Promise<void>((r) => server!.listen(socketPath, () => r()));
+    const start = Date.now();
+    const ok = await writeKeychainBundle({
+      endpoint: socketPath,
+      bundle: sampleBundle,
+      timeoutMs: 200,
+      logger: silentLogger,
+    });
+    expect(ok).toBe(false);
     expect(Date.now() - start).toBeLessThan(1000);
   });
 });

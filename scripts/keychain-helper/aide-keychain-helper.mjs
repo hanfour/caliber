@@ -132,6 +132,80 @@ async function readKeychain() {
   return inflight;
 }
 
+/**
+ * Inverse of reshapeBundle — takes aide's flat snake_case shape and
+ * reconstructs Claude Code's keychain envelope (camelCase under
+ * `claudeAiOauth`, expiresAt as unix-ms).
+ */
+function unshapeBundle(bundle) {
+  if (
+    !bundle ||
+    typeof bundle.access_token !== "string" ||
+    typeof bundle.refresh_token !== "string" ||
+    typeof bundle.expires_at !== "string"
+  ) {
+    throw new Error("write payload missing access_token/refresh_token/expires_at");
+  }
+  const expiresAtMs = new Date(bundle.expires_at).getTime();
+  if (Number.isNaN(expiresAtMs)) {
+    throw new Error("write payload expires_at not a valid date");
+  }
+  return {
+    claudeAiOauth: {
+      accessToken: bundle.access_token,
+      refreshToken: bundle.refresh_token,
+      expiresAt: expiresAtMs,
+      // Preserve any subscription / scope metadata the existing
+      // entry has — read it first and merge. Falls back to defaults
+      // if the keychain is brand new (which shouldn't happen but…).
+    },
+  };
+}
+
+async function writeKeychain(bundle) {
+  // Merge with existing entry to preserve subscriptionType / scopes /
+  // any other fields the Claude Code app puts there. We only own the
+  // token triplet.
+  const reshaped = unshapeBundle(bundle);
+  let existing = {};
+  try {
+    const { stdout } = await execFileP(
+      "/usr/bin/security",
+      ["find-generic-password", "-s", KEYCHAIN_ENTRY, "-w"],
+      { timeout: 3_000 },
+    );
+    existing = JSON.parse(stdout);
+  } catch {
+    // No existing entry — fine, we'll create it. (Unlikely path; aide
+    // only writes to keychain after operator already onboarded.)
+  }
+  const merged = {
+    ...existing,
+    claudeAiOauth: {
+      ...(existing?.claudeAiOauth ?? {}),
+      ...reshaped.claudeAiOauth,
+    },
+  };
+  const payload = JSON.stringify(merged);
+
+  // -U: update if exists, create if not. -s service, -a account
+  // (use the same UID-suffixed account name claude code itself uses
+  // — pull from existing if we have it). -w password (the JSON blob).
+  const accountName =
+    typeof existing?.account === "string"
+      ? existing.account
+      : process.env.USER || "default";
+  await execFileP(
+    "/usr/bin/security",
+    ["add-generic-password", "-U", "-s", KEYCHAIN_ENTRY, "-a", accountName, "-w", payload],
+    { timeout: 3_000 },
+  );
+
+  // Invalidate read cache so the next read sees what we just wrote
+  // (otherwise the 1s cache could mask the new value briefly).
+  readCache = { at: 0, value: null };
+}
+
 async function handleCommand(line, expectedToken) {
   let req;
   try {
@@ -163,6 +237,20 @@ async function handleCommand(line, expectedToken) {
         const msg = err instanceof Error ? err.message : String(err);
         log("warn", "read failed", { err: msg });
         return { ok: false, error: "keychain read failed" };
+      }
+    }
+    case "write": {
+      // Phase 2.6: aide pushes its own freshly-refreshed bundle into
+      // keychain so the host Claude Code app inherits it (and we
+      // both stop racing on the next anthropic-side rotation).
+      try {
+        await writeKeychain(req.bundle);
+        log("info", "write ok");
+        return { ok: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log("warn", "write failed", { err: msg });
+        return { ok: false, error: "keychain write failed" };
       }
     }
     case "ping":

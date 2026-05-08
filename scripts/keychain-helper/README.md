@@ -24,8 +24,11 @@ and Linux Docker Engine alike.
 
 - **macOS only.** Uses `/usr/bin/security find-generic-password`.
   Linux + Windows operators get nothing from this.
-- **READ only at MVP.** Write-back to keychain (so aide-driven
-  refreshes also rotate the Claude Code app's bundle) is a follow-up.
+- **READ + WRITE.** When aide refreshes the bundle itself (anthropic
+  fallback path), it pushes the new bundle back to keychain so the
+  Claude Code app inherits it on its next read. Write op:
+  `add-generic-password -U` with merge-existing-fields to preserve
+  any non-token metadata.
 - **Per-user.** Runs as the user that owns the keychain item; not a
   system-wide daemon.
 
@@ -88,8 +91,14 @@ the bearer token in `~/.aide/keychain.token`.
 |---|---|---|
 | `ping` | `{"op":"ping","auth":"…"}` | `{"ok":true,"pong":true}` |
 | `read` | `{"op":"read","auth":"…"}` | `{"ok":true,"bundle":{access_token,refresh_token,expires_at}}` |
+| `write` | `{"op":"write","auth":"…","bundle":{access_token,refresh_token,expires_at}}` | `{"ok":true}` |
 | (any) on auth fail | — | `{"ok":false,"error":"unauthorized"}` |
 | (any) on other error | — | `{"ok":false,"error":"…"}` |
+
+`write` merges the supplied tokens into the existing keychain entry,
+preserving any non-token fields (subscriptionType / scopes / etc.)
+the Claude Code app may have written. Invalidates the helper's
+internal read cache so the next `read` sees the new value.
 
 ## Container wiring
 
