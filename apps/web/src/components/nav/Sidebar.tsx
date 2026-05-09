@@ -102,9 +102,9 @@ export function Sidebar() {
         <div className="flex h-14 items-center border-b border-border px-5">
           <Link href="/dashboard" className="flex items-center gap-2.5 font-semibold">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-sm text-primary-foreground shadow-card">
-              a
+              C
             </div>
-            <span className="text-[15px] tracking-tight">aide</span>
+            <span className="text-[15px] tracking-tight">Caliber</span>
           </Link>
         </div>
         <nav className="flex-1 overflow-y-auto p-3">

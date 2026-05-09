@@ -1,8 +1,10 @@
-# aide
+# Caliber
 
-**AI Development Performance Evaluator** — A CLI tool that reads local Claude Code and Codex usage data to generate technical performance evaluation reports, similar to [ccusage](https://github.com/ryoppippi/ccusage).
+**Measure the caliber of your AI-assisted engineering.** A self-hostable gateway, audit log, and evaluator for teams that want to know exactly what their AI coding assistants are doing — and how well.
 
-**AI 開發績效評核工具** — 一個 CLI 工具，讀取本地端 Claude Code 與 Codex 的使用資料，以技術績效審核者的角色產出評核報告。
+**精準衡量你的 AI 工程力。** 自架的 gateway / 稽核 / 評核平台，讓團隊清楚知道 AI 助理到底在做什麼、做得多好。
+
+> Codename: `aide` — the workspace package names (`@aide/*`), GHCR images, and DB schema still use the original codename. Phase 2 of the rebrand will rename those.
 
 ---
 

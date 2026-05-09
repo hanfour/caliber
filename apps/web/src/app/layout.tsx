@@ -7,8 +7,8 @@ import { Providers } from './providers'
 import { ThemeProvider } from '@/components/theme-provider'
 
 export const metadata = {
-  title: 'aide',
-  description: 'AI Development Performance Evaluator'
+  title: 'Caliber',
+  description: 'Measure the caliber of your AI-assisted engineering.'
 }
 
 export default async function RootLayout({ children }: { children: ReactNode }) {

@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "aide",
+    "appName": "Caliber",
     "loading": "読み込み中…",
     "save": "保存",
     "saving": "保存中…",
@@ -344,12 +344,12 @@
     "rotateCredentials": "認証情報をローテーション",
     "reonboardSingleTitle": "「{name}」の OAuth 認証情報は再オンボーディングが必要です",
     "reonboardMultiTitle": "{count} 件の OAuth アカウントが再オンボーディングを必要としています",
-    "reonboardWarningBody": "refresh token が別のプロセス(ホストの Claude Code アプリ、別の aide インスタンス)によってローテーションされました。aide は自身でリフレッシュできません — Keychain から新しいバンドルを取得し、認証情報を更新して復旧してください。",
+    "reonboardWarningBody": "refresh token が別のプロセス(ホストの Claude Code アプリ、別の Caliber インスタンス)によってローテーションされました。Caliber は自身でリフレッシュできません — Keychain から新しいバンドルを取得し、認証情報を更新して復旧してください。",
     "reonboard": {
       "title": "OAuth 認証情報を再オンボーディング",
       "description": "「{name}」のローテーション済みバンドルを Keychain の新しいものに置き換えます。",
       "step1Label": "1. ゲートウェイホストのターミナルで実行してください",
-      "step1Hint": "Claude Code アプリの Keychain エントリを読み取り、aide が保存する JSON 形式に変換します。出力は stdout に — 下のボックスにコピーしてください。",
+      "step1Hint": "Claude Code アプリの Keychain エントリを読み取り、Caliber が保存する JSON 形式に変換します。出力は stdout に — 下のボックスにコピーしてください。",
       "step2Label": "2. JSON 出力をここに貼り付け",
       "invalidJson": "有効な JSON ではありません — 出力全体をコピーしたか確認してください。",
       "copyAriaLabel": "コマンドをコピー",
@@ -475,7 +475,7 @@
     "statusClaimed": "受領済み",
     "createDialog": {
       "title": "新しい API キー",
-      "description": "CLI やスクリプトから AIDE ゲートウェイを認証するためのキーを生成します。",
+      "description": "CLI やスクリプトから Caliber ゲートウェイを認証するためのキーを生成します。",
       "namePlaceholder": "例: Laptop CLI",
       "generate": "キーを生成",
       "generating": "生成中…",
@@ -865,7 +865,7 @@
     }
   },
   "signIn": {
-    "title": "aide にサインイン",
+    "title": "Caliber にサインイン",
     "subtitle": "プロバイダーのアカウントで続行します。",
     "google": "Google で続行",
     "github": "GitHub で続行",

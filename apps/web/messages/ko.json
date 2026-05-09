@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "aide",
+    "appName": "Caliber",
     "loading": "불러오는 중…",
     "save": "저장",
     "saving": "저장 중…",
@@ -344,12 +344,12 @@
     "rotateCredentials": "자격 증명 교체",
     "reonboardSingleTitle": "\"{name}\"의 OAuth 자격 증명을 다시 온보딩해야 합니다",
     "reonboardMultiTitle": "{count}개의 OAuth 계정이 다시 온보딩이 필요합니다",
-    "reonboardWarningBody": "refresh token이 다른 프로세스(호스트의 Claude Code 앱, 다른 aide 인스턴스)에 의해 교체되었습니다. aide는 자체적으로 새로 고칠 수 없습니다 — Keychain에서 새 번들을 추출하고 자격 증명을 교체하여 복구하세요.",
+    "reonboardWarningBody": "refresh token이 다른 프로세스(호스트의 Claude Code 앱, 다른 Caliber 인스턴스)에 의해 교체되었습니다. Caliber는 자체적으로 새로 고칠 수 없습니다 — Keychain에서 새 번들을 추출하고 자격 증명을 교체하여 복구하세요.",
     "reonboard": {
       "title": "OAuth 자격 증명 다시 온보딩",
       "description": "Keychain의 새 번들로 \"{name}\"의 교체된 번들을 대체합니다.",
       "step1Label": "1. 게이트웨이 호스트의 터미널에서 이 명령을 실행하세요",
-      "step1Hint": "Claude Code 앱의 Keychain 항목을 읽고 aide가 저장하는 JSON 형식으로 변환합니다. 출력은 stdout으로 — 아래 상자에 복사하세요.",
+      "step1Hint": "Claude Code 앱의 Keychain 항목을 읽고 Caliber가 저장하는 JSON 형식으로 변환합니다. 출력은 stdout으로 — 아래 상자에 복사하세요.",
       "step2Label": "2. JSON 출력을 여기에 붙여넣기",
       "invalidJson": "유효한 JSON이 아닙니다 — 전체 출력을 복사했는지 확인하세요.",
       "copyAriaLabel": "명령 복사",
@@ -475,7 +475,7 @@
     "statusClaimed": "수령됨",
     "createDialog": {
       "title": "새 API 키",
-      "description": "CLI 또는 스크립트에서 AIDE 게이트웨이를 인증하기 위한 키를 생성합니다.",
+      "description": "CLI 또는 스크립트에서 Caliber 게이트웨이를 인증하기 위한 키를 생성합니다.",
       "namePlaceholder": "예: Laptop CLI",
       "generate": "키 생성",
       "generating": "생성 중…",
@@ -865,7 +865,7 @@
     }
   },
   "signIn": {
-    "title": "aide에 로그인",
+    "title": "Caliber에 로그인",
     "subtitle": "공급자 계정으로 계속하세요.",
     "google": "Google로 계속",
     "github": "GitHub로 계속",

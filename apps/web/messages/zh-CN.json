@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "aide",
+    "appName": "Caliber",
     "loading": "加载中…",
     "save": "保存",
     "saving": "保存中…",
@@ -344,12 +344,12 @@
     "rotateCredentials": "轮换凭证",
     "reonboardSingleTitle": "「{name}」的 OAuth 凭证需要重新载入",
     "reonboardMultiTitle": "{count} 个 OAuth 账户需要重新载入",
-    "reonboardWarningBody": "refresh token 已被其他进程(主机上的 Claude Code 应用、其他 aide 实例)轮换。aide 无法自行刷新 — 从 Keychain 提取新的 bundle 并更新凭证以恢复。",
+    "reonboardWarningBody": "refresh token 已被其他进程(主机上的 Claude Code 应用、其他 Caliber 实例)轮换。Caliber 无法自行刷新 — 从 Keychain 提取新的 bundle 并更新凭证以恢复。",
     "reonboard": {
       "title": "重新载入 OAuth 凭证",
       "description": "用 Keychain 中的新 bundle 替换「{name}」已轮换的凭证。",
       "step1Label": "1. 在 gateway 主机的终端执行此命令",
-      "step1Hint": "读取 Claude Code 应用的 Keychain 条目并重塑为 aide 存储的 JSON 结构。输出至 stdout — 将其复制到下方框中。",
+      "step1Hint": "读取 Claude Code 应用的 Keychain 条目并重塑为 Caliber 存储的 JSON 结构。输出至 stdout — 将其复制到下方框中。",
       "step2Label": "2. 将 JSON 输出粘贴到此处",
       "invalidJson": "JSON 格式无效 — 请确保复制了完整的输出。",
       "copyAriaLabel": "复制命令",
@@ -475,7 +475,7 @@
     "statusClaimed": "已认领",
     "createDialog": {
       "title": "新建 API 密钥",
-      "description": "为从 CLI 或脚本访问 AIDE gateway 签发密钥。",
+      "description": "为从 CLI 或脚本访问 Caliber gateway 签发密钥。",
       "namePlaceholder": "例如:Laptop CLI",
       "generate": "生成密钥",
       "generating": "生成中…",
@@ -865,7 +865,7 @@
     }
   },
   "signIn": {
-    "title": "登录 aide",
+    "title": "登录 Caliber",
     "subtitle": "使用你的提供商账户登录。",
     "google": "使用 Google 登录",
     "github": "使用 GitHub 登录",

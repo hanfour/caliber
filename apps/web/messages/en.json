@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "aide",
+    "appName": "Caliber",
     "loading": "Loading…",
     "save": "Save",
     "saving": "Saving…",
@@ -307,7 +307,7 @@
     "rotateCredentials": "Rotate credentials",
     "reonboardSingleTitle": "OAuth credentials for \"{name}\" need re-onboarding",
     "reonboardMultiTitle": "{count} OAuth accounts need re-onboarding",
-    "reonboardWarningBody": "The refresh token was rotated by another process (the Claude Code app on the host, or another aide instance). aide cannot refresh on its own — extract a fresh bundle from your Keychain and rotate the credential to recover.",
+    "reonboardWarningBody": "The refresh token was rotated by another process (the Claude Code app on the host, or another Caliber instance). Caliber cannot refresh on its own — extract a fresh bundle from your Keychain and rotate the credential to recover.",
     "create": {
       "title": "New account",
       "subtitle": "Add upstream credentials so the gateway can route requests for this organization.",
@@ -349,7 +349,7 @@
       "title": "Re-onboard OAuth credentials",
       "description": "Replace the rotated bundle for \"{name}\" with a fresh one from your Keychain.",
       "step1Label": "1. Run this in a terminal on the gateway host",
-      "step1Hint": "Reads the Claude Code app's Keychain entry and reshapes it into the JSON shape aide stores. Output goes to stdout — copy it into the box below.",
+      "step1Hint": "Reads the Claude Code app's Keychain entry and reshapes it into the JSON shape Caliber stores. Output goes to stdout — copy it into the box below.",
       "step2Label": "2. Paste the JSON output here",
       "invalidJson": "Not valid JSON — make sure you copied the entire output.",
       "copyAriaLabel": "Copy command",
@@ -475,7 +475,7 @@
     "statusClaimed": "Claimed",
     "createDialog": {
       "title": "New API key",
-      "description": "Generate a key to authenticate the AIDE gateway from your CLI or scripts.",
+      "description": "Generate a key to authenticate the Caliber gateway from your CLI or scripts.",
       "namePlaceholder": "e.g. Laptop CLI",
       "generate": "Generate key",
       "generating": "Generating…",
@@ -865,7 +865,7 @@
     }
   },
   "signIn": {
-    "title": "Sign in to aide",
+    "title": "Sign in to Caliber",
     "subtitle": "Continue with your provider account.",
     "google": "Continue with Google",
     "github": "Continue with GitHub",
