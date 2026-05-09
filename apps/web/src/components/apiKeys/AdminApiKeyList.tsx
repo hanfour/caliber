@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -11,11 +12,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   adminStatusClassName,
-  ADMIN_STATUS_LABEL,
   deriveAdminKeyStatus,
+  type AdminKeyStatus,
 } from "./adminStatus";
 
 type AdminKeyRow = inferRouterOutputs<AppRouter>["apiKeys"]["listOrg"][number];
+
+const STATUS_LABEL_KEY: Record<AdminKeyStatus, string> = {
+  active: "statusActive",
+  pending_reveal: "statusPendingReveal",
+  reveal_expired: "statusRevealExpired",
+  claimed: "statusClaimed",
+};
 
 function formatCreated(ts: Date | string | null): string {
   const d = toDate(ts);
@@ -31,6 +39,8 @@ interface Props {
 export function AdminApiKeyList({ orgId, targetUserId }: Props) {
   const utils = trpc.useUtils();
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const t = useTranslations("memberApiKeys");
+  const tCommon = useTranslations("common");
   const {
     data: keys,
     isLoading,
@@ -39,28 +49,30 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
 
   const revoke = trpc.apiKeys.revoke.useMutation({
     onSuccess: () => {
-      toast.success("Key revoked");
+      toast.success(t("revokedToast"));
       utils.apiKeys.listOrg.invalidate({ orgId, userId: targetUserId });
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
-      toast.error(code === "FORBIDDEN" ? "Insufficient permission" : e.message);
+      toast.error(
+        code === "FORBIDDEN" ? tCommon("insufficientPermission") : e.message,
+      );
     },
     onSettled: () => setRevokingId(null),
   });
 
   const handleRevoke = (row: AdminKeyRow) => {
     if (typeof window === "undefined") return;
-    const ok = window.confirm(
-      `Revoke key "${row.name}"? This cannot be undone.`,
-    );
+    const ok = window.confirm(t("confirmRevoke", { name: row.name }));
     if (!ok) return;
     setRevokingId(row.id);
     revoke.mutate({ id: row.id });
   };
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return (
+      <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
+    );
   }
   if (error) {
     return <p className="text-xs text-destructive">{error.message}</p>;
@@ -76,7 +88,7 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
       <div className="flex flex-col items-center py-6 text-center">
         <KeyRound className="h-5 w-5 text-muted-foreground" />
         <p className="mt-2 text-sm text-muted-foreground">
-          No keys issued for this user yet.
+          {t("noKeysForUser")}
         </p>
       </div>
     );
@@ -88,19 +100,19 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
         <thead>
           <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
             <th scope="col" className="px-3 py-2 text-left font-medium">
-              Name
+              {t("name")}
             </th>
             <th scope="col" className="px-3 py-2 text-left font-medium">
-              Prefix
+              {t("prefix")}
             </th>
             <th scope="col" className="px-3 py-2 text-left font-medium">
-              Status
+              {t("status")}
             </th>
             <th scope="col" className="px-3 py-2 text-left font-medium">
-              Created
+              {t("created")}
             </th>
             <th scope="col" className="px-3 py-2 text-left font-medium">
-              Last used
+              {t("lastUsed")}
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium"></th>
           </tr>
@@ -126,7 +138,7 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
                     variant="outline"
                     className={adminStatusClassName(status)}
                   >
-                    {ADMIN_STATUS_LABEL[status]}
+                    {t(STATUS_LABEL_KEY[status])}
                   </Badge>
                 </td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">
@@ -145,7 +157,7 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
                     className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                     onClick={() => handleRevoke(row)}
                     disabled={isRevoking}
-                    aria-label={`Revoke ${row.name}`}
+                    aria-label={t("revokeAriaLabel", { name: row.name })}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

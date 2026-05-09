@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { toDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -74,6 +77,11 @@ export function deriveAccountStatus(
   return "active";
 }
 
+// English source-of-truth labels. Kept exported for non-React callers
+// (CSV exports, server-side log helpers, …) that can't reach
+// `useTranslations`. The interactive `<StatusBadge>` below resolves the
+// label via `common.*` keys instead so the badge respects the user's
+// locale.
 export const STATUS_LABEL: Record<AccountStatus, string> = {
   active: "Active",
   disabled: "Disabled",
@@ -82,6 +90,16 @@ export const STATUS_LABEL: Record<AccountStatus, string> = {
   paused: "Paused",
   expired: "Expired",
   error: "Error",
+};
+
+const STATUS_LABEL_KEY: Record<AccountStatus, string> = {
+  active: "active",
+  disabled: "disabled",
+  rate_limited: "rateLimited",
+  overloaded: "overloaded",
+  paused: "paused",
+  expired: "expired",
+  error: "error",
 };
 
 export const STATUS_TONE: Record<AccountStatus, StatusTone> = {
@@ -109,12 +127,13 @@ export const TONE_CLASSNAME: Record<StatusTone, string> = {
 };
 
 export function StatusBadge({ status }: { status: AccountStatus }) {
+  const t = useTranslations("common");
   return (
     <Badge
       variant="outline"
       className={cn("font-medium", TONE_CLASSNAME[STATUS_TONE[status]])}
     >
-      {STATUS_LABEL[status]}
+      {t(STATUS_LABEL_KEY[status])}
     </Badge>
   );
 }
