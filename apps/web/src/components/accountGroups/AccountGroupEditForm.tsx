@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -37,19 +38,23 @@ interface Props {
 
 export function AccountGroupEditForm({ orgId, group }: Props) {
   const utils = trpc.useUtils();
+  const t = useTranslations("accountGroups");
+  const tCreate = useTranslations("accountGroups.create");
+  const tDetail = useTranslations("accountGroups.detail");
+  const tCommon = useTranslations("common");
 
   const update = trpc.accountGroups.update.useMutation({
     onSuccess: () => {
-      toast.success("Group updated");
+      toast.success(t("updatedToast"));
       utils.accountGroups.list.invalidate({ orgId });
       utils.accountGroups.get.invalidate({ id: group.id });
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "FORBIDDEN") {
-        toast.error("Insufficient permission");
+        toast.error(tCommon("insufficientPermission"));
       } else if (code === "BAD_REQUEST") {
-        toast.error(e.message || "Invalid request");
+        toast.error(e.message || tCommon("error"));
       } else {
         toast.error(e.message);
       }
@@ -110,7 +115,7 @@ export function AccountGroupEditForm({ orgId, group }: Props) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="name">Name</Label>
+        <Label htmlFor="name">{tCreate("nameLabel")}</Label>
         <Input id="name" {...register("name")} />
         {errors.name && (
           <p className="text-xs text-destructive">{errors.name.message}</p>
@@ -118,7 +123,7 @@ export function AccountGroupEditForm({ orgId, group }: Props) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="description">Description</Label>
+        <Label htmlFor="description">{tCreate("descriptionLabel")}</Label>
         <textarea
           id="description"
           rows={2}
@@ -129,7 +134,7 @@ export function AccountGroupEditForm({ orgId, group }: Props) {
 
       <div className="grid grid-cols-3 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="rateMultiplier">Rate multiplier</Label>
+          <Label htmlFor="rateMultiplier">{tCreate("rateMultiplierLabel")}</Label>
           <Input
             id="rateMultiplier"
             type="number"
@@ -145,15 +150,15 @@ export function AccountGroupEditForm({ orgId, group }: Props) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="status">Status</Label>
+          <Label htmlFor="status">{t("status")}</Label>
           <select id="status" className={SELECT_CLASS} {...register("status")}>
-            <option value="active">Active</option>
-            <option value="disabled">Disabled</option>
+            <option value="active">{tCommon("active")}</option>
+            <option value="disabled">{tCommon("disabled")}</option>
           </select>
         </div>
 
         <div className="space-y-1.5">
-          <Label>Exclusive</Label>
+          <Label>{t("exclusive")}</Label>
           <label className="flex items-start gap-2 pt-2 text-sm">
             <input
               type="checkbox"
@@ -161,16 +166,14 @@ export function AccountGroupEditForm({ orgId, group }: Props) {
               {...register("isExclusive")}
             />
             <span className="text-xs text-muted-foreground">
-              Members not used by other groups
+              {tDetail("membersNotByOthers")}
             </span>
           </label>
         </div>
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Platform is fixed at <code className="font-mono">{group.platform}</code>{" "}
-        — to change it, delete and recreate the group (members would have to
-        re-add anyway since platform mismatch is rejected).
+        {tDetail("platformFixed", { platform: group.platform })}
       </p>
 
       <div className="flex justify-end pt-1">
@@ -178,7 +181,7 @@ export function AccountGroupEditForm({ orgId, group }: Props) {
           type="submit"
           disabled={!isDirty || isSubmitting || update.isPending}
         >
-          {update.isPending ? "Saving…" : "Save changes"}
+          {update.isPending ? tCommon("saving") : tCommon("saveChanges")}
         </Button>
       </div>
     </form>

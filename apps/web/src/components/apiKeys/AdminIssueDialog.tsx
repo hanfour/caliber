@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AlertTriangle, Copy } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +53,9 @@ export function AdminIssueDialog({
   targetUserLabel,
 }: Props) {
   const utils = trpc.useUtils();
+  const t = useTranslations("memberApiKeys.adminIssueDialog");
+  const tCreate = useTranslations("memberApiKeys.createDialog");
+  const tCommon = useTranslations("common");
   // One-time URL lives ONLY in component state — never logged, never echoed
   // through toasts, never placed in a URL query. Matches the self-issue contract.
   const [issued, setIssued] = useState<Issued | null>(null);
@@ -88,9 +92,9 @@ export function AdminIssueDialog({
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "FORBIDDEN") {
-        toast.error("Insufficient permission");
+        toast.error(tCommon("insufficientPermission"));
       } else if (code === "BAD_REQUEST") {
-        toast.error(e.message || "Invalid request");
+        toast.error(e.message || tCommon("error"));
       } else {
         toast.error(e.message);
       }
@@ -102,9 +106,9 @@ export function AdminIssueDialog({
     try {
       await navigator.clipboard.writeText(issued.revealUrl);
       // Toast omits the URL — treat like a credential-in-transit.
-      toast.success("Copied");
+      toast.success(tCreate("copied"));
     } catch {
-      toast.error("Clipboard unavailable");
+      toast.error(tCreate("copyFail"));
     }
   };
 
@@ -126,10 +130,9 @@ export function AdminIssueDialog({
         {issued ? (
           <>
             <DialogHeader>
-              <DialogTitle>URL issued</DialogTitle>
+              <DialogTitle>{t("issuedTitle")}</DialogTitle>
               <DialogDescription>
-                Issued to {targetUserLabel}. Share the URL with them through a
-                secure channel.
+                {t("issuedDescription", { target: targetUserLabel })}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -139,12 +142,11 @@ export function AdminIssueDialog({
               >
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  This URL is valid 24h and can be opened only ONCE. Share it
-                  securely — whoever opens it first holds the key.
+                  {t("warning")}
                 </span>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="apiKeyRevealUrl">One-time URL</Label>
+                <Label htmlFor="apiKeyRevealUrl">{t("urlLabel")}</Label>
                 <div className="flex items-stretch gap-2">
                   <code
                     id="apiKeyRevealUrl"
@@ -158,46 +160,43 @@ export function AdminIssueDialog({
                     size="sm"
                     onClick={handleCopy}
                     className="gap-1.5"
-                    aria-label="Copy one-time URL to clipboard"
+                    aria-label={t("copyUrlAriaLabel")}
                   >
                     <Copy className="h-4 w-4" />
-                    Copy
+                    {tCommon("copy")}
                   </Button>
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Prefix:{" "}
+                {tCreate("prefixLabel")}{" "}
                 <code className="font-mono text-foreground">
                   {issued.prefix}
                 </code>
               </p>
               <p className="text-xs text-muted-foreground">
-                If the user doesn&apos;t claim within 24h, the URL expires and a
-                new key must be issued.
+                {t("expireNote")}
               </p>
             </div>
             <DialogFooter>
               <Button type="button" onClick={() => onOpenChange(false)}>
-                Done
+                {tCreate("done")}
               </Button>
             </DialogFooter>
           </>
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Issue API key</DialogTitle>
+              <DialogTitle>{t("title")}</DialogTitle>
               <DialogDescription>
-                Generate a key for {targetUserLabel}. You&apos;ll receive a
-                one-time URL to share with them — the raw key is never shown to
-                you.
+                {t("description", { target: targetUserLabel })}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="adminApiKeyName">Name</Label>
+                <Label htmlFor="adminApiKeyName">{t("nameLabel")}</Label>
                 <Input
                   id="adminApiKeyName"
-                  placeholder="e.g. Laptop CLI"
+                  placeholder={t("namePlaceholder")}
                   autoComplete="off"
                   {...register("name")}
                 />
@@ -209,7 +208,7 @@ export function AdminIssueDialog({
               </div>
               {(teamsLoading || hasTeams) && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="adminApiKeyTeamId">Team (optional)</Label>
+                  <Label htmlFor="adminApiKeyTeamId">{t("teamOptionalLabel")}</Label>
                   <select
                     id="adminApiKeyTeamId"
                     className={SELECT_CLASS}
@@ -217,13 +216,13 @@ export function AdminIssueDialog({
                     {...register("teamId")}
                   >
                     {teamsLoading ? (
-                      <option value="">Loading teams…</option>
+                      <option value="">{t("loadingTeams")}</option>
                     ) : (
                       <>
-                        <option value="">— Any team —</option>
-                        {teams?.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}
+                        <option value="">{t("anyTeam")}</option>
+                        {teams?.map((team) => (
+                          <option key={team.id} value={team.id}>
+                            {team.name}
                           </option>
                         ))}
                       </>
@@ -242,10 +241,10 @@ export function AdminIssueDialog({
                   variant="outline"
                   onClick={() => onOpenChange(false)}
                 >
-                  Cancel
+                  {tCommon("cancel")}
                 </Button>
                 <Button type="submit" disabled={issue.isPending}>
-                  {issue.isPending ? "Generating…" : "Generate one-time URL"}
+                  {issue.isPending ? t("generating") : t("generateUrl")}
                 </Button>
               </DialogFooter>
             </form>

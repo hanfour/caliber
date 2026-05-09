@@ -1,30 +1,17 @@
+import { getTranslations } from 'next-intl/server'
 import { configuredProviderIds } from '@aide/auth'
 import { signIn } from '@/auth'
 import { getEnv } from '@/env'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 
-const ERROR_MESSAGES: Record<string, { title: string; description: string }> = {
-  AccessDenied: {
-    title: '尚未取得存取權限',
-    description: '您的 Email 尚未被邀請加入任何組織。請聯絡管理員取得邀請連結。',
-  },
-  OAuthAccountNotLinked: {
-    title: '此 Email 已綁定其他登入方式',
-    description: '請改用先前使用的登入提供者（例如 Google 或 GitHub）登入。',
-  },
-  Verification: {
-    title: '驗證連結已失效',
-    description: '請重新嘗試登入以取得新的驗證連結。',
-  },
-  Configuration: {
-    title: '系統設定錯誤',
-    description: '登入服務目前無法使用，請稍後再試或聯絡管理員。',
-  },
-  Default: {
-    title: '登入失敗',
-    description: '發生未預期的錯誤，請稍後再試。',
-  },
+// Map NextAuth error codes to translation key suffixes inside `signIn.errors.*`.
+const ERROR_KEY_MAP: Record<string, { title: string; description: string }> = {
+  AccessDenied: { title: 'accessDeniedTitle', description: 'accessDeniedDesc' },
+  OAuthAccountNotLinked: { title: 'oauthNotLinkedTitle', description: 'oauthNotLinkedDesc' },
+  Verification: { title: 'verificationTitle', description: 'verificationDesc' },
+  Configuration: { title: 'configurationTitle', description: 'configurationDesc' },
+  Default: { title: 'defaultTitle', description: 'defaultDesc' },
 }
 
 export default async function SignInPage({
@@ -33,8 +20,16 @@ export default async function SignInPage({
   searchParams: Promise<{ error?: string; callbackUrl?: string }>
 }) {
   const params = await searchParams
+  const t = await getTranslations('signIn')
+  const tErrors = await getTranslations('signIn.errors')
   const errorKey = params.error
-  const error = errorKey ? (ERROR_MESSAGES[errorKey] ?? ERROR_MESSAGES.Default) : null
+  const errorEntry = errorKey ? (ERROR_KEY_MAP[errorKey] ?? ERROR_KEY_MAP.Default!) : null
+  const error = errorEntry
+    ? {
+        title: tErrors(errorEntry.title as 'defaultTitle'),
+        description: tErrors(errorEntry.description as 'defaultDesc'),
+      }
+    : null
   const callbackUrl = params.callbackUrl ?? '/dashboard'
   const providers = configuredProviderIds(getEnv())
   const showGoogle = providers.includes('google')
@@ -56,8 +51,8 @@ export default async function SignInPage({
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground text-lg font-semibold">
             a
           </div>
-          <CardTitle className="text-2xl">Sign in to aide</CardTitle>
-          <CardDescription>AI Development Performance Evaluator</CardDescription>
+          <CardTitle className="text-2xl">{t('title')}</CardTitle>
+          <CardDescription>{t('tagline')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {error && (
@@ -72,21 +67,21 @@ export default async function SignInPage({
           {showGoogle && (
             <form action={signInGoogle}>
               <Button type="submit" variant="outline" className="w-full" size="lg">
-                Sign in with Google
+                {t('googleBtn')}
               </Button>
             </form>
           )}
           {showGitHub && (
             <form action={signInGitHub}>
               <Button type="submit" variant="outline" className="w-full" size="lg">
-                Sign in with GitHub
+                {t('githubBtn')}
               </Button>
             </form>
           )}
         </CardContent>
         <CardFooter className="flex-col gap-1 text-center text-xs text-muted-foreground">
-          <p>僅受邀請的 Email 可以註冊與登入。</p>
-          <p>如需邀請請聯絡您的組織管理員。</p>
+          <p>{t('footer1')}</p>
+          <p>{t('footer2')}</p>
         </CardFooter>
       </Card>
     </main>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { usePermissions } from "@/lib/usePermissions";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,9 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
   const router = useRouter();
   const utils = trpc.useUtils();
   const { can } = usePermissions();
+  const t = useTranslations("accountGroups");
+  const tDetail = useTranslations("accountGroups.detail");
+  const tCommon = useTranslations("common");
   const {
     data: group,
     isLoading,
@@ -34,7 +38,7 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
 
   const del = trpc.accountGroups.delete.useMutation({
     onSuccess: () => {
-      toast.success("Group deleted");
+      toast.success(t("deletedToast"));
       utils.accountGroups.list.invalidate({ orgId });
       router.push(`/dashboard/organizations/${orgId}/account-groups`);
     },
@@ -47,7 +51,7 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
       className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
     >
       <ArrowLeft className="h-3.5 w-3.5" />
-      Back to groups
+      {tDetail("backToGroups")}
     </Link>
   );
 
@@ -56,7 +60,7 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
       <div className="space-y-4">
         {backLink}
         <Card className="shadow-card p-6 text-sm text-muted-foreground">
-          Loading…
+          {tCommon("loading")}
         </Card>
       </div>
     );
@@ -71,11 +75,11 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
         <Card className="shadow-card flex flex-col items-center p-10 text-center">
           <ShieldAlert className="h-6 w-6 text-muted-foreground" />
           <h3 className="mt-3 text-sm font-semibold">
-            {isNotFound ? "Group not found" : "Unable to load group"}
+            {isNotFound ? t("groupNotFound") : t("unableToLoad")}
           </h3>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
             {isNotFound
-              ? "The group may have been deleted, or you don't have access to this org."
+              ? t("groupNotFoundDesc")
               : error?.message}
           </p>
         </Card>
@@ -101,9 +105,7 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
 
   const handleDelete = () => {
     if (typeof window === "undefined") return;
-    const ok = window.confirm(
-      `Delete group "${group.name}"? Soft-deletes the group; member accounts are NOT deleted, only their membership.`,
-    );
+    const ok = window.confirm(tDetail("confirmDelete", { name: group.name }));
     if (!ok) return;
     del.mutate({ id: group.id });
   };
@@ -118,8 +120,7 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
             {group.name}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            <code className="font-mono">{group.platform}</code> · rate ×
-            {group.rateMultiplier} · {group.isExclusive ? "exclusive" : "shared"} ·{" "}
+            <code className="font-mono">{group.platform}</code> · {t("rateLabel", { multiplier: String(group.rateMultiplier) })} · {group.isExclusive ? t("exclusiveLabel") : t("sharedLabel")} ·{" "}
             <span
               className={
                 group.status === "active"
@@ -143,16 +144,16 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
             disabled={del.isPending}
           >
             <Trash2 className="h-4 w-4" />
-            {del.isPending ? "Deleting…" : "Delete group"}
+            {del.isPending ? tDetail("deletingGroup") : t("deleteGroup")}
           </Button>
         )}
       </div>
 
       <Card className="shadow-card">
         <CardHeader>
-          <CardTitle>Members ({group.members.length})</CardTitle>
+          <CardTitle>{t("membersWithCount", { count: group.members.length })}</CardTitle>
           <CardDescription>
-            The scheduler picks among active members by lowest priority first.
+            {t("membersDesc")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -160,7 +161,7 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
             <AccountGroupMembers orgId={orgId} group={group} />
           ) : (
             <p className="text-sm text-muted-foreground">
-              You can view members but not modify them. Ask an org admin for{" "}
+              {t("viewMembersOnly")}{" "}
               <code className="font-mono">account_group.manage_members</code>.
             </p>
           )}
@@ -170,10 +171,9 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
       {canUpdate && (
         <Card className="shadow-card">
           <CardHeader>
-            <CardTitle>Settings</CardTitle>
+            <CardTitle>{tDetail("settingsTitle")}</CardTitle>
             <CardDescription>
-              Rename, retune the rate cap, or disable scheduler picks
-              temporarily.
+              {tDetail("settingsDesc")}
             </CardDescription>
           </CardHeader>
           <CardContent>

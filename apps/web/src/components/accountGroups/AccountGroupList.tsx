@@ -10,6 +10,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -40,6 +41,8 @@ function GroupRowActions({
   isDeleting,
 }: RowActionsProps) {
   const { can } = usePermissions();
+  const t = useTranslations("accountGroups");
+  const tCommon = useTranslations("common");
   const canUpdate = can({
     type: "account_group.update",
     orgId,
@@ -54,9 +57,7 @@ function GroupRowActions({
 
   const handleDelete = () => {
     if (typeof window === "undefined") return;
-    const ok = window.confirm(
-      `Delete group "${row.name}"? Soft-deletes the group and stops the scheduler from picking it. Members are not deleted.`,
-    );
+    const ok = window.confirm(t("confirmDelete", { name: row.name }));
     if (!ok) return;
     onDelete(row);
   };
@@ -68,7 +69,7 @@ function GroupRowActions({
           variant="ghost"
           size="sm"
           className="h-8 w-8 p-0"
-          aria-label={`Actions for ${row.name}`}
+          aria-label={t("actionsAriaLabel", { name: row.name })}
         >
           <MoreHorizontal className="h-4 w-4" />
         </Button>
@@ -79,7 +80,7 @@ function GroupRowActions({
             <Link
               href={`/dashboard/organizations/${orgId}/account-groups/${row.id}`}
             >
-              Edit / manage members
+              {t("editAndManage")}
             </Link>
           </DropdownMenuItem>
         )}
@@ -91,7 +92,7 @@ function GroupRowActions({
               disabled={isDeleting}
               className="text-destructive focus:text-destructive"
             >
-              {isDeleting ? "Deleting…" : "Delete"}
+              {isDeleting ? tCommon("deleting") : tCommon("delete")}
             </DropdownMenuItem>
           </>
         )}
@@ -107,6 +108,8 @@ interface Props {
 export function AccountGroupList({ orgId }: Props) {
   const utils = trpc.useUtils();
   const { can } = usePermissions();
+  const t = useTranslations("accountGroups");
+  const tCommon = useTranslations("common");
   const canCreate = can({ type: "account_group.create", orgId });
   const {
     data: groups,
@@ -117,12 +120,12 @@ export function AccountGroupList({ orgId }: Props) {
 
   const del = trpc.accountGroups.delete.useMutation({
     onSuccess: () => {
-      toast.success("Group removed");
+      toast.success(t("removedToast"));
       utils.accountGroups.list.invalidate({ orgId });
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
-      toast.error(code === "FORBIDDEN" ? "Insufficient permission" : e.message);
+      toast.error(code === "FORBIDDEN" ? tCommon("insufficientPermission") : e.message);
     },
     onSettled: () => setDeletingId(null),
   });
@@ -139,7 +142,7 @@ export function AccountGroupList({ orgId }: Props) {
       <Button size="sm" className="gap-1.5" asChild>
         <Link href={newHref}>
           <Plus className="h-4 w-4" />
-          New group
+          {t("newGroup")}
         </Link>
       </Button>
     </div>
@@ -150,7 +153,7 @@ export function AccountGroupList({ orgId }: Props) {
       <div className="space-y-4">
         {headerCta}
         <Card className="shadow-card p-6 text-sm text-muted-foreground">
-          Loading…
+          {tCommon("loading")}
         </Card>
       </div>
     );
@@ -162,7 +165,7 @@ export function AccountGroupList({ orgId }: Props) {
         {headerCta}
         <Card className="shadow-card flex flex-col items-center p-10 text-center">
           <ShieldAlert className="h-6 w-6 text-muted-foreground" />
-          <h3 className="mt-3 text-sm font-semibold">Unable to load groups</h3>
+          <h3 className="mt-3 text-sm font-semibold">{t("unableToLoad")}</h3>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
             {error.message}
           </p>
@@ -177,16 +180,15 @@ export function AccountGroupList({ orgId }: Props) {
         {headerCta}
         <Card className="shadow-card flex flex-col items-center p-10 text-center">
           <Layers className="h-6 w-6 text-muted-foreground" />
-          <h3 className="mt-3 text-sm font-semibold">No account groups yet</h3>
+          <h3 className="mt-3 text-sm font-semibold">{t("emptyTitle")}</h3>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-            Groups let the scheduler load-balance multiple upstream accounts of
-            the same platform under a shared rate cap.
+            {t("emptyDesc")}
           </p>
           {canCreate && (
             <Button size="sm" className="mt-4 gap-1.5" asChild>
               <Link href={newHref}>
                 <Plus className="h-4 w-4" />
-                New group
+                {t("newGroup")}
               </Link>
             </Button>
           )}
@@ -203,19 +205,19 @@ export function AccountGroupList({ orgId }: Props) {
           <thead>
             <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Name
+                {t("name")}
               </th>
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Platform
+                {t("platform")}
               </th>
               <th scope="col" className="px-4 py-2 text-right font-medium">
-                Rate ×
+                {t("rateMultiplier")}
               </th>
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Exclusive
+                {t("exclusive")}
               </th>
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Status
+                {t("status")}
               </th>
               <th scope="col" className="px-4 py-2 text-right font-medium" />
             </tr>
@@ -247,7 +249,7 @@ export function AccountGroupList({ orgId }: Props) {
                   {row.rateMultiplier}
                 </td>
                 <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                  {row.isExclusive ? "Yes" : "No"}
+                  {row.isExclusive ? t("exclusiveYes") : t("exclusiveNo")}
                 </td>
                 <td className="px-4 py-2.5 text-xs">
                   <span

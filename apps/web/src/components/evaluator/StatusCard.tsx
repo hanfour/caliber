@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +19,7 @@ interface Props {
 
 export function StatusCard({ orgId }: Props) {
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const t = useTranslations("evaluator.status");
 
   const {
     data: status,
@@ -29,10 +31,10 @@ export function StatusCard({ orgId }: Props) {
     setIsRefreshing(true);
     try {
       await refetch();
-      toast.success("Status refreshed");
+      toast.success(t("refreshedToast"));
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to refresh";
+        error instanceof Error ? error.message : t("refreshFailed");
       toast.error(message);
     } finally {
       setIsRefreshing(false);
@@ -43,10 +45,10 @@ export function StatusCard({ orgId }: Props) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Cron Health</CardTitle>
+          <CardTitle>{t("cronHealthTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Loading status…</p>
+          <p className="text-sm text-muted-foreground">{t("loadingStatus")}</p>
         </CardContent>
       </Card>
     );
@@ -56,11 +58,11 @@ export function StatusCard({ orgId }: Props) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Cron Health</CardTitle>
+          <CardTitle>{t("cronHealthTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            No status data available
+            {t("noData")}
           </p>
         </CardContent>
       </Card>
@@ -68,7 +70,7 @@ export function StatusCard({ orgId }: Props) {
   }
 
   const formatDate = (date: Date | string | null) => {
-    if (!date) return "Never";
+    if (!date) return t("never");
     const d = typeof date === "string" ? new Date(date) : date;
     return d.toLocaleString("en-US", {
       year: "numeric",
@@ -93,9 +95,9 @@ export function StatusCard({ orgId }: Props) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>Cron Health</CardTitle>
+          <CardTitle>{t("cronHealthTitle")}</CardTitle>
           <CardDescription>
-            Current health and coverage statistics for evaluations.
+            {t("cronHealthDesc")}
           </CardDescription>
         </div>
         <Button
@@ -104,7 +106,7 @@ export function StatusCard({ orgId }: Props) {
           onClick={handleRefresh}
           disabled={isRefreshing}
         >
-          {isRefreshing ? "Refreshing…" : "Refresh"}
+          {isRefreshing ? t("refreshing") : t("refresh")}
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -112,12 +114,12 @@ export function StatusCard({ orgId }: Props) {
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
             <p className="text-xs font-semibold text-muted-foreground uppercase">
-              Last Cron Run
+              {t("lastCronRun")}
             </p>
             <p className="text-sm font-mono">{formatDate(status.lastCronAt)}</p>
             {status.lastPeriodStart && (
               <p className="text-xs text-muted-foreground">
-                Period from {periodStart}
+                {t("periodFrom", { date: periodStart })}
               </p>
             )}
           </div>
@@ -125,10 +127,10 @@ export function StatusCard({ orgId }: Props) {
           {/* Next cron scheduled */}
           <div className="space-y-1">
             <p className="text-xs font-semibold text-muted-foreground uppercase">
-              Next Cron Scheduled
+              {t("nextCronScheduled")}
             </p>
             <p className="text-sm font-mono">{formatDate(status.nextCronAt)}</p>
-            <p className="text-xs text-muted-foreground">00:05 UTC daily</p>
+            <p className="text-xs text-muted-foreground">{t("cronDailyAt", { time: "00:05" })}</p>
           </div>
         </div>
 
@@ -139,14 +141,14 @@ export function StatusCard({ orgId }: Props) {
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-1">
             <p className="text-xs font-semibold text-muted-foreground uppercase">
-              Members
+              {t("members")}
             </p>
             <p className="text-2xl font-semibold">{status.memberCount}</p>
           </div>
 
           <div className="space-y-1">
             <p className="text-xs font-semibold text-muted-foreground uppercase">
-              Reports (24h)
+              {t("reports24h")}
             </p>
             <p className="text-2xl font-semibold">
               {status.reportsWrittenLast24h}
@@ -155,7 +157,7 @@ export function StatusCard({ orgId }: Props) {
 
           <div className="space-y-1">
             <p className="text-xs font-semibold text-muted-foreground uppercase">
-              Coverage
+              {t("coverage")}
             </p>
             <p className="text-2xl font-semibold">
               {status.coveragePct.toFixed(1)}%

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import {
   Card,
@@ -17,14 +18,6 @@ interface Props {
   /** ISO timestamp marking the upper bound of the report window. */
   rangeTo: string;
 }
-
-const SESSION_TYPE_LABEL: Record<string, string> = {
-  feature_dev: "Feature dev",
-  bug_fix: "Bug fix",
-  refactor: "Refactor",
-  exploration: "Exploration",
-  other: "Other",
-};
 
 function fmtPercent(v: number | null): string {
   if (v == null) return "—";
@@ -45,18 +38,27 @@ function fmtNumber(v: number | null, digits = 0): string {
  * Plan 4C follow-up #3.
  */
 export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
+  const t = useTranslations("evaluator.facetSummary");
   const { data, isLoading, error } = trpc.reports.facetSummary.useQuery({
     orgId,
     userId,
     range: { from: rangeFrom, to: rangeTo },
   });
 
+  const SESSION_TYPE_LABEL: Record<string, string> = {
+    feature_dev: t("sessionTypeFeatureDev"),
+    bug_fix: t("sessionTypeBugFix"),
+    refactor: t("sessionTypeRefactor"),
+    exploration: t("sessionTypeExploration"),
+    other: t("sessionTypeOther"),
+  };
+
   if (isLoading) {
     return (
       <Card>
         <CardContent className="py-6">
           <p className="text-sm text-muted-foreground">
-            Loading facet drill-down…
+            {t("loading")}
           </p>
         </CardContent>
       </Card>
@@ -68,7 +70,7 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
       <Card>
         <CardContent className="py-6">
           <p className="text-sm text-destructive">
-            Failed to load facet summary: {error.message}
+            {t("loadFail", { message: error.message })}
           </p>
         </CardContent>
       </Card>
@@ -84,21 +86,20 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Facet drill-down</CardTitle>
+        <CardTitle>{t("title")}</CardTitle>
         <CardDescription>
-          Per-session classifications extracted by the LLM facet pipeline for
-          this period.
+          {t("description")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
           <div>
-            <dt className="text-muted-foreground text-xs uppercase">Sessions</dt>
+            <dt className="text-muted-foreground text-xs uppercase">{t("sessions")}</dt>
             <dd className="text-base font-medium tabular-nums">{data.total}</dd>
           </div>
           <div>
             <dt className="text-muted-foreground text-xs uppercase">
-              Success rate
+              {t("successRate")}
             </dt>
             <dd className="text-base font-medium tabular-nums">
               {fmtPercent(data.outcomeSuccessRate)}
@@ -106,7 +107,7 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
           </div>
           <div>
             <dt className="text-muted-foreground text-xs uppercase">
-              Avg. helpfulness
+              {t("avgHelpfulness")}
             </dt>
             <dd className="text-base font-medium tabular-nums">
               {data.avgClaudeHelpfulness == null
@@ -116,7 +117,7 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
           </div>
           <div>
             <dt className="text-muted-foreground text-xs uppercase">
-              Failed extractions
+              {t("failedExtractions")}
             </dt>
             <dd className="text-base font-medium tabular-nums">
               {data.failed}
@@ -124,7 +125,7 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
           </div>
           <div>
             <dt className="text-muted-foreground text-xs uppercase">
-              Bugs caught
+              {t("bugsCaught")}
             </dt>
             <dd className="text-base font-medium tabular-nums">
               {fmtNumber(data.totalBugsCaught)}
@@ -132,7 +133,7 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
           </div>
           <div>
             <dt className="text-muted-foreground text-xs uppercase">
-              Friction events
+              {t("frictionEvents")}
             </dt>
             <dd className="text-base font-medium tabular-nums">
               {fmtNumber(data.totalFrictionCount)}
@@ -140,7 +141,7 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
           </div>
           <div>
             <dt className="text-muted-foreground text-xs uppercase">
-              Codex errors
+              {t("codexErrors")}
             </dt>
             <dd className="text-base font-medium tabular-nums">
               {fmtNumber(data.totalCodexErrors)}
@@ -151,7 +152,7 @@ export function FacetSummaryCard({ orgId, userId, rangeFrom, rangeTo }: Props) {
         {sessionTypeEntries.length > 0 && (
           <div>
             <h3 className="text-xs uppercase text-muted-foreground mb-2">
-              Session types
+              {t("sessionTypes")}
             </h3>
             <ul className="flex flex-wrap gap-2 text-xs">
               {sessionTypeEntries.map(([key, count]) => (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import {
   Card,
@@ -38,6 +39,7 @@ interface Props {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function TeamAggregate({ orgId, teamId, teamName }: Props) {
+  const t = useTranslations("evaluator.leaderboard");
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
@@ -54,7 +56,7 @@ export function TeamAggregate({ orgId, teamId, teamName }: Props) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Loading team evaluation data…
+          {t("loadingTeam")}
         </CardContent>
       </Card>
     );
@@ -74,11 +76,11 @@ export function TeamAggregate({ orgId, teamId, teamName }: Props) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Team Evaluation</CardTitle>
-          <CardDescription>30-day score history</CardDescription>
+          <CardTitle className="text-base">{t("teamEvaluationTitle")}</CardTitle>
+          <CardDescription>{t("thirtyDayHistory")}</CardDescription>
         </CardHeader>
         <CardContent className="py-6 text-center text-sm text-muted-foreground">
-          No evaluation reports found for the last 30 days.
+          {t("noReports")}
         </CardContent>
       </Card>
     );
@@ -112,16 +114,28 @@ export function TeamAggregate({ orgId, teamId, teamName }: Props) {
   const reportCount = reports.length;
   const uniqueMembers = new Set(reports.map((r) => r.userId)).size;
 
+  // Pick the right pluralized window summary.
+  const windowSummary =
+    reportCount === 1 && uniqueMembers === 1
+      ? t("thirtyDayWindowSummaryBothOne")
+      : reportCount === 1
+        ? t("thirtyDayWindowSummaryOne", { members: uniqueMembers })
+        : uniqueMembers === 1
+          ? t("thirtyDayWindowSummaryOneMember", { reports: reportCount })
+          : t("thirtyDayWindowSummary", {
+              reports: reportCount,
+              members: uniqueMembers,
+            });
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between space-y-0">
         <div className="space-y-1">
           <CardTitle className="text-base">
-            Team Evaluation — {teamName}
+            {t("teamEvaluationFor", { name: teamName })}
           </CardTitle>
           <CardDescription>
-            30-day window · {reportCount} report{reportCount !== 1 ? "s" : ""}{" "}
-            across {uniqueMembers} member{uniqueMembers !== 1 ? "s" : ""}
+            {windowSummary}
           </CardDescription>
         </div>
 

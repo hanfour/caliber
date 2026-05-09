@@ -1,6 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -57,15 +58,13 @@ interface PreviewCardProps {
 
 function PreviewCard({ rubric, result }: PreviewCardProps) {
   const { preview } = result;
+  const t = useTranslations("evaluator.rubrics.dryRunPreview");
 
   return (
     <div className="space-y-4">
       {/* Usage-only warning */}
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        <span className="font-semibold">Usage-only preview</span> — body signals (keyword, refusal,
-        tool diversity) show zero hits because request body decryption is disabled from the API
-        server. Scores reflect threshold-based metrics only (tokens, cost, cache ratios, model
-        diversity).
+        <span className="font-semibold">{t("usageOnlyTitle")}</span> — {t("usageOnlyBody")}
       </div>
 
       {/* Period + rubric summary */}
@@ -78,7 +77,7 @@ function PreviewCard({ rubric, result }: PreviewCardProps) {
       {/* Total score */}
       <div className="rounded-lg border border-border p-4 space-y-2">
         <div className="flex items-baseline justify-between">
-          <span className="text-sm font-semibold">Total score</span>
+          <span className="text-sm font-semibold">{t("totalScore")}</span>
           <span className="text-2xl font-bold tabular-nums">{preview.totalScore}</span>
         </div>
         <ScoreBar score={preview.totalScore} max={120} />
@@ -88,7 +87,7 @@ function PreviewCard({ rubric, result }: PreviewCardProps) {
       {preview.sectionScores.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Section breakdown
+            {t("sectionBreakdown")}
           </h3>
           <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
             {preview.sectionScores.map((sec) => (
@@ -110,11 +109,11 @@ function PreviewCard({ rubric, result }: PreviewCardProps) {
 
       {/* Data quality */}
       <div className="text-xs text-muted-foreground grid grid-cols-2 gap-x-4 gap-y-1">
-        <span>Total requests</span>
+        <span>{t("totalRequests")}</span>
         <span className="tabular-nums">{preview.dataQuality.totalRequests}</span>
-        <span>Captured bodies</span>
+        <span>{t("capturedBodies")}</span>
         <span className="tabular-nums">{preview.dataQuality.capturedRequests}</span>
-        <span>Coverage</span>
+        <span>{t("coverage")}</span>
         <span className="tabular-nums">
           {Math.round(preview.dataQuality.coverageRatio * 100)}%
         </span>
@@ -133,6 +132,8 @@ interface DryRunPreviewProps {
 
 export function DryRunPreview({ orgId, rubric, onClose }: DryRunPreviewProps) {
   const searchParams = useSearchParams();
+  const t = useTranslations("evaluator.rubrics.dryRunPreview");
+  const tCommon = useTranslations("common");
   // userId can be overridden via ?userId=<uuid> for admins previewing a specific member.
   // Falls back to the current user via the me.session call handled server-side.
   // We pass an empty string when no override, and the query stays disabled until
@@ -152,26 +153,26 @@ export function DryRunPreview({ orgId, rubric, onClose }: DryRunPreviewProps) {
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Dry run preview</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
-            Scores the last 7 days of your usage data against this rubric without saving a report.
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="py-2">
           {!userId && (
             <p className="text-sm text-muted-foreground">
-              Waiting for session…
+              {t("waitingSession")}
             </p>
           )}
 
           {userId && isLoading && (
-            <p className="text-sm text-muted-foreground">Running preview…</p>
+            <p className="text-sm text-muted-foreground">{t("running")}</p>
           )}
 
           {error && (
             <p className="text-sm text-destructive">
-              {error.message || "Failed to run preview"}
+              {error.message || t("failedDefault")}
             </p>
           )}
 
@@ -180,7 +181,7 @@ export function DryRunPreview({ orgId, rubric, onClose }: DryRunPreviewProps) {
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
-            Close
+            {tCommon("close")}
           </Button>
         </DialogFooter>
       </DialogContent>

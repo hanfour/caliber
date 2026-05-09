@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AlertTriangle, Copy } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,9 @@ interface Props {
 
 export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
   const utils = trpc.useUtils();
+  const t = useTranslations("memberApiKeys.createDialog");
+  const tList = useTranslations("memberApiKeys");
+  const tCommon = useTranslations("common");
   // The raw key lives ONLY in component state. It is never logged, never sent
   // to a toast string, and never persisted. Closing the dialog drops it.
   const [revealed, setRevealed] = useState<Revealed | null>(null);
@@ -69,7 +73,7 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
-      toast.error(code === "FORBIDDEN" ? "Insufficient permission" : e.message);
+      toast.error(code === "FORBIDDEN" ? tCommon("insufficientPermission") : e.message);
     },
   });
 
@@ -78,9 +82,9 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
     try {
       await navigator.clipboard.writeText(revealed.raw);
       // Toast text intentionally does NOT include the raw value.
-      toast.success("Copied");
+      toast.success(t("copied"));
     } catch {
-      toast.error("Clipboard unavailable");
+      toast.error(t("copyFail"));
     }
   };
 
@@ -94,9 +98,9 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
         {revealed ? (
           <>
             <DialogHeader>
-              <DialogTitle>API key created</DialogTitle>
+              <DialogTitle>{t("createdTitle")}</DialogTitle>
               <DialogDescription>
-                Copy this key now. You won&apos;t be able to see it again.
+                {t("createdDescription")}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -105,10 +109,10 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
                 className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
               >
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>Save this key now. We can&apos;t show it again.</span>
+                <span>{t("warning")}</span>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="apiKeyRaw">Key</Label>
+                <Label htmlFor="apiKeyRaw">{t("keyLabel")}</Label>
                 <div className="flex items-stretch gap-2">
                   <code
                     id="apiKeyRaw"
@@ -122,15 +126,15 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
                     size="sm"
                     onClick={handleCopy}
                     className="gap-1.5"
-                    aria-label="Copy key to clipboard"
+                    aria-label={t("copyAriaLabel")}
                   >
                     <Copy className="h-4 w-4" />
-                    Copy
+                    {tCommon("copy")}
                   </Button>
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Prefix:{" "}
+                {t("prefixLabel")}{" "}
                 <code className="font-mono text-foreground">
                   {revealed.prefix}
                 </code>
@@ -138,25 +142,24 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
             </div>
             <DialogFooter>
               <Button type="button" onClick={() => onOpenChange(false)}>
-                Done
+                {t("done")}
               </Button>
             </DialogFooter>
           </>
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>New API key</DialogTitle>
+              <DialogTitle>{t("title")}</DialogTitle>
               <DialogDescription>
-                Generate a key to authenticate the AIDE gateway from your CLI or
-                scripts.
+                {t("description")}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="apiKeyName">Name</Label>
+                <Label htmlFor="apiKeyName">{tList("name")}</Label>
                 <Input
                   id="apiKeyName"
-                  placeholder="e.g. Laptop CLI"
+                  placeholder={t("namePlaceholder")}
                   autoComplete="off"
                   {...register("name")}
                 />
@@ -172,10 +175,10 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
                   variant="outline"
                   onClick={() => onOpenChange(false)}
                 >
-                  Cancel
+                  {tCommon("cancel")}
                 </Button>
                 <Button type="submit" disabled={issue.isPending}>
-                  {issue.isPending ? "Generating…" : "Generate key"}
+                  {issue.isPending ? t("generating") : t("generate")}
                 </Button>
               </DialogFooter>
             </form>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Mail, CheckCircle2, XCircle } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { trpc } from '@/lib/trpc/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 export default function AcceptInvitePage() {
   const params = useParams()
   const router = useRouter()
+  const t = useTranslations('invitePage')
   const token = params?.token as string
   const [state, setState] = useState<'idle' | 'accepting' | 'accepted' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState<string>('')
@@ -23,8 +25,8 @@ export default function AcceptInvitePage() {
     onError: (e) => {
       setState('error')
       const code = (e.data as { code?: string } | undefined)?.code
-      if (code === 'FORBIDDEN') setErrorMsg('This invite was issued to a different email.')
-      else if (code === 'NOT_FOUND') setErrorMsg('This invite is invalid or has expired.')
+      if (code === 'FORBIDDEN') setErrorMsg(t('errorWrongEmail'))
+      else if (code === 'NOT_FOUND') setErrorMsg(t('errorInvalid'))
       else setErrorMsg(e.message)
     }
   })
@@ -57,23 +59,23 @@ export default function AcceptInvitePage() {
           </div>
           <CardTitle>
             {state === 'accepted'
-              ? 'Invite accepted'
+              ? t('acceptedTitle')
               : state === 'error'
-              ? 'Unable to accept invite'
-              : 'Accepting invite…'}
+              ? t('errorTitle')
+              : t('acceptingTitle')}
           </CardTitle>
           <CardDescription>
             {state === 'accepted'
-              ? 'Redirecting you to the workspace.'
+              ? t('acceptedSubtitle')
               : state === 'error'
               ? errorMsg
-              : 'Please wait a moment.'}
+              : t('acceptingSubtitle')}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {state === 'error' && (
             <div className="flex justify-center">
-              <Button onClick={() => router.push('/dashboard')}>Go to dashboard</Button>
+              <Button onClick={() => router.push('/dashboard')}>{t('goToDashboard')}</Button>
             </div>
           )}
         </CardContent>

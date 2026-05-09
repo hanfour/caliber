@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,10 +35,13 @@ interface Props {
 export function AccountGroupCreateForm({ orgId }: Props) {
   const router = useRouter();
   const utils = trpc.useUtils();
+  const t = useTranslations("accountGroups.create");
+  const tGroups = useTranslations("accountGroups");
+  const tCommon = useTranslations("common");
 
   const create = trpc.accountGroups.create.useMutation({
     onSuccess: (group) => {
-      toast.success(`Group "${group?.name}" created`);
+      toast.success(tGroups("createdToast", { name: group?.name ?? "" }));
       utils.accountGroups.list.invalidate({ orgId });
       router.push(
         `/dashboard/organizations/${orgId}/account-groups/${group.id}`,
@@ -46,9 +50,9 @@ export function AccountGroupCreateForm({ orgId }: Props) {
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "FORBIDDEN") {
-        toast.error("Insufficient permission");
+        toast.error(tCommon("insufficientPermission"));
       } else if (code === "BAD_REQUEST") {
-        toast.error(e.message || "Invalid request");
+        toast.error(e.message || tCommon("error"));
       } else {
         toast.error(e.message);
       }
@@ -82,10 +86,10 @@ export function AccountGroupCreateForm({ orgId }: Props) {
   return (
     <form onSubmit={onSubmit} className="space-y-5">
       <div className="space-y-1.5">
-        <Label htmlFor="name">Name</Label>
+        <Label htmlFor="name">{t("nameLabel")}</Label>
         <Input
           id="name"
-          placeholder="e.g. openai-prod-pool"
+          placeholder={t("nameHelpPlaceholder")}
           {...register("name")}
         />
         {errors.name && (
@@ -94,18 +98,18 @@ export function AccountGroupCreateForm({ orgId }: Props) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="description">Description (optional)</Label>
+        <Label htmlFor="description">{t("descriptionOptionalLabel")}</Label>
         <textarea
           id="description"
           rows={2}
           className={TEXTAREA_CLASS}
-          placeholder="What's this pool for?"
+          placeholder={t("descriptionHelpPlaceholder")}
           {...register("description")}
         />
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="platform">Platform</Label>
+        <Label htmlFor="platform">{t("platformLabel")}</Label>
         <select
           id="platform"
           className={SELECT_CLASS}
@@ -115,14 +119,13 @@ export function AccountGroupCreateForm({ orgId }: Props) {
           <option value="anthropic">Anthropic</option>
         </select>
         <p className="text-xs text-muted-foreground">
-          All members must be upstream accounts of the same platform — the
-          scheduler dispatches based on group platform.
+          {t("platformAllSamePlatform")}
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="rateMultiplier">Rate multiplier</Label>
+          <Label htmlFor="rateMultiplier">{t("rateMultiplierLabel")}</Label>
           <Input
             id="rateMultiplier"
             type="number"
@@ -131,8 +134,7 @@ export function AccountGroupCreateForm({ orgId }: Props) {
             {...register("rateMultiplier")}
           />
           <p className="text-xs text-muted-foreground">
-            Scales each member account&apos;s effective concurrency. 1.0 = no
-            change.
+            {t("rateMultiplierHint")}
           </p>
           {errors.rateMultiplier && (
             <p className="text-xs text-destructive">
@@ -142,7 +144,7 @@ export function AccountGroupCreateForm({ orgId }: Props) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="isExclusive">Exclusive</Label>
+          <Label htmlFor="isExclusive">{tGroups("exclusive")}</Label>
           <label className="flex items-start gap-2 pt-2 text-sm">
             <input
               id="isExclusive"
@@ -151,8 +153,7 @@ export function AccountGroupCreateForm({ orgId }: Props) {
               {...register("isExclusive")}
             />
             <span className="text-xs text-muted-foreground">
-              When enabled, accounts in this group are NOT used by any other
-              group&apos;s scheduler picks.
+              {t("exclusiveHint")}
             </span>
           </label>
         </div>
@@ -161,11 +162,11 @@ export function AccountGroupCreateForm({ orgId }: Props) {
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" asChild>
           <Link href={`/dashboard/organizations/${orgId}/account-groups`}>
-            Cancel
+            {tCommon("cancel")}
           </Link>
         </Button>
         <Button type="submit" disabled={isSubmitting || create.isPending}>
-          {create.isPending ? "Creating…" : "Create group"}
+          {create.isPending ? t("submitting") : t("submit")}
         </Button>
       </div>
     </form>

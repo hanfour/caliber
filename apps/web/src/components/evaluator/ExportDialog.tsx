@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, Download } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,8 @@ interface Props {
 export function ExportDialog({ open, onOpenChange }: Props) {
   const [loading, setLoading] = useState(false);
   const utils = trpc.useUtils();
+  const t = useTranslations("evaluator.exportDialog");
+  const tCommon = useTranslations("common");
 
   const handleDownload = async () => {
     try {
@@ -39,11 +42,11 @@ export function ExportDialog({ open, onOpenChange }: Props) {
       a.click();
       URL.revokeObjectURL(url);
 
-      toast.success("Export downloaded successfully");
+      toast.success(t("downloadedToast"));
       onOpenChange(false);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Export failed. Please try again.";
+        err instanceof Error ? err.message : t("exportFailed");
       toast.error(message);
     } finally {
       setLoading(false);
@@ -54,9 +57,9 @@ export function ExportDialog({ open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Export My Data</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
-            Download all your evaluation data as a JSON file
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -66,11 +69,10 @@ export function ExportDialog({ open, onOpenChange }: Props) {
             <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                Full Data Export
+                {t("warningTitle")}
               </p>
               <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5">
-                This will export all evaluation reports and body request metadata
-                associated with your account. The file may be large.
+                {t("warningDesc")}
               </p>
             </div>
           </div>
@@ -79,24 +81,24 @@ export function ExportDialog({ open, onOpenChange }: Props) {
           <div className="space-y-3">
             <div>
               <p className="text-sm font-semibold text-foreground mb-2">
-                Included:
+                {t("includedHeading")}
               </p>
               <ul className="text-xs text-muted-foreground space-y-1 ml-4">
-                <li>• All evaluation reports (scores, narratives, evidence)</li>
-                <li>• Body request metadata (capture dates, retention info)</li>
+                <li>• {t("included1")}</li>
+                <li>• {t("included2")}</li>
                 <li>
-                  • Full LLM analysis (you always see your own complete data)
+                  • {t("included3")}
                 </li>
               </ul>
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground mb-2">
-                Not included:
+                {t("notIncludedHeading")}
               </p>
               <ul className="text-xs text-muted-foreground space-y-1 ml-4">
-                <li>• Encrypted request body content</li>
+                <li>• {t("notIncluded1")}</li>
                 <li className="text-[11px]">
-                  (Contact your administrator for decrypted exports)
+                  {t("notIncluded2")}
                 </li>
               </ul>
             </div>
@@ -109,7 +111,7 @@ export function ExportDialog({ open, onOpenChange }: Props) {
             onClick={() => onOpenChange(false)}
             disabled={loading}
           >
-            Cancel
+            {tCommon("cancel")}
           </Button>
           <Button
             onClick={handleDownload}
@@ -119,12 +121,12 @@ export function ExportDialog({ open, onOpenChange }: Props) {
             {loading ? (
               <>
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                Exporting…
+                {t("exporting")}
               </>
             ) : (
               <>
                 <Download className="h-4 w-4" />
-                Download
+                {t("downloadBtn")}
               </>
             )}
           </Button>

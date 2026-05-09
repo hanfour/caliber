@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,11 +67,13 @@ export function ReonboardDialog({
   onClose,
 }: ReonboardDialogProps) {
   const utils = trpc.useUtils();
+  const t = useTranslations("accounts.reonboard");
+  const tCommon = useTranslations("common");
   const [credentials, setCredentials] = useState("");
 
   const reonboard = trpc.accounts.reonboard.useMutation({
     onSuccess: () => {
-      toast.success("Account re-onboarded successfully");
+      toast.success(t("successToast"));
       utils.accounts.list.invalidate({ orgId });
       setCredentials("");
       onClose();
@@ -78,11 +81,11 @@ export function ReonboardDialog({
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "FORBIDDEN") {
-        toast.error("You do not have permission to re-onboard this account");
+        toast.error(t("permissionFail"));
       } else if (code === "BAD_REQUEST") {
-        toast.error(e.message || "Invalid credentials format");
+        toast.error(e.message || t("invalidFormat"));
       } else {
-        toast.error(e.message || "Re-onboard failed");
+        toast.error(e.message || t("failToast"));
       }
     },
   });
@@ -101,9 +104,9 @@ export function ReonboardDialog({
   const copyCmd = async () => {
     try {
       await navigator.clipboard.writeText(KEYCHAIN_EXTRACT_CMD);
-      toast.success("Command copied to clipboard");
+      toast.success(t("copyToast"));
     } catch {
-      toast.error("Clipboard unavailable — copy manually");
+      toast.error(t("copyFail"));
     }
   };
 
@@ -119,18 +122,16 @@ export function ReonboardDialog({
     >
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Re-onboard OAuth credentials</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
-            {account
-              ? `Replace the rotated bundle for "${account.name}" with a fresh one from your Keychain.`
-              : ""}
+            {account ? t("description", { name: account.name }) : ""}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
             <Label className="text-xs font-medium">
-              1. Run this in a terminal on the gateway host
+              {t("step1Label")}
             </Label>
             <div className="relative">
               <pre className="whitespace-pre-wrap break-all rounded-md border border-input bg-muted/30 p-3 pr-12 text-xs leading-relaxed">
@@ -141,21 +142,19 @@ export function ReonboardDialog({
                 size="sm"
                 className="absolute right-1.5 top-1.5 h-7 w-7 p-0"
                 onClick={copyCmd}
-                aria-label="Copy command"
+                aria-label={t("copyAriaLabel")}
               >
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Reads the Claude Code app&rsquo;s Keychain entry and reshapes it
-              into the JSON shape aide stores. Output goes to stdout — copy it
-              into the box below.
+              {t("step1Hint")}
             </p>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="reonboard-credentials" className="text-xs font-medium">
-              2. Paste the JSON output here
+              {t("step2Label")}
             </Label>
             <textarea
               id="reonboard-credentials"
@@ -168,7 +167,7 @@ export function ReonboardDialog({
             />
             {hasInput && !validJson && (
               <p className="text-xs text-destructive">
-                Not valid JSON — make sure you copied the entire output.
+                {t("invalidJson")}
               </p>
             )}
           </div>
@@ -176,13 +175,13 @@ export function ReonboardDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={reonboard.isPending}>
-            Cancel
+            {tCommon("cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={submitDisabled}>
             {reonboard.isPending && (
               <Loader2 className="h-4 w-4 animate-spin" />
             )}
-            Re-onboard
+            {t("submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

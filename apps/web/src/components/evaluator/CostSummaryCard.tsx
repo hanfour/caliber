@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -9,24 +10,25 @@ interface Props {
   className?: string;
 }
 
-function fmtUsd(v: number | null): string {
-  if (v == null) return "Unlimited";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(v);
-}
-
 export function CostSummaryCard({ orgId, variant = "full", className }: Props) {
+  const t = useTranslations("evaluator.costs");
   const { data, isLoading, error } = trpc.evaluator.costSummary.useQuery({
     orgId,
   });
+
+  const fmtUsd = (v: number | null): string => {
+    if (v == null) return t("unlimited");
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(v);
+  };
 
   if (isLoading) {
     return (
       <Card className={className}>
         <CardContent className="py-6">
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
         </CardContent>
       </Card>
     );
@@ -36,7 +38,7 @@ export function CostSummaryCard({ orgId, variant = "full", className }: Props) {
       <Card className={className}>
         <CardContent className="py-6">
           <p className="text-sm text-destructive">
-            Failed to load cost summary: {error.message}
+            {t("loadFail", { message: error.message })}
           </p>
         </CardContent>
       </Card>
@@ -61,7 +63,7 @@ export function CostSummaryCard({ orgId, variant = "full", className }: Props) {
       <Card className={className}>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">
-            This month&apos;s LLM spend
+            {t("monthlySpendCompact")}
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
@@ -84,7 +86,7 @@ export function CostSummaryCard({ orgId, variant = "full", className }: Props) {
           )}
           {data.halted && (
             <p className="text-xs text-amber-600 mt-2">
-              Halted until next month (UTC)
+              {t("haltedCompact")}
             </p>
           )}
         </CardContent>
@@ -92,27 +94,27 @@ export function CostSummaryCard({ orgId, variant = "full", className }: Props) {
     );
   }
 
+  const monthLabel = new Date().toLocaleString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+
   return (
     <Card className={className}>
       <CardHeader>
         <CardTitle>
-          This month —{" "}
-          {new Date().toLocaleString("en-US", {
-            month: "long",
-            year: "numeric",
-          })}
+          {t("thisMonthHeading", { month: monthLabel })}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {data.halted && (
           <div className="text-sm border border-amber-300 bg-amber-50 text-amber-900 rounded px-3 py-2">
-            This org is halted until next month boundary (UTC). LLM evaluation
-            is paused; rule-based scoring continues.
+            {t("haltedNotice")}
           </div>
         )}
         {data.warningThresholdReached && !data.halted && (
           <div className="text-sm border border-red-300 bg-red-50 text-red-900 rounded px-3 py-2">
-            You&apos;ve reached 80% of this month&apos;s budget.
+            {t("warning80")}
           </div>
         )}
 
@@ -136,16 +138,16 @@ export function CostSummaryCard({ orgId, variant = "full", className }: Props) {
           )}
           <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
             <div>
-              <div className="text-muted-foreground">Remaining</div>
+              <div className="text-muted-foreground">{t("remaining")}</div>
               <div className="font-medium tabular-nums">
                 {data.remainingUsd == null
-                  ? "Unlimited"
+                  ? t("unlimited")
                   : fmtUsd(data.remainingUsd)}
               </div>
             </div>
             <div>
               <div className="text-muted-foreground">
-                Projected end-of-month
+                {t("projected")}
               </div>
               <div className="font-medium tabular-nums">
                 {fmtUsd(data.projectedEndOfMonthUsd)}

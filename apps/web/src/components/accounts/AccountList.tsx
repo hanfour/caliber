@@ -10,6 +10,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -45,6 +46,8 @@ function AccountRowActions({
   isDeleting,
 }: AccountRowActionsProps) {
   const { can } = usePermissions();
+  const t = useTranslations("accounts");
+  const tCommon = useTranslations("common");
   const canRotate = can({ type: "account.rotate", orgId, accountId: row.id });
   const canUpdate = can({ type: "account.update", orgId, accountId: row.id });
   const canDelete = can({ type: "account.delete", orgId, accountId: row.id });
@@ -56,9 +59,7 @@ function AccountRowActions({
 
   const handleDelete = () => {
     if (typeof window === "undefined") return;
-    const ok = window.confirm(
-      `Remove account "${row.name}"? This marks it as deleted and unschedulable.`,
-    );
+    const ok = window.confirm(t("confirmDelete", { name: row.name }));
     if (!ok) return;
     onDelete(row);
   };
@@ -70,7 +71,7 @@ function AccountRowActions({
           variant="ghost"
           size="sm"
           className="h-8 w-8 p-0"
-          aria-label={`Actions for ${row.name}`}
+          aria-label={t("actionsAriaLabel", { name: row.name })}
         >
           <MoreHorizontal className="h-4 w-4" />
         </Button>
@@ -83,7 +84,7 @@ function AccountRowActions({
         {canReonboard && (
           <DropdownMenuItem onSelect={() => onReonboard(row)}>
             <Key className="h-4 w-4" />
-            Re-onboard from Keychain
+            {t("reonboardFromKeychain")}
           </DropdownMenuItem>
         )}
         {/* Rotate + Edit flows land in a follow-up PR. Kept disabled here so
@@ -93,17 +94,17 @@ function AccountRowActions({
         {canRotate && row.type !== "oauth" && (
           <DropdownMenuItem disabled>
             <Key className="h-4 w-4" />
-            Rotate credentials
+            {t("rotateCredentials")}
             <span className="ml-auto text-[10px] text-muted-foreground">
-              Soon
+              {tCommon("comingSoon")}
             </span>
           </DropdownMenuItem>
         )}
         {canUpdate && (
           <DropdownMenuItem disabled>
-            Edit
+            {tCommon("edit")}
             <span className="ml-auto text-[10px] text-muted-foreground">
-              Soon
+              {tCommon("comingSoon")}
             </span>
           </DropdownMenuItem>
         )}
@@ -115,7 +116,7 @@ function AccountRowActions({
               disabled={isDeleting}
               className="text-destructive focus:text-destructive"
             >
-              {isDeleting ? "Deleting…" : "Delete"}
+              {isDeleting ? tCommon("deleting") : tCommon("delete")}
             </DropdownMenuItem>
           </>
         )}
@@ -131,6 +132,8 @@ interface AccountListProps {
 export function AccountList({ orgId }: AccountListProps) {
   const utils = trpc.useUtils();
   const { can } = usePermissions();
+  const t = useTranslations("accounts");
+  const tCommon = useTranslations("common");
   const canCreate = can({ type: "account.create", orgId, teamId: null });
   const {
     data: accounts,
@@ -145,12 +148,12 @@ export function AccountList({ orgId }: AccountListProps) {
 
   const del = trpc.accounts.delete.useMutation({
     onSuccess: () => {
-      toast.success("Account removed");
+      toast.success(t("removedToast"));
       utils.accounts.list.invalidate({ orgId });
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
-      toast.error(code === "FORBIDDEN" ? "Insufficient permission" : e.message);
+      toast.error(code === "FORBIDDEN" ? tCommon("insufficientPermission") : e.message);
     },
     onSettled: () => {
       setDeletingId(null);
@@ -169,7 +172,7 @@ export function AccountList({ orgId }: AccountListProps) {
       <Button size="sm" className="gap-1.5" asChild>
         <Link href={newAccountHref}>
           <Plus className="h-4 w-4" />
-          New account
+          {t("newAccount")}
         </Link>
       </Button>
     </div>
@@ -180,7 +183,7 @@ export function AccountList({ orgId }: AccountListProps) {
       <div className="space-y-4">
         {headerCta}
         <Card className="shadow-card p-6 text-sm text-muted-foreground">
-          Loading…
+          {tCommon("loading")}
         </Card>
       </div>
     );
@@ -193,7 +196,7 @@ export function AccountList({ orgId }: AccountListProps) {
         <Card className="shadow-card flex flex-col items-center p-10 text-center">
           <ShieldAlert className="h-6 w-6 text-muted-foreground" />
           <h3 className="mt-3 text-sm font-semibold">
-            Unable to load accounts
+            {t("unableToLoad")}
           </h3>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
             {error.message}
@@ -210,17 +213,16 @@ export function AccountList({ orgId }: AccountListProps) {
         <Card className="shadow-card flex flex-col items-center p-10 text-center">
           <Key className="h-6 w-6 text-muted-foreground" />
           <h3 className="mt-3 text-sm font-semibold">
-            No upstream accounts yet
+            {t("emptyTitle")}
           </h3>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-            Add an Anthropic API key or OAuth credential to start routing
-            requests.
+            {t("emptyHint")}
           </p>
           {canCreate && (
             <Button size="sm" className="mt-4 gap-1.5" asChild>
               <Link href={newAccountHref}>
                 <Plus className="h-4 w-4" />
-                New account
+                {t("newAccount")}
               </Link>
             </Button>
           )}
@@ -249,14 +251,11 @@ export function AccountList({ orgId }: AccountListProps) {
               <div className="space-y-1">
                 <p className="font-semibold text-amber-900 dark:text-amber-200">
                   {invalidGrantAccounts.length === 1
-                    ? `OAuth credentials for "${invalidGrantAccounts[0]!.name}" need re-onboarding`
-                    : `${invalidGrantAccounts.length} OAuth accounts need re-onboarding`}
+                    ? t("reonboardSingleTitle", { name: invalidGrantAccounts[0]!.name })
+                    : t("reonboardMultiTitle", { count: invalidGrantAccounts.length })}
                 </p>
                 <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
-                  The refresh token was rotated by another process (the
-                  Claude Code app on the host, or another aide instance).
-                  aide cannot refresh on its own — extract a fresh bundle
-                  from your Keychain and rotate the credential to recover.
+                  {t("reonboardWarningBody")}
                 </p>
               </div>
               {invalidGrantAccounts.length === 1 && (
@@ -271,7 +270,7 @@ export function AccountList({ orgId }: AccountListProps) {
                     })
                   }
                 >
-                  Re-onboard from Keychain
+                  {t("reonboardFromKeychain")}
                 </Button>
               )}
             </div>
@@ -283,25 +282,25 @@ export function AccountList({ orgId }: AccountListProps) {
           <thead>
             <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Name
+                {t("name")}
               </th>
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Platform
+                {t("platform")}
               </th>
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Type
+                {t("type")}
               </th>
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Status
+                {t("status")}
               </th>
               <th scope="col" className="px-4 py-2 text-right font-medium">
-                Priority
+                {t("priority")}
               </th>
               <th scope="col" className="px-4 py-2 text-right font-medium">
-                Concurrency
+                {t("concurrency")}
               </th>
               <th scope="col" className="px-4 py-2 text-left font-medium">
-                Last used
+                {t("lastUsed")}
               </th>
               <th scope="col" className="px-4 py-2 text-right font-medium"></th>
             </tr>
@@ -322,7 +321,7 @@ export function AccountList({ orgId }: AccountListProps) {
                     {row.platform}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                    {row.type === "oauth" ? "OAuth" : "API key"}
+                    {row.type === "oauth" ? t("typeOauth") : t("typeApiKey")}
                   </td>
                   <td className="px-4 py-2.5">
                     <StatusBadge status={status} />

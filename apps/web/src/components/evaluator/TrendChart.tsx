@@ -3,6 +3,8 @@
 // Pure SVG trend chart — no chart library dependency.
 // Mirrors the horizontal-bar approach in UsageChart: lightweight, no extra bundle cost.
 
+import { useTranslations } from "next-intl";
+
 const VIEWBOX_W = 600;
 const VIEWBOX_H = 160;
 const PAD_LEFT = 36;
@@ -62,12 +64,13 @@ function buildAreaPath(points: ScorePoint[]): string {
 const Y_TICKS = [0, 40, 80, 100, 120];
 
 export function TrendChart({ series, teamSeries }: Props) {
+  const t = useTranslations("evaluator.trendChart");
   const total = series.length;
 
   if (total === 0) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        No data for this period.
+        {t("noData")}
       </div>
     );
   }
@@ -88,7 +91,7 @@ export function TrendChart({ series, teamSeries }: Props) {
     <svg
       viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
       className="w-full"
-      aria-label="30-day score trend"
+      aria-label={t("ariaLabel")}
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">

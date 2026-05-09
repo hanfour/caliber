@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -22,6 +23,8 @@ interface Props {
 
 export function AccountGroupMembers({ orgId, group }: Props) {
   const utils = trpc.useUtils();
+  const t = useTranslations("accountGroups.detail");
+  const tCommon = useTranslations("common");
   // Server-side platform narrowing: avoids pulling every anthropic account
   // when this group is openai-only (and vice versa). `accounts.list`
   // accepts an optional `platform` filter — backward-compatible.
@@ -55,20 +58,20 @@ export function AccountGroupMembers({ orgId, group }: Props) {
 
   const addMember = trpc.accountGroups.addMember.useMutation({
     onSuccess: () => {
-      toast.success("Member added");
+      toast.success(t("memberAddedToast"));
       setPickedAccountId("");
       setPickedPriority("50");
       invalidate();
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
-      toast.error(code === "FORBIDDEN" ? "Insufficient permission" : e.message);
+      toast.error(code === "FORBIDDEN" ? tCommon("insufficientPermission") : e.message);
     },
   });
 
   const removeMember = trpc.accountGroups.removeMember.useMutation({
     onSuccess: () => {
-      toast.success("Member removed");
+      toast.success(t("memberRemovedToast"));
       invalidate();
     },
     onError: (e) => toast.error(e.message),
@@ -76,7 +79,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
 
   const setPriority = trpc.accountGroups.setMemberPriority.useMutation({
     onSuccess: (_data, vars) => {
-      toast.success("Priority updated");
+      toast.success(t("priorityUpdatedToast"));
       setPriorityDrafts((d) => {
         const next = { ...d };
         delete next[vars.accountId];
@@ -95,7 +98,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
       priorityNum < 0 ||
       priorityNum > 1000
     ) {
-      toast.error("Priority must be 0-1000");
+      toast.error(t("priorityRange"));
       return;
     }
     addMember.mutate({
@@ -108,7 +111,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
   const handleRemove = (accountId: string, accountName: string) => {
     if (typeof window === "undefined") return;
     const ok = window.confirm(
-      `Remove "${accountName}" from group "${group.name}"? The account itself is not deleted.`,
+      t("confirmRemoveMember", { name: accountName, group: group.name }),
     );
     if (!ok) return;
     removeMember.mutate({ groupId: group.id, accountId });
@@ -123,7 +126,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
       priorityNum < 0 ||
       priorityNum > 1000
     ) {
-      toast.error("Priority must be 0-1000");
+      toast.error(t("priorityRange"));
       return;
     }
     setPriority.mutate({
@@ -138,27 +141,26 @@ export function AccountGroupMembers({ orgId, group }: Props) {
       <div className="rounded-md border border-border">
         {group.members.length === 0 ? (
           <div className="p-6 text-center text-sm text-muted-foreground">
-            No members yet — add one of the eligible {group.platform} accounts
-            below.
+            {t("noMembersYet", { platform: group.platform })}
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
                 <th scope="col" className="px-4 py-2 text-left font-medium">
-                  Account
+                  {t("memberAccount")}
                 </th>
                 <th scope="col" className="px-4 py-2 text-left font-medium">
-                  Type
+                  {t("memberType")}
                 </th>
                 <th scope="col" className="px-4 py-2 text-left font-medium">
-                  Status
+                  {t("memberStatus")}
                 </th>
                 <th scope="col" className="px-4 py-2 text-left font-medium">
-                  Schedulable
+                  {t("memberSchedulable")}
                 </th>
                 <th scope="col" className="px-4 py-2 text-right font-medium">
-                  Priority
+                  {t("memberPriority")}
                 </th>
                 <th scope="col" className="px-4 py-2 text-right font-medium" />
               </tr>
@@ -178,7 +180,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
                       {m.accountName}
                       {m.accountDeletedAt !== null && (
                         <span className="ml-2 text-xs text-destructive">
-                          (deleted)
+                          {t("deletedSuffix")}
                         </span>
                       )}
                     </td>
@@ -187,7 +189,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
                     </td>
                     <td className="px-4 py-2.5 text-xs">{m.accountStatus}</td>
                     <td className="px-4 py-2.5 text-xs">
-                      {m.accountSchedulable ? "Yes" : "No"}
+                      {m.accountSchedulable ? t("schedulableYes") : t("schedulableNo")}
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex items-center gap-1.5">
@@ -211,7 +213,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
                             onClick={() => handleSavePriority(m.accountId)}
                             disabled={busy}
                           >
-                            Save
+                            {t("saveBtn")}
                           </Button>
                         )}
                       </div>
@@ -223,7 +225,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
                         className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                         onClick={() => handleRemove(m.accountId, m.accountName)}
                         disabled={busy}
-                        aria-label={`Remove ${m.accountName}`}
+                        aria-label={t("removeAriaLabel", { name: m.accountName })}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -237,12 +239,10 @@ export function AccountGroupMembers({ orgId, group }: Props) {
       </div>
 
       <div className="rounded-md border border-dashed border-border p-4">
-        <h4 className="mb-3 text-sm font-medium">Add member</h4>
+        <h4 className="mb-3 text-sm font-medium">{t("addMemberHeading")}</h4>
         {eligibleAccounts.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            No eligible accounts — every {group.platform} account in this org is
-            already a member, or there are no {group.platform} accounts at all.
-            Create one in the Accounts tab first.
+            {t("noEligibleAccounts", { platform: group.platform })}
           </p>
         ) : (
           <div className="flex items-end gap-3">
@@ -251,7 +251,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
                 htmlFor="add-account"
                 className="text-xs text-muted-foreground"
               >
-                Account
+                {t("memberAccount")}
               </label>
               <select
                 id="add-account"
@@ -259,7 +259,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
                 value={pickedAccountId}
                 onChange={(e) => setPickedAccountId(e.target.value)}
               >
-                <option value="">— Select an account —</option>
+                <option value="">{t("selectAccount")}</option>
                 {eligibleAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} ({a.type === "oauth" ? "OAuth" : "API key"})
@@ -272,7 +272,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
                 htmlFor="add-priority"
                 className="text-xs text-muted-foreground"
               >
-                Priority
+                {t("memberPriority")}
               </label>
               <Input
                 id="add-priority"
@@ -290,7 +290,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
               className="gap-1.5"
             >
               <Plus className="h-4 w-4" />
-              {addMember.isPending ? "Adding…" : "Add"}
+              {addMember.isPending ? t("addingMember") : t("addBtn")}
             </Button>
           </div>
         )}

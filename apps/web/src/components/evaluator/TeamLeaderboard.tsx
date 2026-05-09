@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import {
   Card,
@@ -43,16 +44,17 @@ function trendDirection(
 }
 
 function TrendArrow({ direction }: { direction: TrendDirection }) {
+  const t = useTranslations("evaluator.leaderboard");
   if (direction === "up")
     return (
-      <TrendingUp className="h-3.5 w-3.5 text-emerald-500" aria-label="up" />
+      <TrendingUp className="h-3.5 w-3.5 text-emerald-500" aria-label={t("trendUp")} />
     );
   if (direction === "down")
     return (
-      <TrendingDown className="h-3.5 w-3.5 text-red-500" aria-label="down" />
+      <TrendingDown className="h-3.5 w-3.5 text-red-500" aria-label={t("trendDown")} />
     );
   return (
-    <Minus className="h-3.5 w-3.5 text-muted-foreground" aria-label="flat" />
+    <Minus className="h-3.5 w-3.5 text-muted-foreground" aria-label={t("trendFlat")} />
   );
 }
 
@@ -68,6 +70,7 @@ interface Props {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function TeamLeaderboard({ orgId, teamId, members }: Props) {
+  const t = useTranslations("evaluator.leaderboard");
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
@@ -100,7 +103,7 @@ export function TeamLeaderboard({ orgId, teamId, members }: Props) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Loading member scores…
+          {t("loading")}
         </CardContent>
       </Card>
     );
@@ -149,12 +152,12 @@ export function TeamLeaderboard({ orgId, teamId, members }: Props) {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            {leaderboardEnabled ? "Leaderboard" : "Member Scores"}
+            {leaderboardEnabled ? t("leaderboardTitle") : t("memberScoresTitle")}
           </CardTitle>
-          <CardDescription>Individual scores — last 30 days</CardDescription>
+          <CardDescription>{t("thirtyDayHistory")}</CardDescription>
         </CardHeader>
         <CardContent className="py-6 text-center text-sm text-muted-foreground">
-          No individual reports found for this period.
+          {t("noIndividualReports")}
         </CardContent>
       </Card>
     );
@@ -173,12 +176,12 @@ export function TeamLeaderboard({ orgId, teamId, members }: Props) {
     <Card className="overflow-hidden">
       <CardHeader>
         <CardTitle className="text-base">
-          {leaderboardEnabled ? "Leaderboard" : "Member Scores"}
+          {leaderboardEnabled ? t("leaderboardTitle") : t("memberScoresTitle")}
         </CardTitle>
         <CardDescription>
           {leaderboardEnabled
-            ? "Ranked by latest score · last 30 days"
-            : "Alphabetical · last 30 days"}
+            ? t("rankedSubtitle")
+            : t("alphabeticalSubtitle")}
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -186,11 +189,11 @@ export function TeamLeaderboard({ orgId, teamId, members }: Props) {
           <thead>
             <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
               {leaderboardEnabled && (
-                <th className="w-10 px-4 py-2 text-center font-medium">#</th>
+                <th className="w-10 px-4 py-2 text-center font-medium">{t("rank")}</th>
               )}
-              <th className="px-4 py-2 text-left font-medium">Member</th>
-              <th className="px-4 py-2 text-center font-medium">Score</th>
-              <th className="px-4 py-2 text-center font-medium">Trend</th>
+              <th className="px-4 py-2 text-left font-medium">{t("member")}</th>
+              <th className="px-4 py-2 text-center font-medium">{t("score")}</th>
+              <th className="px-4 py-2 text-center font-medium">{t("trend")}</th>
             </tr>
           </thead>
           <tbody>

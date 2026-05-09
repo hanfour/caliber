@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { rubricSchema } from "@aide/evaluator";
@@ -91,6 +92,9 @@ export function RubricEditor({
 }: RubricEditorProps) {
   const isEditing = editingRow !== null;
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const t = useTranslations("evaluator.rubrics");
+  const tEditor = useTranslations("evaluator.rubrics.editor");
+  const tCommon = useTranslations("common");
 
   const {
     register,
@@ -128,30 +132,30 @@ export function RubricEditor({
 
   const create = trpc.rubrics.create.useMutation({
     onSuccess: () => {
-      toast.success("Rubric created");
+      toast.success(t("createdToast"));
       onSuccess();
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "FORBIDDEN") {
-        toast.error("Insufficient permission");
+        toast.error(tCommon("insufficientPermission"));
       } else {
-        toast.error(e.message || "Failed to create rubric");
+        toast.error(e.message || t("createFail"));
       }
     },
   });
 
   const update = trpc.rubrics.update.useMutation({
     onSuccess: () => {
-      toast.success("Rubric updated");
+      toast.success(t("updatedToast"));
       onSuccess();
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "FORBIDDEN") {
-        toast.error("Insufficient permission");
+        toast.error(tCommon("insufficientPermission"));
       } else {
-        toast.error(e.message || "Failed to update rubric");
+        toast.error(e.message || t("updateFail"));
       }
     },
   });
@@ -191,7 +195,7 @@ export function RubricEditor({
       setValue("definitionJson", formatted, { shouldValidate: false });
     };
     reader.onerror = () => {
-      setUploadError("Failed to read file");
+      setUploadError(tEditor("uploadFailed"));
     };
     reader.readAsText(file);
     // Reset the input so re-uploading the same file fires the event
@@ -209,21 +213,19 @@ export function RubricEditor({
     >
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit rubric" : "New rubric"}</DialogTitle>
+          <DialogTitle>{isEditing ? tEditor("editTitle") : tEditor("newTitle")}</DialogTitle>
           <DialogDescription>
-            {isEditing
-              ? "Update this rubric's metadata or definition."
-              : "Define a custom scoring rubric for your organization."}
+            {isEditing ? tEditor("editDescription") : tEditor("newDescription")}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="space-y-4">
           {/* Name */}
           <div className="space-y-1.5">
-            <Label htmlFor="rubric-name">Name</Label>
+            <Label htmlFor="rubric-name">{tEditor("nameLabel")}</Label>
             <Input
               id="rubric-name"
-              placeholder="e.g. Engineering Excellence"
+              placeholder={tEditor("namePlaceholder")}
               {...register("name")}
             />
             {errors.name && (
@@ -233,10 +235,10 @@ export function RubricEditor({
 
           {/* Description */}
           <div className="space-y-1.5">
-            <Label htmlFor="rubric-description">Description</Label>
+            <Label htmlFor="rubric-description">{tEditor("descriptionLabel")}</Label>
             <Input
               id="rubric-description"
-              placeholder="Optional summary"
+              placeholder={tEditor("descriptionPlaceholder")}
               {...register("description")}
             />
             {errors.description && (
@@ -248,10 +250,10 @@ export function RubricEditor({
 
           {/* Version */}
           <div className="space-y-1.5">
-            <Label htmlFor="rubric-version">Version</Label>
+            <Label htmlFor="rubric-version">{tEditor("versionLabel")}</Label>
             <Input
               id="rubric-version"
-              placeholder="e.g. 1.0.0"
+              placeholder={tEditor("versionPlaceholder")}
               {...register("version")}
             />
             {errors.version && (
@@ -264,12 +266,12 @@ export function RubricEditor({
           {/* Definition — file upload or manual JSON */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="rubric-definition">Definition (JSON)</Label>
+              <Label htmlFor="rubric-definition">{tEditor("definitionLabel")}</Label>
               <label
                 htmlFor="rubric-file-upload"
                 className="cursor-pointer text-xs text-primary underline-offset-2 hover:underline"
               >
-                Upload JSON file
+                {tEditor("uploadJson")}
                 <input
                   id="rubric-file-upload"
                   type="file"
@@ -300,12 +302,12 @@ export function RubricEditor({
             {/* Signal-type reference (Plan 4C follow-up #4) */}
             <details className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
               <summary className="cursor-pointer font-medium select-none">
-                Signal types reference
+                {tEditor("signalTypesReference")}
               </summary>
               <div className="mt-2 space-y-3">
                 <div>
                   <p className="font-medium uppercase text-muted-foreground tracking-wide">
-                    Built-in (gateway-native)
+                    {tEditor("builtInHeading")}
                   </p>
                   <ul className="mt-1 space-y-0.5 font-mono">
                     <li>
@@ -345,7 +347,7 @@ export function RubricEditor({
                 </div>
                 <div>
                   <p className="font-medium uppercase text-muted-foreground tracking-wide">
-                    Facet (requires facet extraction enabled on the org)
+                    {tEditor("facetHeading")}
                   </p>
                   <ul className="mt-1 space-y-0.5 font-mono">
                     <li>
@@ -399,16 +401,16 @@ export function RubricEditor({
               onClick={onCancel}
               disabled={isMutating}
             >
-              Cancel
+              {tCommon("cancel")}
             </Button>
             <Button type="submit" disabled={isSubmitting || isMutating}>
               {isMutating
                 ? isEditing
-                  ? "Saving…"
-                  : "Creating…"
+                  ? tEditor("savingBtn")
+                  : tEditor("creating")
                 : isEditing
-                  ? "Save changes"
-                  : "Create rubric"}
+                  ? tEditor("saveBtn")
+                  : tEditor("createBtn")}
             </Button>
           </DialogFooter>
         </form>

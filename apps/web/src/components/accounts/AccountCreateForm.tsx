@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,22 +66,24 @@ interface Props {
 export function AccountCreateForm({ orgId }: Props) {
   const router = useRouter();
   const utils = trpc.useUtils();
+  const t = useTranslations("accounts.create");
+  const tCommon = useTranslations("common");
   const { data: teams, isLoading: teamsLoading } = trpc.teams.list.useQuery({
     orgId,
   });
 
   const create = trpc.accounts.create.useMutation({
     onSuccess: (account) => {
-      toast.success(`Account "${account?.name}" created`);
+      toast.success(t("createdToast", { name: account?.name ?? "" }));
       utils.accounts.list.invalidate({ orgId });
       router.push(`/dashboard/organizations/${orgId}/accounts`);
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "FORBIDDEN") {
-        toast.error("Insufficient permission");
+        toast.error(tCommon("insufficientPermission"));
       } else if (code === "BAD_REQUEST") {
-        toast.error(e.message || "Invalid request");
+        toast.error(e.message || t("invalidRequest"));
       } else {
         toast.error(e.message);
       }
@@ -136,10 +139,10 @@ export function AccountCreateForm({ orgId }: Props) {
 
   const credentialHint =
     type === "oauth"
-      ? "Paste the OAuth JSON returned by `claude auth login` — must include `access_token`, `refresh_token`, `expires_at`."
+      ? t("credentialsOauthHint")
       : platform === "openai"
-        ? "Paste the OpenAI org/project API key (sk-... or sk-proj-...). See docs/admin/openai-account-setup.md for sourcing."
-        : "Paste the raw Anthropic API key (sk-ant-...).";
+        ? t("credentialApiKeyOpenAIHint")
+        : t("credentialApiKeyHint");
 
   const credentialPlaceholder =
     type === "oauth"
@@ -189,10 +192,10 @@ export function AccountCreateForm({ orgId }: Props) {
   return (
     <form ref={formRef} onSubmit={onSubmit} className="space-y-5">
       <div className="space-y-1.5">
-        <Label htmlFor="name">Name</Label>
+        <Label htmlFor="name">{t("nameLabel")}</Label>
         <Input
           id="name"
-          placeholder="e.g. Production Anthropic key"
+          placeholder={t("namePlaceholder")}
           {...register("name")}
         />
         {errors.name && (
@@ -201,24 +204,24 @@ export function AccountCreateForm({ orgId }: Props) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="platform">Platform</Label>
+        <Label htmlFor="platform">{t("platformLabel")}</Label>
         <select
           id="platform"
           className={SELECT_CLASS}
           {...register("platform")}
         >
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
+          <option value="anthropic">{t("platformAnthropic")}</option>
+          <option value="openai">{t("platformOpenAI")}</option>
         </select>
         <p className="text-xs text-muted-foreground">
           {platform === "openai"
-            ? "Onboard via API key obtained from a compliant OpenAI org / project."
-            : "Anthropic supports both API key and OAuth (claude auth login)."}
+            ? t("platformOpenAIHint")
+            : t("platformAnthropicHint")}
         </p>
       </div>
 
       <fieldset className="space-y-2">
-        <legend className="text-sm font-medium leading-none">Type</legend>
+        <legend className="text-sm font-medium leading-none">{t("typeLabel")}</legend>
         <div className="flex flex-col gap-2 pt-1">
           <label className="flex items-start gap-2 text-sm">
             <input
@@ -228,9 +231,9 @@ export function AccountCreateForm({ orgId }: Props) {
               {...register("type")}
             />
             <span>
-              <span className="font-medium">API key</span>
+              <span className="font-medium">{t("typeApiKeyTitle")}</span>
               <span className="block text-xs text-muted-foreground">
-                Long-lived Anthropic API key.
+                {t("typeApiKeyDesc")}
               </span>
             </span>
           </label>
@@ -245,11 +248,11 @@ export function AccountCreateForm({ orgId }: Props) {
               {...register("type")}
             />
             <span>
-              <span className="font-medium">OAuth (JSON)</span>
+              <span className="font-medium">{t("typeOauthTitle")}</span>
               <span className="block text-xs text-muted-foreground">
                 {platform === "openai"
-                  ? "Not available for OpenAI — use API key path."
-                  : "Refreshable token bundle from `claude auth login`."}
+                  ? t("typeOauthDisabled")
+                  : t("typeOauthDesc")}
               </span>
             </span>
           </label>
@@ -257,7 +260,7 @@ export function AccountCreateForm({ orgId }: Props) {
       </fieldset>
 
       <fieldset className="space-y-2">
-        <legend className="text-sm font-medium leading-none">Scope</legend>
+        <legend className="text-sm font-medium leading-none">{t("scopeLabel")}</legend>
         <div className="flex flex-col gap-2 pt-1">
           <label className="flex items-start gap-2 text-sm">
             <input
@@ -267,9 +270,9 @@ export function AccountCreateForm({ orgId }: Props) {
               {...register("scopeType")}
             />
             <span>
-              <span className="font-medium">Organization</span>
+              <span className="font-medium">{t("scopeOrg")}</span>
               <span className="block text-xs text-muted-foreground">
-                Any team in this workspace can use this account.
+                {t("scopeOrgDesc")}
               </span>
             </span>
           </label>
@@ -281,16 +284,16 @@ export function AccountCreateForm({ orgId }: Props) {
               {...register("scopeType")}
             />
             <span>
-              <span className="font-medium">Specific team</span>
+              <span className="font-medium">{t("scopeTeamTitle")}</span>
               <span className="block text-xs text-muted-foreground">
-                Only the selected team can use this account.
+                {t("scopeTeamDesc")}
               </span>
             </span>
           </label>
         </div>
         {scopeType === "team" && (
           <div className="space-y-1.5 pl-6 pt-1">
-            <Label htmlFor="teamId">Team</Label>
+            <Label htmlFor="teamId">{t("teamPicker")}</Label>
             <select
               id="teamId"
               className={SELECT_CLASS}
@@ -299,14 +302,14 @@ export function AccountCreateForm({ orgId }: Props) {
             >
               {teamsLoading ? (
                 <option value="" disabled>
-                  Loading teams…
+                  {t("loadingTeams")}
                 </option>
               ) : (
-                <option value="">— Select a team —</option>
+                <option value="">{t("selectTeam")}</option>
               )}
-              {teams?.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              {teams?.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
                 </option>
               ))}
             </select>
@@ -320,7 +323,7 @@ export function AccountCreateForm({ orgId }: Props) {
       </fieldset>
 
       <div className="space-y-1.5">
-        <Label htmlFor="credentials">Credentials</Label>
+        <Label htmlFor="credentials">{t("credentialsLabel")}</Label>
         <textarea
           id="credentials"
           rows={6}
@@ -339,11 +342,11 @@ export function AccountCreateForm({ orgId }: Props) {
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" asChild>
           <Link href={`/dashboard/organizations/${orgId}/accounts`}>
-            Cancel
+            {tCommon("cancel")}
           </Link>
         </Button>
         <Button type="submit" disabled={isSubmitting || create.isPending}>
-          {create.isPending ? "Creating…" : "Create account"}
+          {create.isPending ? t("submitting") : t("submit")}
         </Button>
       </div>
     </form>

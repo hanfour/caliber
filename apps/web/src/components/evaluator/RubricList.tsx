@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Plus, FlaskConical, BookOpen, MoreHorizontal, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@aide/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -50,6 +51,8 @@ function RubricRowActions({
   isSettingActive,
 }: RowActionsProps) {
   const { can } = usePermissions();
+  const t = useTranslations("evaluator.rubrics");
+  const tCommon = useTranslations("common");
   const isPlatformDefault = row.orgId === null;
   const canUpdate = !isPlatformDefault && can({ type: "rubric.update", orgId, rubricId: row.id });
   const canDelete = !isPlatformDefault && can({ type: "rubric.delete", orgId, rubricId: row.id });
@@ -58,9 +61,7 @@ function RubricRowActions({
 
   const handleDelete = () => {
     if (typeof window === "undefined") return;
-    const ok = window.confirm(
-      `Delete rubric "${row.name}"? This cannot be undone.`,
-    );
+    const ok = window.confirm(t("confirmDelete", { name: row.name }));
     if (!ok) return;
     onDelete(row);
   };
@@ -72,7 +73,7 @@ function RubricRowActions({
           variant="ghost"
           size="sm"
           className="h-8 w-8 p-0"
-          aria-label={`Actions for ${row.name}`}
+          aria-label={t("actionsAriaLabel", { name: row.name })}
         >
           <MoreHorizontal className="h-4 w-4" />
         </Button>
@@ -80,12 +81,12 @@ function RubricRowActions({
       <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={() => onDryRun(row)}>
           <FlaskConical className="h-4 w-4" />
-          Dry run (last 7 days)
+          {t("dryRun7")}
         </DropdownMenuItem>
 
         {canSetActive && !isActive && (
           <DropdownMenuItem onSelect={() => onSetActive(row)} disabled={isSettingActive}>
-            Set as active
+            {t("setAsActive")}
           </DropdownMenuItem>
         )}
 
@@ -93,7 +94,7 @@ function RubricRowActions({
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => onEdit(row)}>
-              Edit
+              {tCommon("edit")}
             </DropdownMenuItem>
           </>
         )}
@@ -106,7 +107,7 @@ function RubricRowActions({
               disabled={isDeleting}
               className="text-destructive focus:text-destructive"
             >
-              {isDeleting ? "Deleting…" : "Delete"}
+              {isDeleting ? tCommon("deleting") : tCommon("delete")}
             </DropdownMenuItem>
           </>
         )}
@@ -124,6 +125,8 @@ interface RubricListProps {
 export function RubricList({ orgId }: RubricListProps) {
   const utils = trpc.useUtils();
   const { can } = usePermissions();
+  const t = useTranslations("evaluator.rubrics");
+  const tCommon = useTranslations("common");
   const canCreate = can({ type: "rubric.create", orgId });
 
   const { data: rubrics, isLoading, error } = trpc.rubrics.list.useQuery({ orgId });
@@ -140,17 +143,17 @@ export function RubricList({ orgId }: RubricListProps) {
 
   const del = trpc.rubrics.delete.useMutation({
     onSuccess: () => {
-      toast.success("Rubric deleted");
+      toast.success(t("deletedToast"));
       utils.rubrics.list.invalidate({ orgId });
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       if (code === "CONFLICT") {
-        toast.error("Cannot delete the org's active rubric. Set a different rubric first.");
+        toast.error(t("cannotDeleteActive"));
       } else if (code === "FORBIDDEN") {
-        toast.error("Insufficient permission");
+        toast.error(tCommon("insufficientPermission"));
       } else {
-        toast.error(e.message || "Failed to delete rubric");
+        toast.error(e.message || t("deleteFail"));
       }
     },
     onSettled: () => setDeletingId(null),
@@ -158,14 +161,14 @@ export function RubricList({ orgId }: RubricListProps) {
 
   const setActive = trpc.rubrics.setActive.useMutation({
     onSuccess: () => {
-      toast.success("Active rubric updated");
+      toast.success(t("activeUpdatedToast"));
       utils.rubrics.list.invalidate({ orgId });
       utils.contentCapture.getSettings.invalidate({ orgId });
     },
     onError: (e) => {
       const code = (e.data as { code?: string } | undefined)?.code;
       toast.error(
-        code === "FORBIDDEN" ? "Insufficient permission" : e.message || "Failed to set active rubric",
+        code === "FORBIDDEN" ? tCommon("insufficientPermission") : e.message || t("setActiveFail"),
       );
     },
     onSettled: () => setSettingActiveId(null),
@@ -195,7 +198,7 @@ export function RubricList({ orgId }: RubricListProps) {
     <div className="flex justify-end">
       <Button size="sm" className="gap-1.5" onClick={() => setCreating(true)}>
         <Plus className="h-4 w-4" />
-        New rubric
+        {t("newRubric")}
       </Button>
     </div>
   ) : null;
@@ -205,7 +208,7 @@ export function RubricList({ orgId }: RubricListProps) {
       <div className="space-y-4">
         {headerCta}
         <Card className="shadow-card p-6 text-sm text-muted-foreground">
-          Loading rubrics…
+          {t("loadingRubrics")}
         </Card>
       </div>
     );
@@ -217,7 +220,7 @@ export function RubricList({ orgId }: RubricListProps) {
         {headerCta}
         <Card className="shadow-card flex flex-col items-center p-10 text-center">
           <ShieldAlert className="h-6 w-6 text-muted-foreground" />
-          <h3 className="mt-3 text-sm font-semibold">Unable to load rubrics</h3>
+          <h3 className="mt-3 text-sm font-semibold">{t("unableToLoad")}</h3>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
             {error.message}
           </p>
@@ -232,14 +235,14 @@ export function RubricList({ orgId }: RubricListProps) {
         {headerCta}
         <Card className="shadow-card flex flex-col items-center p-10 text-center">
           <BookOpen className="h-6 w-6 text-muted-foreground" />
-          <h3 className="mt-3 text-sm font-semibold">No rubrics yet</h3>
+          <h3 className="mt-3 text-sm font-semibold">{t("emptyTitle")}</h3>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-            Create a custom rubric to define how your organization scores AI usage.
+            {t("emptyHint")}
           </p>
           {canCreate && (
             <Button size="sm" className="mt-4 gap-1.5" onClick={() => setCreating(true)}>
               <Plus className="h-4 w-4" />
-              New rubric
+              {t("newRubric")}
             </Button>
           )}
         </Card>
@@ -264,10 +267,10 @@ export function RubricList({ orgId }: RubricListProps) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
-              <th scope="col" className="px-4 py-2 text-left font-medium">Name</th>
-              <th scope="col" className="px-4 py-2 text-left font-medium">Version</th>
-              <th scope="col" className="px-4 py-2 text-left font-medium">Source</th>
-              <th scope="col" className="px-4 py-2 text-left font-medium">Status</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium">{t("name")}</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium">{t("version")}</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium">{t("source")}</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium">{t("status")}</th>
               <th scope="col" className="px-4 py-2 text-right font-medium"></th>
             </tr>
           </thead>
@@ -293,18 +296,18 @@ export function RubricList({ orgId }: RubricListProps) {
                   </td>
                   <td className="px-4 py-2.5">
                     {isPlatformDefault ? (
-                      <Badge variant="secondary" className="text-xs">Platform</Badge>
+                      <Badge variant="secondary" className="text-xs">{t("platformBadge")}</Badge>
                     ) : (
-                      <Badge variant="outline" className="text-xs">Custom</Badge>
+                      <Badge variant="outline" className="text-xs">{t("custom")}</Badge>
                     )}
                   </td>
                   <td className="px-4 py-2.5">
                     {isActive ? (
                       <Badge className="text-xs bg-green-100 text-green-800 border-green-200">
-                        Active
+                        {t("active")}
                       </Badge>
                     ) : row.isDefault ? (
-                      <Badge variant="secondary" className="text-xs">Default</Badge>
+                      <Badge variant="secondary" className="text-xs">{t("default")}</Badge>
                     ) : null}
                   </td>
                   <td className="px-4 py-2.5 text-right">

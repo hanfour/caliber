@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +38,8 @@ export function DeleteRequestDialog({
   open,
   onOpenChange,
 }: DeleteRequestDialogProps) {
+  const t = useTranslations("evaluator.deleteRequest");
+  const tCommon = useTranslations("common");
   const [dialogState, setDialogState] = useState<DialogState>({
     type: "form",
     scope: "bodies",
@@ -106,30 +109,27 @@ export function DeleteRequestDialog({
         {isSuccess ? (
           <>
             <DialogHeader>
-              <DialogTitle>Request Submitted</DialogTitle>
+              <DialogTitle>{t("submittedTitle")}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Your deletion request has been submitted successfully. Your
-                organization administrator will review this request and notify
-                you of the outcome.
+                {t("submittedDesc")}
               </p>
               <Button
                 onClick={handleClose}
                 className="w-full"
                 variant="default"
               >
-                Close
+                {tCommon("close")}
               </Button>
             </div>
           </>
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Request Data Deletion</DialogTitle>
+              <DialogTitle>{t("title")}</DialogTitle>
               <DialogDescription>
-                Submit a GDPR data deletion request for your account. Your
-                organization administrator must review and approve this request.
+                {t("description")}
               </DialogDescription>
             </DialogHeader>
 
@@ -137,7 +137,7 @@ export function DeleteRequestDialog({
               {/* Scope radio group */}
               <div className="space-y-3">
                 <label className="text-sm font-medium">
-                  What would you like to delete?
+                  {t("scopeQuestion")}
                 </label>
                 <div className="space-y-2.5">
                   <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border p-3 hover:bg-accent/30 transition-colors">
@@ -153,11 +153,10 @@ export function DeleteRequestDialog({
                     />
                     <div className="flex-1">
                       <p className="text-sm font-medium">
-                        Delete captured conversations only
+                        {t("scopeBodiesTitle")}
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Your API request bodies will be deleted. Evaluation
-                        reports will be retained for historical records.
+                        {t("scopeBodiesDesc")}
                       </p>
                     </div>
                   </label>
@@ -175,11 +174,10 @@ export function DeleteRequestDialog({
                     />
                     <div className="flex-1">
                       <p className="text-sm font-medium">
-                        Delete conversations and evaluation reports
+                        {t("scopeBothTitle")}
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Both your API request bodies and evaluation reports will
-                        be deleted completely.
+                        {t("scopeBothDesc")}
                       </p>
                     </div>
                   </label>
@@ -189,11 +187,11 @@ export function DeleteRequestDialog({
               {/* Reason textarea */}
               <div className="space-y-2">
                 <label htmlFor="reason" className="text-sm font-medium">
-                  Reason for deletion (optional)
+                  {t("reasonLabel")}
                 </label>
                 <textarea
                   id="reason"
-                  placeholder="Please provide any context for your deletion request (e.g., employment separation, data concerns)…"
+                  placeholder={t("reasonPlaceholder")}
                   value={dialogState.reason}
                   onChange={(e) => handleReasonChange(e.target.value)}
                   maxLength={1000}
@@ -210,9 +208,7 @@ export function DeleteRequestDialog({
                 <div className="flex gap-3">
                   <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-800 dark:text-amber-200">
-                    Your request will be reviewed by your organization
-                    administrator. It may be approved or rejected. You will be
-                    notified of the outcome.
+                    {t("disclaimer")}
                   </p>
                 </div>
               </div>
@@ -225,7 +221,7 @@ export function DeleteRequestDialog({
                 onClick={() => onOpenChange(false)}
                 disabled={isLoading}
               >
-                Cancel
+                {tCommon("cancel")}
               </Button>
               <Button
                 onClick={handleSubmit}
@@ -235,10 +231,10 @@ export function DeleteRequestDialog({
                 {isLoading ? (
                   <>
                     <span className="h-4 w-4 inline-block animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    Submitting…
+                    {t("submitting")}
                   </>
                 ) : (
-                  "Request Deletion"
+                  t("submit")
                 )}
               </Button>
             </div>
@@ -247,7 +243,7 @@ export function DeleteRequestDialog({
               <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
                 <p className="text-xs text-destructive">
                   {deleteOwn.error.message ||
-                    "Failed to submit deletion request"}
+                    t("submitFail")}
                 </p>
               </div>
             )}

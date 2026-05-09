@@ -1,15 +1,17 @@
 "use client";
 
 import { Info } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 
 export function ProfileBanner() {
+  const t = useTranslations("evaluator.profileEval");
   const { data: disclosure, isLoading } = trpc.me.captureDisclosure.useQuery();
 
   if (isLoading) {
     return (
       <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground animate-pulse">
-        Loading disclosure…
+        {t("loadingDisclosure")}
       </div>
     );
   }
@@ -22,11 +24,10 @@ export function ProfileBanner() {
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="space-y-1 text-sm">
           <p className="font-medium">
-            Content capture is not currently enabled for your organization.
+            {t("captureNotEnabledTitle")}
           </p>
           <p className="text-muted-foreground text-xs">
-            No evaluation data is being collected. Contact your administrator if
-            you have questions.
+            {t("captureNotEnabledHint")}
           </p>
         </div>
       </div>
@@ -41,18 +42,13 @@ export function ProfileBanner() {
       <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
       <div className="space-y-1.5 text-sm">
         <p className="font-medium text-blue-900 dark:text-blue-100">
-          Content capture is enabled for your account.
+          {t("captureEnabledTitle")}
         </p>
         <p className="text-blue-800/80 dark:text-blue-200/80 text-xs leading-relaxed">
-          Request content associated with your API key is retained for up to{" "}
-          <strong>{retentionDays} days</strong> (your organization may configure
-          a shorter retention window). Evaluations are generated automatically
-          by a nightly process using your organization&apos;s rubric.
+          {t("captureEnabledBodyDays", { days: retentionDays })}
         </p>
         <p className="text-blue-700/70 dark:text-blue-300/70 text-xs">
-          For questions about data retention or to request deletion, contact
-          your organization administrator. You can also use the export and
-          deletion options at the bottom of this page.
+          {t("captureEnabledFooter")}
         </p>
       </div>
     </div>

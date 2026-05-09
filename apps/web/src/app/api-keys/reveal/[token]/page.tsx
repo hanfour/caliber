@@ -15,6 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,8 @@ const BANNER =
 export default function RevealApiKeyPage() {
   const params = useParams();
   const router = useRouter();
+  const t = useTranslations("reveal");
+  const tCommon = useTranslations("common");
   const token = params?.token as string;
 
   const [state, setState] = useState<State>("idle");
@@ -72,9 +75,9 @@ export default function RevealApiKeyPage() {
     try {
       await navigator.clipboard.writeText(result.raw);
       // Toast omits the raw value — treat as a credential in transit.
-      toast.success("Copied");
+      toast.success(t("copiedToast"));
     } catch {
-      toast.error("Clipboard unavailable");
+      toast.error(t("copyFailToast"));
     }
   };
 
@@ -82,8 +85,8 @@ export default function RevealApiKeyPage() {
     return (
       <Shell icon={<KeyRound className="h-6 w-6 text-primary" />}>
         <CardHeader className="text-center">
-          <CardTitle>Loading…</CardTitle>
-          <CardDescription>Checking your session.</CardDescription>
+          <CardTitle>{t("loading")}</CardTitle>
+          <CardDescription>{t("checkingSession")}</CardDescription>
         </CardHeader>
       </Shell>
     );
@@ -94,15 +97,14 @@ export default function RevealApiKeyPage() {
     return (
       <Shell icon={<KeyRound className="h-6 w-6 text-primary" />}>
         <CardHeader className="text-center">
-          <CardTitle>Sign in to claim your key</CardTitle>
+          <CardTitle>{t("signInTitle")}</CardTitle>
           <CardDescription>
-            This URL is tied to your account. Sign in to continue — the admin
-            who issued the key chose the target recipient.
+            {t("signInDesc")}
           </CardDescription>
         </CardHeader>
         <CardFooter className="justify-center">
           <Button onClick={() => router.push(`/sign-in?returnTo=${returnTo}`)}>
-            Sign in to continue
+            {t("signInBtn")}
           </Button>
         </CardFooter>
       </Shell>
@@ -113,15 +115,14 @@ export default function RevealApiKeyPage() {
     return (
       <Shell icon={<XCircle className="h-6 w-6 text-destructive" />}>
         <CardHeader className="text-center">
-          <CardTitle>This key can&apos;t be revealed</CardTitle>
+          <CardTitle>{t("errorTitle")}</CardTitle>
           <CardDescription>
-            It may have already been claimed, expired, or been issued to a
-            different user. Ask your admin to issue a new key if you need one.
+            {t("errorDesc")}
           </CardDescription>
         </CardHeader>
         <CardFooter className="justify-center">
           <Button onClick={() => router.push("/dashboard/profile")}>
-            Go to profile
+            {t("goToProfile")}
           </Button>
         </CardFooter>
       </Shell>
@@ -132,21 +133,20 @@ export default function RevealApiKeyPage() {
     return (
       <Shell icon={<CheckCircle2 className="h-6 w-6 text-primary" />}>
         <CardHeader className="text-center">
-          <CardTitle>Your API key</CardTitle>
+          <CardTitle>{t("yourKey")}</CardTitle>
           {result.name ? (
-            <CardDescription>Key: {result.name}</CardDescription>
+            <CardDescription>{t("keyName", { name: result.name })}</CardDescription>
           ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
           <div role="alert" className={BANNER}>
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              This is the only time you&apos;ll see this key. Copy it now and
-              store it somewhere safe (password manager or secrets vault).
+              {t("warning")}
             </span>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="apiKeyRaw">Key</Label>
+            <Label htmlFor="apiKeyRaw">{t("keyLabel")}</Label>
             <div className="flex items-stretch gap-2">
               <code
                 id="apiKeyRaw"
@@ -160,21 +160,21 @@ export default function RevealApiKeyPage() {
                 size="sm"
                 onClick={handleCopy}
                 className="gap-1.5"
-                aria-label="Copy key to clipboard"
+                aria-label={t("copyKeyAriaLabel")}
               >
                 <Copy className="h-4 w-4" />
-                Copy
+                {tCommon("copy")}
               </Button>
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Prefix:{" "}
+            {t("prefixLabel")}{" "}
             <code className="font-mono text-foreground">{result.prefix}</code>
           </p>
         </CardContent>
         <CardFooter className="justify-center">
           <Button onClick={() => router.push("/dashboard/profile")}>
-            Done
+            {t("doneBtn")}
           </Button>
         </CardFooter>
       </Shell>
@@ -185,18 +185,16 @@ export default function RevealApiKeyPage() {
   return (
     <Shell icon={<KeyRound className="h-6 w-6 text-primary" />}>
       <CardHeader className="text-center">
-        <CardTitle>Claim your API key</CardTitle>
+        <CardTitle>{t("claimTitle")}</CardTitle>
         <CardDescription>
-          An admin issued an API key for your account. Reveal it to copy the
-          key.
+          {t("claimDesc")}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <div role="alert" className={BANNER}>
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            This URL is valid for one-time use. Once you reveal the key you
-            won&apos;t be able to do it again — save it immediately.
+            {t("claimWarning")}
           </span>
         </div>
       </CardContent>
@@ -206,7 +204,7 @@ export default function RevealApiKeyPage() {
           disabled={state === "revealing"}
           aria-busy={state === "revealing"}
         >
-          {state === "revealing" ? "Revealing…" : "Reveal key"}
+          {state === "revealing" ? t("revealing") : t("revealBtn")}
         </Button>
       </CardFooter>
     </Shell>

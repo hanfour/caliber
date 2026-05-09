@@ -2,6 +2,8 @@
 
 // Evidence quotes for a single rubric section, shown when a row is expanded.
 
+import { useTranslations } from "next-intl";
+
 export interface EvidenceItem {
   requestId?: string;
   quote: string;
@@ -19,6 +21,7 @@ interface Props {
 }
 
 export function EvidenceRow({ signals }: Props) {
+  const t = useTranslations("evaluator.report");
   const hitsWithEvidence = signals.filter(
     (s) => s.hit && s.evidence && s.evidence.length > 0,
   );
@@ -26,7 +29,7 @@ export function EvidenceRow({ signals }: Props) {
   if (hitsWithEvidence.length === 0) {
     return (
       <div className="px-4 py-3 text-xs text-muted-foreground">
-        No evidence quotes available for this section.
+        {t("noEvidence")}
       </div>
     );
   }
@@ -36,7 +39,7 @@ export function EvidenceRow({ signals }: Props) {
       {hitsWithEvidence.map((signal) => (
         <div key={signal.id} className="space-y-1.5">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Signal: {signal.id}
+            {t("evidenceTitle", { id: signal.id })}
           </p>
           {signal.evidence!.map((ev, idx) => (
             <div
@@ -48,7 +51,7 @@ export function EvidenceRow({ signals }: Props) {
               </blockquote>
               {ev.requestId && (
                 <p className="font-mono text-[10px] text-muted-foreground">
-                  request_id:{" "}
+                  {t("requestId")}{" "}
                   <span className="select-all">{ev.requestId}</span>
                 </p>
               )}

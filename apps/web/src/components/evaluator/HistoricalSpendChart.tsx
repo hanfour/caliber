@@ -1,14 +1,17 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 interface Props {
   months: Array<{ month: string; costUsd: number }>;
 }
 
 export function HistoricalSpendChart({ months }: Props) {
+  const t = useTranslations("evaluator.costs");
   if (months.length === 0) {
     return (
       <p className="text-sm text-muted-foreground italic">
-        No historical data.
+        {t("noHistoricalData")}
       </p>
     );
   }
