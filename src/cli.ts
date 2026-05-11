@@ -49,7 +49,7 @@ import {
 const program = new Command();
 
 program
-  .name("aide")
+  .name("caliber")
   .description(
     "AI Development Performance Evaluator\n" +
       "Analyze Claude Code & Codex usage for technical performance review\n" +
@@ -463,7 +463,7 @@ function runSummary(since: string, until: string, config: AppConfig): void {
   }
 
   console.log("");
-  console.log(chalk.dim("Run `aide report` for full evaluation report."));
+  console.log(chalk.dim("Run `caliber report` for full evaluation report."));
   console.log("");
 }
 

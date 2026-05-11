@@ -77,7 +77,7 @@ function normalizeStandard(
 
   if (warnings.length > 0) {
     for (const w of warnings) {
-      process.stderr.write(`[aide] WARNING: ${w}\n`);
+      process.stderr.write(`[caliber] WARNING: ${w}\n`);
     }
   }
 

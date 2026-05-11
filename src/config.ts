@@ -39,6 +39,10 @@ export function getDefaultConfig(): AppConfig {
 // ── Path ──
 
 export function getConfigPath(): string {
+  return join(homedir(), ".caliber.json");
+}
+
+export function getLegacyConfigPath(): string {
   return join(homedir(), ".aide.json");
 }
 
@@ -109,40 +113,68 @@ function isValidValue(key: keyof AppConfig, value: unknown): boolean {
   }
 }
 
+function readConfigFile(configPath: string): AppConfig {
+  const raw = JSON.parse(readFileSync(configPath, "utf-8")) as Record<
+    string,
+    unknown
+  >;
+  const validated: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(raw)) {
+    if (!VALID_KEYS.has(key)) {
+      process.stderr.write(
+        `[caliber] config warning: ignoring unknown key '${key}'\n`,
+      );
+      continue;
+    }
+    const typedKey = key as keyof AppConfig;
+    if (isValidValue(typedKey, value)) {
+      validated[key] = value;
+    } else {
+      process.stderr.write(
+        `[caliber] config warning: invalid value for '${key}': ${JSON.stringify(value)}, using default\n`,
+      );
+    }
+  }
+
+  return { ...DEFAULT_CONFIG, ...validated } as AppConfig;
+}
+
+function migrateLegacyConfig(legacyPath: string, configPath: string): AppConfig {
+  const config = readConfigFile(legacyPath);
+  try {
+    saveConfig(config);
+    process.stderr.write(
+      `[caliber] config notice: migrated legacy config from ${legacyPath} to ${configPath}\n`,
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[caliber] config warning: loaded legacy config from ${legacyPath} but could not write ${configPath}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
+  return config;
+}
+
 export function loadConfig(): AppConfig {
   const configPath = getConfigPath();
-  if (!existsSync(configPath)) {
-    return getDefaultConfig();
-  }
-
-  try {
-    const raw = JSON.parse(readFileSync(configPath, "utf-8")) as Record<
-      string,
-      unknown
-    >;
-    const validated: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(raw)) {
-      if (!VALID_KEYS.has(key)) {
-        process.stderr.write(
-          `[aide] config warning: ignoring unknown key '${key}'\n`,
-        );
-        continue;
-      }
-      const typedKey = key as keyof AppConfig;
-      if (isValidValue(typedKey, value)) {
-        validated[key] = value;
-      } else {
-        process.stderr.write(
-          `[aide] config warning: invalid value for '${key}': ${JSON.stringify(value)}, using default\n`,
-        );
-      }
+  if (existsSync(configPath)) {
+    try {
+      return readConfigFile(configPath);
+    } catch {
+      return getDefaultConfig();
     }
-
-    return { ...DEFAULT_CONFIG, ...validated } as AppConfig;
-  } catch {
-    return getDefaultConfig();
   }
+
+  const legacyPath = getLegacyConfigPath();
+  if (existsSync(legacyPath)) {
+    try {
+      return migrateLegacyConfig(legacyPath, configPath);
+    } catch {
+      return getDefaultConfig();
+    }
+  }
+
+  return getDefaultConfig();
 }
 
 export function saveConfig(config: AppConfig): void {
@@ -173,6 +205,10 @@ export function resetConfig(): AppConfig {
   const configPath = getConfigPath();
   if (existsSync(configPath)) {
     unlinkSync(configPath);
+  }
+  const legacyPath = getLegacyConfigPath();
+  if (existsSync(legacyPath)) {
+    unlinkSync(legacyPath);
   }
   return getDefaultConfig();
 }

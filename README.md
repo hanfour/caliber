@@ -36,7 +36,7 @@ Engineering managers need evidence-based data to evaluate how effectively their 
 
 ## Platform mode / 平台模式
 
-Starting with **v0.2.0** aide also ships as a self-hostable web platform with
+Starting with **v0.2.0** Caliber also ships as a self-hostable web platform with
 organization-scoped RBAC, invites, and an audit log. Use this mode if you want
 a shared workspace for a team rather than a per-engineer CLI report.
 
@@ -202,6 +202,10 @@ caliber --version
 npm install -g @hanfour.huang/caliber@latest
 ```
 
+Caliber uses `~/.caliber.json` for CLI settings. On first run after upgrading
+from the older `aide` CLI, an existing `~/.aide.json` file is read, migrated to
+`~/.caliber.json`, and reported with a one-time deprecation notice.
+
 ### Existing local-clone users / 已使用 clone 安裝的使用者
 
 If you previously installed from a cloned repo or `npm link`, migrate to the npm package:
@@ -226,19 +230,19 @@ npx tsx src/cli.ts --help
 
 ```bash
 # Quick usage summary (last 7 days)
-aide summary
+caliber summary
 
 # Full evaluation report (last 30 days, terminal output)
-aide report
+caliber report
 
 # Save report as Markdown
-aide report --format markdown --output report.md
+caliber report --format markdown --output report.md
 
 # Save report as HTML
-aide report --format html --output report.html
+caliber report --format html --output report.html
 
 # Monthly KPI report
-aide monthly
+caliber monthly
 ```
 
 ---
@@ -249,10 +253,10 @@ aide monthly
 
 ```bash
 # Last 7 days (default)
-aide summary
+caliber summary
 
 # Custom date range
-aide summary --since 2026-03-01 --until 2026-03-31
+caliber summary --since 2026-03-01 --until 2026-03-31
 ```
 
 Output:
@@ -277,40 +281,40 @@ Codex
 
 ```bash
 # Default: last 30 days, text format, built-in OneAD standard
-aide report
+caliber report
 
 # Current calendar month
-aide monthly
+caliber monthly
 
 # Previous full calendar month
-aide monthly --previous
+caliber monthly --previous
 
 # Current calendar quarter
-aide quarterly
+caliber quarterly
 
 # Previous full calendar quarter
-aide quarterly --previous
+caliber quarterly --previous
 
 # Custom date range
-aide report --since 2026-03-01 --until 2026-04-14
+caliber report --since 2026-03-01 --until 2026-04-14
 
 # Output as Markdown file
-aide report --format markdown --output report.md
+caliber report --format markdown --output report.md
 
 # Output as HTML file
-aide report --format html --output report.html
+caliber report --format html --output report.html
 
 # Output as JSON (machine-parseable, clean stdout)
-aide report --format json --output report.json
+caliber report --format json --output report.json
 
 # Pipe JSON for programmatic consumption
-aide report --format json 2>/dev/null | jq '.sections[].score'
+caliber report --format json 2>/dev/null | jq '.sections[].score'
 
 # Use a custom evaluation standard
-aide report --standard my-standard.json
+caliber report --standard my-standard.json
 
 # Include engineer/department metadata in report
-aide report --engineer "Jane Doe" --department "R&D"
+caliber report --engineer "Jane Doe" --department "R&D"
 ```
 
 > **Note:** When using `--format json`, progress and status messages are written to stderr.
@@ -331,7 +335,7 @@ node dist/cli.js report --format html --output report.html
 
 ## CLI Reference / 命令參考
 
-### `aide report`
+### `caliber report`
 
 Generate a full evaluation report.
 
@@ -346,7 +350,7 @@ Options:
   --department <name>      Department name for report identification
 ```
 
-### `aide summary`
+### `caliber summary`
 
 Quick usage summary for a date range.
 
@@ -356,7 +360,7 @@ Options:
   -u, --until <date>       End date, YYYY-MM-DD (default: today)
 ```
 
-### `aide monthly`
+### `caliber monthly`
 
 Generate a monthly KPI report.
 
@@ -368,7 +372,7 @@ Options:
   --previous               Use the previous full calendar month
 ```
 
-### `aide quarterly`
+### `caliber quarterly`
 
 Generate a quarterly KPI report.
 
@@ -380,7 +384,7 @@ Options:
   --previous               Use the previous full calendar quarter
 ```
 
-### `aide init-standard`
+### `caliber init-standard`
 
 Export the default evaluation standard as a JSON template for customization.
 

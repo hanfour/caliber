@@ -1,25 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, writeFileSync, unlinkSync, readFileSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { describe, it, expect } from "vitest";
 import {
   getDefaultConfig,
-  loadConfig,
-  saveConfig,
   setConfigValue,
-  resetConfig,
   getConfigPath,
 } from "../src/config.js";
-import type { AppConfig } from "../src/config.js";
-
-// Use a temp file for tests to avoid touching real config
-const TEST_CONFIG_PATH = join(tmpdir(), `.aide-test-${process.pid}.json`);
-
-function cleanup() {
-  if (existsSync(TEST_CONFIG_PATH)) {
-    unlinkSync(TEST_CONFIG_PATH);
-  }
-}
 
 describe("config", () => {
   describe("getDefaultConfig", () => {
@@ -42,9 +26,9 @@ describe("config", () => {
   });
 
   describe("getConfigPath", () => {
-    it("returns a path ending with .aide.json", () => {
+    it("returns a path ending with .caliber.json", () => {
       const path = getConfigPath();
-      expect(path).toMatch(/\.aide\.json$/);
+      expect(path).toMatch(/\.caliber\.json$/);
     });
   });
 

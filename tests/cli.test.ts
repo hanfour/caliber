@@ -26,7 +26,7 @@ const runStderr = (args: string) =>
 describe("CLI regression (subprocess)", () => {
   it("shows help without error", () => {
     const output = run("--help");
-    expect(output).toContain("aide");
+    expect(output).toContain("caliber");
     expect(output).toContain("report");
     expect(output).toContain("summary");
     expect(output).toContain("init-standard");
