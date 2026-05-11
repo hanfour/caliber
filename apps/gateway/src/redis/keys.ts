@@ -1,5 +1,5 @@
 // Single source of truth for Redis key shapes. ioredis client (Task 4.1) prepends
-// `aide:gw:` via keyPrefix; these helpers return the suffix only.
+// `caliber:gw:` via keyPrefix; these helpers return the suffix only.
 // All shapes match design Section 4.1 + Plan 5A §8.2.
 export const keys = {
   slots: (scope: "user" | "account", id: string) => `slots:${scope}:${id}`,

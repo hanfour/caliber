@@ -33,7 +33,7 @@ export interface TrpcContext {
   perm: UserPermissions | null;
   reqId: string;
   env: ServerEnv;
-  // Shared with the gateway via the `aide:gw:` keyPrefix so admin-issued
+  // Shared with the gateway via the `caliber:gw:` keyPrefix so admin-issued
   // api-key reveal-token stashes are written/read from the same namespace.
   // When ENABLE_GATEWAY=false, this is a placeholder client whose methods
   // throw on use — the routers' ENABLE_GATEWAY guard short-circuits before

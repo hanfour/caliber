@@ -62,9 +62,9 @@ const STUB_CONNECTION = { host: "localhost", port: 6379 } as const;
 describe("usageLogQueue constants", () => {
   it("exports the design-doc queue identifier as prefix + name", () => {
     // The full Redis namespace BullMQ writes to is `${prefix}:${name}:*` —
-    // verify the two halves combine to "aide:gw:usage-log".
+    // verify the two halves combine to "caliber:gw:usage-log".
     expect(`${USAGE_LOG_QUEUE_PREFIX}:${USAGE_LOG_QUEUE_NAME}`).toBe(
-      "aide:gw:usage-log",
+      "caliber:gw:usage-log",
     );
   });
 

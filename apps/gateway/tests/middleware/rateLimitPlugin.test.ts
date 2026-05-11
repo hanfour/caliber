@@ -64,7 +64,7 @@ async function buildApp({
   const r =
     redis ??
     (() => {
-      const mock = new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+      const mock = new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
       return mock;
     })();
   await app.register(fakeRedisPlugin(r));
@@ -83,7 +83,7 @@ async function buildApp({
 describe("rateLimitPlugin", () => {
   let redis: Redis;
   beforeEach(async () => {
-    redis = new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+    redis = new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
     await redis.flushall();
   });
 

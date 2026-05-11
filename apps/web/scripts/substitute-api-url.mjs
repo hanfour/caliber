@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const manifest = path.resolve(here, "..", ".next", "routes-manifest.json");
-const PLACEHOLDER = "http://aide-internal-api-url-placeholder";
+const PLACEHOLDER = "http://caliber-internal-api-url-placeholder";
 const value = process.env.API_INTERNAL_URL ?? "http://localhost:3001";
 
 if (!existsSync(manifest)) {

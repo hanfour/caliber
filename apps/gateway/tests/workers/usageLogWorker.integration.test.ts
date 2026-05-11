@@ -567,7 +567,7 @@ describe("UsageLogWorker pure helpers", () => {
   // the beforeAll fixtures.
   it("module exports the expected queue identifier shape", () => {
     expect(`${USAGE_LOG_QUEUE_PREFIX}:${USAGE_LOG_QUEUE_NAME}`).toBe(
-      "aide:gw:usage-log",
+      "caliber:gw:usage-log",
     );
   });
 });

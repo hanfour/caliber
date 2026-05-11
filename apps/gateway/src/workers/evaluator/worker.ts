@@ -37,7 +37,7 @@ export interface CreateEvaluatorWorkerOptions {
 // ── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * Build a BullMQ Worker wired to the `aide:gw:evaluator` queue.
+ * Build a BullMQ Worker wired to the `caliber:gw:evaluator` queue.
  *
  * The worker validates the job payload via Zod, resolves the appropriate rubric
  * for the org (custom or platform-default), reads the org's llm_eval_enabled

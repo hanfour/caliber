@@ -235,7 +235,7 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
  * `buildServer` reads cleanly.
  *
  * Rationale for a separate Redis connection (vs reusing `fastify.redis`):
- * `redisPlugin` decorates `fastify.redis` with `keyPrefix: "aide:gw:"`. BullMQ
+ * `redisPlugin` decorates `fastify.redis` with `keyPrefix: "caliber:gw:"`. BullMQ
  * computes Redis keys inside Lua scripts using its own `prefix` option and
  * does not see ioredis's transparent key prefixing — passing the prefixed
  * client breaks Lua atomicity (see usageLogQueue.ts module header). We build

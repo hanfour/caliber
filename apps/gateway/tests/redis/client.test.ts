@@ -163,8 +163,8 @@ describe("redisPlugin", () => {
     );
   });
 
-  it("8. keyPrefix aide:gw: is applied — key stored with prefix in ioredis-mock store", async () => {
-    const mock = new RedisMock({ keyPrefix: "aide:gw:" });
+  it("8. keyPrefix caliber:gw: is applied — key stored with prefix in ioredis-mock store", async () => {
+    const mock = new RedisMock({ keyPrefix: "caliber:gw:" });
     const app = Fastify({ logger: false });
     apps.push(app);
     await app.register(redisPlugin, { env: makeEnv(), client: mock as never });
@@ -176,7 +176,7 @@ describe("redisPlugin", () => {
     // mock.data is a Map-like object; use .keys() (not Object.keys) to iterate it.
     const mockData = (mock as unknown as { data: Map<string, unknown> }).data;
     const storeKeys = [...mockData.keys()];
-    expect(storeKeys).toContain("aide:gw:mykey");
+    expect(storeKeys).toContain("caliber:gw:mykey");
 
     // Round-trip via the same prefixed client works
     const val = await app.redis.get("mykey");

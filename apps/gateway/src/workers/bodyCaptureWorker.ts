@@ -1,7 +1,7 @@
 /**
  * BullMQ worker for body capture (Plan 4B Part 3, Task 3.4).
  *
- * Processes jobs from `aide:gw:body-capture:*`, running the full
+ * Processes jobs from `caliber:gw:body-capture:*`, running the full
  * sanitize → truncate → encrypt → INSERT pipeline for each job.
  *
  * Concurrency is 4 per plan spec. Each job is independent so there is no

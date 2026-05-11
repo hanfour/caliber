@@ -1,4 +1,4 @@
-// Single source of truth for the locales aide ships with.
+// Single source of truth for the locales caliber ships with.
 //
 // Adding a new locale requires:
 //   1. an entry here (and in `LOCALE_LABELS`),

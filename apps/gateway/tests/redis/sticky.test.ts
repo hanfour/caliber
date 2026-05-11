@@ -8,7 +8,7 @@ import {
 describe("sticky", () => {
   let redis: Redis;
   beforeEach(() => {
-    redis = new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+    redis = new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
   });
   afterEach(async () => { await redis.quit().catch(() => {}); });
 

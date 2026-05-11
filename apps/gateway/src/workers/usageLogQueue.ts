@@ -2,9 +2,9 @@
  * BullMQ queue + thin wrapper for usage log writes (Plan 4A Part 7, Task 7.1).
  *
  * Design notes:
- *   - The plan/design doc names the queue "aide:gw:usage-log".  BullMQ namespaces
- *     keys as `<prefix>:<name>:*`, so we set prefix="aide:gw" + name="usage-log",
- *     which yields the expected `aide:gw:usage-log:*` Redis keyspace.
+ *   - The plan/design doc names the queue "caliber:gw:usage-log".  BullMQ namespaces
+ *     keys as `<prefix>:<name>:*`, so we set prefix="caliber:gw" + name="usage-log",
+ *     which yields the expected `caliber:gw:usage-log:*` Redis keyspace.
  *
  *   - We do NOT pass the gateway's existing `keyPrefix`-laden ioredis client to
  *     BullMQ. BullMQ's Lua scripts compute keys themselves and break when the
@@ -35,10 +35,10 @@ export const USAGE_LOG_QUEUE_NAME = "usage-log";
 
 /**
  * BullMQ key prefix. Combined with the queue name, this produces Redis keys
- * under `aide:gw:usage-log:*`, matching the design-doc identifier
- * "aide:gw:usage-log".
+ * under `caliber:gw:usage-log:*`, matching the design-doc identifier
+ * "caliber:gw:usage-log".
  */
-export const USAGE_LOG_QUEUE_PREFIX = "aide:gw";
+export const USAGE_LOG_QUEUE_PREFIX = "caliber:gw";
 
 /** BullMQ job name used for every usage-log write. */
 export const USAGE_LOG_JOB_NAME = "usage-log";
@@ -213,7 +213,7 @@ export function buildQueueOptions(
 }
 
 /**
- * Build a real BullMQ Queue wired to `aide:gw:usage-log:*`.
+ * Build a real BullMQ Queue wired to `caliber:gw:usage-log:*`.
  *
  * The returned instance satisfies `QueueLike` — callers may pass it directly
  * to `enqueueUsageLog`.

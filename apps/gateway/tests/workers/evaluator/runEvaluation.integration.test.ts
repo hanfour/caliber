@@ -55,7 +55,7 @@ const TEST_MASTER_KEY =
 const STUB_RUBRIC_VERSION = platformDefaultRubric.version;
 const STUB_LLM_MODEL = "claude-haiku-4-5";
 const STUB_RAW_KEY =
-  "aide-eval-aabbccddee112233445566778899aabbccddee112233445566778899aabbccddee";
+  "caliber-eval-aabbccddee112233445566778899aabbccddee112233445566778899aabbccddee";
 const LLM_REQUEST_ID = "req-llm-eval-orch-001";
 
 // Period window used across tests

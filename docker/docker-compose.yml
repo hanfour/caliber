@@ -3,7 +3,7 @@
 x-app-env: &app-env
   NODE_ENV: production
   LOG_LEVEL: ${LOG_LEVEL:-info}
-  DATABASE_URL: postgresql://${DB_USER:-aide}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-aide}
+  DATABASE_URL: postgresql://${DB_USER:-caliber}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-caliber}
   AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
   NEXTAUTH_URL: ${NEXTAUTH_URL:?NEXTAUTH_URL is required}
   # OAuth providers — at least ONE pair (Google or GitHub) must be filled in
@@ -47,13 +47,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-aide}
+      POSTGRES_USER: ${DB_USER:-caliber}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      POSTGRES_DB: ${DB_NAME:-aide}
+      POSTGRES_DB: ${DB_NAME:-caliber}
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-aide} -d ${DB_NAME:-aide}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-caliber} -d ${DB_NAME:-caliber}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -80,18 +80,18 @@ services:
     # via the internal compose network only.
 
   migrate:
-    image: ghcr.io/hanfour/aide-api:${VERSION:?VERSION is required}
+    image: ghcr.io/hanfour/caliber-api:${VERSION:?VERSION is required}
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${DB_USER:-aide}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-aide}
+      DATABASE_URL: postgresql://${DB_USER:-caliber}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-caliber}
     command: ["node", "/app/dist/migrate.js"]
 
   api:
-    image: ghcr.io/hanfour/aide-api:${VERSION}
+    image: ghcr.io/hanfour/caliber-api:${VERSION}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -106,7 +106,7 @@ services:
       - "3001"
 
   web:
-    image: ghcr.io/hanfour/aide-web:${VERSION}
+    image: ghcr.io/hanfour/caliber-web:${VERSION}
     restart: unless-stopped
     depends_on:
       api:
@@ -131,7 +131,7 @@ services:
     # Keeps the base profile (api + web + postgres + migrate + redis) bootable
     # on hosts that don't need the customer-facing /v1/* proxy yet.
     profiles: [gateway]
-    image: ghcr.io/hanfour/aide-gateway:${VERSION:?VERSION is required}
+    image: ghcr.io/hanfour/caliber-gateway:${VERSION:?VERSION is required}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -198,7 +198,7 @@ services:
     # installed — the keychainReader will warn + fall through to
     # direct anthropic refresh.
     volumes:
-      - ${HOME}/.aide/keychain.token:/run/aide-keychain.token:ro
+      - ${HOME}/.caliber/keychain.token:/run/caliber-keychain.token:ro
     # Lets the container reach the host helper via host.docker.internal
     # on Linux Docker Engine (works automatically on Docker Desktop).
     extra_hosts:

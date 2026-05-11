@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  launchd LaunchAgent for aide-keychain-helper.
+  launchd LaunchAgent for caliber-keychain-helper.
 
   Install:
-    cp aide-keychain-helper.plist ~/Library/LaunchAgents/com.hanfour.aide.keychain-helper.plist
+    cp caliber-keychain-helper.plist ~/Library/LaunchAgents/com.hanfour.caliber.keychain-helper.plist
     # edit the absolute paths in WorkingDirectory + ProgramArguments to
     # match your checkout (or run install.sh which does this for you)
-    launchctl load ~/Library/LaunchAgents/com.hanfour.aide.keychain-helper.plist
+    launchctl load ~/Library/LaunchAgents/com.hanfour.caliber.keychain-helper.plist
 
   Uninstall:
-    launchctl unload ~/Library/LaunchAgents/com.hanfour.aide.keychain-helper.plist
-    rm ~/Library/LaunchAgents/com.hanfour.aide.keychain-helper.plist
+    launchctl unload ~/Library/LaunchAgents/com.hanfour.caliber.keychain-helper.plist
+    rm ~/Library/LaunchAgents/com.hanfour.caliber.keychain-helper.plist
 
   Notes:
   - LaunchAgent (per-user), not LaunchDaemon (system-wide). The keychain
@@ -25,7 +25,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.hanfour.aide.keychain-helper</string>
+    <string>com.hanfour.caliber.keychain-helper</string>
 
     <!-- install.sh substitutes __NODE_BIN__ with the absolute path
          of node as discovered on the operator's PATH. launchd starts
@@ -35,7 +35,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>__NODE_BIN__</string>
-        <string>__INSTALL_DIR__/aide-keychain-helper.mjs</string>
+        <string>__INSTALL_DIR__/caliber-keychain-helper.mjs</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -51,9 +51,9 @@
     <integer>10</integer>
 
     <key>StandardOutPath</key>
-    <string>__HOME__/Library/Logs/aide-keychain-helper.log</string>
+    <string>__HOME__/Library/Logs/caliber-keychain-helper.log</string>
 
     <key>StandardErrorPath</key>
-    <string>__HOME__/Library/Logs/aide-keychain-helper.log</string>
+    <string>__HOME__/Library/Logs/caliber-keychain-helper.log</string>
 </dict>
 </plist>

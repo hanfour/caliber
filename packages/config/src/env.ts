@@ -139,7 +139,7 @@ export const serverEnvSchema = z
         .default("https://console.anthropic.com/v1/oauth/token"),
     ),
     /**
-     * `host:port` of the aide-keychain-helper TCP server. When set
+     * `host:port` of the caliber-keychain-helper TCP server. When set
      * (and the helper is reachable + the auth token is mounted),
      * the gateway will attempt to read the host macOS Keychain
      * before calling anthropic's OAuth refresh endpoint — this
@@ -149,13 +149,13 @@ export const serverEnvSchema = z
      * Operator wires this in by:
      *   1. Running scripts/keychain-helper/install.sh on the host
      *      (autostarts a localhost TCP server + writes a 0600 token
-     *      file at $HOME/.aide/keychain.token)
+     *      file at $HOME/.caliber/keychain.token)
      *   2. Adding a docker compose volume + env (see
      *      docker/docker-compose.yml gateway service)
      *   3. Setting GATEWAY_KEYCHAIN_HELPER_ENDPOINT to
      *      `host.docker.internal:47823` and
      *      GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH to
-     *      `/run/aide-keychain.token` (the in-container mount path)
+     *      `/run/caliber-keychain.token` (the in-container mount path)
      *
      * Empty/unset → keychain re-read disabled, gateway falls back to
      * direct anthropic refresh (pre-#93 behaviour).

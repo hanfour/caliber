@@ -233,7 +233,7 @@ async function seedAccount(
 // ── App factory ───────────────────────────────────────────────────────────────
 
 function makeRedisMock(): Redis {
-  return new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+  return new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
 }
 
 async function makeApp(
@@ -617,7 +617,7 @@ describe("POST /v1/messages", () => {
     };
 
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -690,7 +690,7 @@ describe("POST /v1/messages", () => {
     };
 
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -790,7 +790,7 @@ describe("POST /v1/messages", () => {
     };
 
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -865,7 +865,7 @@ describe("POST /v1/messages", () => {
     };
 
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -940,7 +940,7 @@ describe("POST /v1/messages", () => {
     };
 
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -996,7 +996,7 @@ describe("POST /v1/messages", () => {
     };
 
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -1036,7 +1036,7 @@ describe("POST /v1/messages", () => {
       body: JSON.stringify({ error: { message: "Service unavailable" } }),
     };
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -1073,7 +1073,7 @@ describe("POST /v1/messages", () => {
       body: JSON.stringify({ error: { message: "Invalid API key" } }),
     };
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -1112,7 +1112,7 @@ describe("POST /v1/messages", () => {
       body: "not valid json {",
     };
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));
@@ -1169,7 +1169,7 @@ describe("POST /v1/messages", () => {
       }),
     };
     const redis = new RedisMock({
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     }) as unknown as Redis;
     const { parseServerEnv } = await import("@caliber/config");
     const env = parseServerEnv(buildEnv(container.getConnectionUri()));

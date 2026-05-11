@@ -62,8 +62,8 @@ jobs:
           platforms: ${{ matrix.platforms }}
           push: true
           tags: |
-            ghcr.io/${{ steps.owner.outputs.name }}/aide-${{ matrix.image }}:${{ github.ref_name }}
-            ghcr.io/${{ steps.owner.outputs.name }}/aide-${{ matrix.image }}:latest
+            ghcr.io/${{ steps.owner.outputs.name }}/caliber-${{ matrix.image }}:${{ github.ref_name }}
+            ghcr.io/${{ steps.owner.outputs.name }}/caliber-${{ matrix.image }}:latest
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           provenance: false

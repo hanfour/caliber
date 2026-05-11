@@ -266,7 +266,7 @@ async function seedAccount(
 // ── App factory ───────────────────────────────────────────────────────────────
 
 function makeRedisMock(): Redis {
-  return new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+  return new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
 }
 
 async function makeApp(

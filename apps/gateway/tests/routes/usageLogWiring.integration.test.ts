@@ -133,7 +133,7 @@ const pepper = "b".repeat(64);
 // resolveCost returns miss=false + non-zero totals.
 const KNOWN_MODEL = "claude-3-5-haiku-20241022";
 // Not present in pricing map → miss=true, all costs zero.
-const UNKNOWN_MODEL = "aide-test-unknown-model-xyz";
+const UNKNOWN_MODEL = "caliber-test-unknown-model-xyz";
 
 // ── Per-test cleanup ─────────────────────────────────────────────────────────
 

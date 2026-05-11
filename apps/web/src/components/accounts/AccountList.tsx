@@ -233,7 +233,7 @@ export function AccountList({ orgId }: AccountListProps) {
 
   // Issue #92 sub-task 2: surface accounts auto-paused by
   // `oauth_invalid_grant`. The refresh_token rotated externally
-  // (Claude Code app, another aide instance, …) and aide can no
+  // (Claude Code app, another caliber instance, …) and caliber can no
   // longer refresh on its own. Direct operator to re-onboard from
   // Keychain instead of leaving the account silently dead.
   const invalidGrantAccounts = accounts.filter(

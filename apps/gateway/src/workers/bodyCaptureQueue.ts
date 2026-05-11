@@ -2,8 +2,8 @@
  * BullMQ queue + thin wrapper for body capture writes (Plan 4B Part 3, Task 3.4).
  *
  * Design notes:
- *   - Queue name "body-capture" with prefix "aide:gw" yields Redis keys under
- *     `aide:gw:body-capture:*`, matching the design-doc identifier.
+ *   - Queue name "body-capture" with prefix "caliber:gw" yields Redis keys under
+ *     `caliber:gw:body-capture:*`, matching the design-doc identifier.
  *
  *   - Body capture is best-effort / opt-in: no inline fallback. If Redis is
  *     unavailable the capture is dropped (caller should emit a metric). This
@@ -27,9 +27,9 @@ export const BODY_CAPTURE_QUEUE_NAME = "body-capture";
 
 /**
  * BullMQ key prefix. Combined with the queue name, this produces Redis keys
- * under `aide:gw:body-capture:*`.
+ * under `caliber:gw:body-capture:*`.
  */
-export const BODY_CAPTURE_QUEUE_PREFIX = "aide:gw";
+export const BODY_CAPTURE_QUEUE_PREFIX = "caliber:gw";
 
 /** BullMQ job name used for every body-capture write. */
 export const BODY_CAPTURE_JOB_NAME = "body-capture";
@@ -128,7 +128,7 @@ export function buildQueueOptions(
 }
 
 /**
- * Build a real BullMQ Queue wired to `aide:gw:body-capture:*`.
+ * Build a real BullMQ Queue wired to `caliber:gw:body-capture:*`.
  *
  * The returned instance satisfies `QueueLike` — callers may pass it directly
  * to `enqueueBodyCapture`.

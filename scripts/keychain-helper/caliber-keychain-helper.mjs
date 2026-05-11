@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * aide-keychain-helper — tiny TCP bridge that lets the gateway
+ * caliber-keychain-helper — tiny TCP bridge that lets the gateway
  * container read the host macOS Keychain entry
  * `Claude Code-credentials`.
  *
- * Why this exists: aide gateway runs in Docker; macOS Keychain lives
+ * Why this exists: caliber gateway runs in Docker; macOS Keychain lives
  * on the host. The container has no way to invoke
  * `security find-generic-password` itself, so this helper exposes
  * the keychain entry over a localhost TCP socket the container
@@ -19,7 +19,7 @@
  *
  * Wire format: newline-delimited JSON requests/responses. Each
  * request must include `auth` matching the bearer token written to
- * `$HOME/.aide/keychain.token` at first start.
+ * `$HOME/.caliber/keychain.token` at first start.
  *
  *   request:  {"op":"read","auth":"<token>"}
  *   response: {"ok":true,"bundle":{"access_token":"…","refresh_token":"…","expires_at":"2026-…Z"}}
@@ -31,7 +31,7 @@
  * has the same UID as the keychain owner, so they could run
  * `security find-generic-password` themselves — no extra exposure.
  *
- * Lifecycle: managed by launchd (see aide-keychain-helper.plist).
+ * Lifecycle: managed by launchd (see caliber-keychain-helper.plist).
  */
 
 import net from "node:net";
@@ -44,13 +44,13 @@ import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
 
-const HOST = process.env.AIDE_KEYCHAIN_HOST || "127.0.0.1";
-const PORT = parseInt(process.env.AIDE_KEYCHAIN_PORT || "47823", 10);
+const HOST = process.env.CALIBER_KEYCHAIN_HOST || "127.0.0.1";
+const PORT = parseInt(process.env.CALIBER_KEYCHAIN_PORT || "47823", 10);
 const TOKEN_PATH =
-  process.env.AIDE_KEYCHAIN_TOKEN_PATH ||
-  path.join(os.homedir(), ".aide", "keychain.token");
+  process.env.CALIBER_KEYCHAIN_TOKEN_PATH ||
+  path.join(os.homedir(), ".caliber", "keychain.token");
 const KEYCHAIN_ENTRY =
-  process.env.AIDE_KEYCHAIN_ENTRY || "Claude Code-credentials";
+  process.env.CALIBER_KEYCHAIN_ENTRY || "Claude Code-credentials";
 
 /** Per-connection idle timeout. Keep tight — clients should send + go. */
 const CONN_IDLE_MS = 5_000;
@@ -78,8 +78,8 @@ function log(level, msg, extra) {
 }
 
 /**
- * Reshape Claude Code's keychain JSON into aide's stored format.
- * Mirrors the python one-liner in ReonboardDialog.tsx so what aide
+ * Reshape Claude Code's keychain JSON into caliber's stored format.
+ * Mirrors the python one-liner in ReonboardDialog.tsx so what caliber
  * gets via socket matches what an operator gets via copy-paste.
  */
 function reshapeBundle(raw) {
@@ -133,7 +133,7 @@ async function readKeychain() {
 }
 
 /**
- * Inverse of reshapeBundle — takes aide's flat snake_case shape and
+ * Inverse of reshapeBundle — takes caliber's flat snake_case shape and
  * reconstructs Claude Code's keychain envelope (camelCase under
  * `claudeAiOauth`, expiresAt as unix-ms).
  */
@@ -176,7 +176,7 @@ async function writeKeychain(bundle) {
     );
     existing = JSON.parse(stdout);
   } catch {
-    // No existing entry — fine, we'll create it. (Unlikely path; aide
+    // No existing entry — fine, we'll create it. (Unlikely path; caliber
     // only writes to keychain after operator already onboarded.)
   }
   const merged = {
@@ -240,7 +240,7 @@ async function handleCommand(line, expectedToken) {
       }
     }
     case "write": {
-      // Phase 2.6: aide pushes its own freshly-refreshed bundle into
+      // Phase 2.6: caliber pushes its own freshly-refreshed bundle into
       // keychain so the host Claude Code app inherits it (and we
       // both stop racing on the next anthropic-side rotation).
       try {

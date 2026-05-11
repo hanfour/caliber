@@ -95,7 +95,7 @@ const EXPLICIT_UNSUPPORTED_FIELDS = [
 
 /**
  * Fields codex CLI / openai SDK send unconditionally on every
- * `/v1/responses` call, but which aide doesn't currently forward
+ * `/v1/responses` call, but which caliber doesn't currently forward
  * upstream. Stripped pre-Zod so `.strict()` doesn't 400 the request.
  *
  * Trade-off (acknowledged): on the OpenAI passthrough path these
@@ -152,12 +152,12 @@ export function makeResponsesRouteHandler(
     // ── Dispatch by platform ────────────────────────────────────────
     // The Anthropic translator branch needs strict Zod validation to
     // safely transform the body. The OpenAI passthrough branch does
-    // not — aide forwards the body verbatim to the OpenAI-compatible
+    // not — caliber forwards the body verbatim to the OpenAI-compatible
     // upstream, which owns request validation. Skipping the schema on
-    // the passthrough path lets aide stay compatible with codex CLI /
+    // the passthrough path lets caliber stay compatible with codex CLI /
     // openai SDK as they evolve (new tools like `web_search` /
     // `local_shell`, new top-level fields like `include` / `text` /
-    // `prompt_cache_key` / `client_metadata`) without aide needing to
+    // `prompt_cache_key` / `client_metadata`) without caliber needing to
     // model every shape upstream introduces.
 
     if (ctx.platform === "openai") {
@@ -449,9 +449,9 @@ export async function responsesRoutes(
  * approached: ask the OpenAI Responses upstream to compact the
  * conversation server-side. The compact endpoint is OpenAI-specific
  * (no anthropic equivalent), strictly request/response (non-stream),
- * and aide forwards the request body verbatim — no translation, no
+ * and caliber forwards the request body verbatim — no translation, no
  * usage accounting, no body capture. The upstream owns validation;
- * aide just provides the gateway auth/routing surface.
+ * caliber just provides the gateway auth/routing surface.
  *
  * Returns the upstream response body and status code as-is. On
  * `AllUpstreamsFailed` returns 503; on `FatalUpstreamError` mirrors

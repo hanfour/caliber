@@ -64,9 +64,9 @@ ENV NODE_ENV=production \
     PORT=3001
 WORKDIR /app
 # Non-root user (node image ships 1000:1000 already, but use a named pair)
-RUN addgroup -g 1001 -S aide && adduser -u 1001 -S aide -G aide
-COPY --from=build --chown=aide:aide /out /app
-USER aide
+RUN addgroup -g 1001 -S caliber && adduser -u 1001 -S caliber -G caliber
+COPY --from=build --chown=caliber:caliber /out /app
+USER caliber
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:3001/health >/dev/null 2>&1 || exit 1

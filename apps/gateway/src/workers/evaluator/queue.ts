@@ -2,8 +2,8 @@
  * BullMQ queue + thin wrapper for evaluator jobs (Plan 4B Part 4, Task 4.1).
  *
  * Design notes:
- *   - Queue name "evaluator" with prefix "aide:gw" yields Redis keys under
- *     `aide:gw:evaluator:*`, matching the design-doc identifier.
+ *   - Queue name "evaluator" with prefix "caliber:gw" yields Redis keys under
+ *     `caliber:gw:evaluator:*`, matching the design-doc identifier.
  *
  *   - Job payload uses ISO 8601 datetime strings (not Date objects) because
  *     BullMQ JSON-serializes payloads. Dates become strings after JSON
@@ -28,10 +28,10 @@ export const EVALUATOR_QUEUE_NAME = "evaluator";
 
 /**
  * BullMQ key prefix. Combined with the queue name, this produces Redis keys
- * under `aide:gw:evaluator:*`, matching the design-doc identifier
- * "aide:gw:evaluator".
+ * under `caliber:gw:evaluator:*`, matching the design-doc identifier
+ * "caliber:gw:evaluator".
  */
-export const EVALUATOR_QUEUE_PREFIX = "aide:gw";
+export const EVALUATOR_QUEUE_PREFIX = "caliber:gw";
 
 /** BullMQ job name used for every evaluator job. */
 export const EVALUATOR_JOB_NAME = "evaluator";
@@ -138,7 +138,7 @@ export function buildQueueOptions(
 }
 
 /**
- * Build a real BullMQ Queue wired to `aide:gw:evaluator:*`.
+ * Build a real BullMQ Queue wired to `caliber:gw:evaluator:*`.
  *
  * The returned instance satisfies `QueueLike` — callers may pass it directly
  * to `enqueueEvaluator`.
