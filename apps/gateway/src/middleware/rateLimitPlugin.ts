@@ -6,7 +6,7 @@
 // per-apiKey rate limit".
 
 import fp from "fastify-plugin";
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 import { checkApiKeyRateLimit } from "../redis/rateLimit.js";
 
 export interface RateLimitOptions {

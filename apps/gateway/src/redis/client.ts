@@ -1,6 +1,6 @@
 import fp from "fastify-plugin";
 import { Redis } from "ioredis";
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 
 declare module "fastify" {
   interface FastifyInstance {

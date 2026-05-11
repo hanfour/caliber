@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, and, isNull } from "drizzle-orm";
-import { users, organizations, organizationMembers } from "@aide/db";
+import { users, organizations, organizationMembers } from "@caliber/db";
 import { protectedProcedure, router } from "../procedures.js";
 
 export const meRouter = router({

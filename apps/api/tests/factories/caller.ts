@@ -1,9 +1,9 @@
 import type { TRPCRouterCaller } from "@trpc/server";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
-import type { Database } from "@aide/db";
-import type { ServerEnv } from "@aide/config";
-import { resolvePermissions } from "@aide/auth";
+import type { Database } from "@caliber/db";
+import type { ServerEnv } from "@caliber/config";
+import { resolvePermissions } from "@caliber/auth";
 import { appRouter, type AppRouter } from "../../src/trpc/router.js";
 import { createCallerFactory } from "../../src/trpc/procedures.js";
 import type { TrpcLogger } from "../../src/trpc/context.js";

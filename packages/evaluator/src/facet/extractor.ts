@@ -52,7 +52,7 @@ export interface FacetRow {
 export interface FacetCallDeps {
   /**
    * Wraps the LLM call AND budget enforcement. Same signature as
-   * `callWithCostTracking` from `@aide/evaluator/llm/callWithCostTracking`.
+   * `callWithCostTracking` from `@caliber/evaluator/llm/callWithCostTracking`.
    * The gateway wires this with concrete LLM client + budget deps + ledger writer.
    */
   callWithCostTracking: (args: {

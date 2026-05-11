@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   evaluationReports,
   gdprDeleteRequests,
@@ -8,9 +8,9 @@ import {
   apiKeys,
   usageLogs,
   requestBodies,
-} from "@aide/db";
-import { resolvePermissions } from "@aide/auth";
-import type { ServerEnv } from "@aide/config";
+} from "@caliber/db";
+import { resolvePermissions } from "@caliber/auth";
+import type { ServerEnv } from "@caliber/config";
 import {
   setupTestDb,
   makeOrg,

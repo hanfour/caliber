@@ -12,9 +12,9 @@
  *   4. If LLM fails → proceed with rule-based only; LLM columns stay NULL.
  */
 
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
-import type { Rubric } from "@aide/evaluator";
+import type { Rubric } from "@caliber/evaluator";
 import {
   runRuleBased,
   upsertEvaluationReport,

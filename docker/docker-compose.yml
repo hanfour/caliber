@@ -25,7 +25,7 @@ x-app-env: &app-env
   # base profile still boots cleanly.
   ENABLE_GATEWAY: ${ENABLE_GATEWAY:-false}
   # When ENABLE_GATEWAY=true, parseServerEnv requires these four to be
-  # present on every service that imports @aide/config (api, web, and
+  # present on every service that imports @caliber/config (api, web, and
   # gateway), not just the gateway container. Defaults are empty so
   # base-profile boots stay clean — when gateway is on, .env supplies
   # real values.
@@ -150,7 +150,7 @@ services:
       # when the `gateway` profile is inactive — making them strictly required
       # would break the base `docker compose up` flow for api+web-only
       # deploys. Validation happens inside the container: parseServerEnv
-      # (@aide/config) enforces URL + 64-char-hex shapes on boot, so a missing
+      # (@caliber/config) enforces URL + 64-char-hex shapes on boot, so a missing
       # or malformed value fails fast with a clear error.
       #
       # For file-backed secrets, swap these three lines for an `env_file:`

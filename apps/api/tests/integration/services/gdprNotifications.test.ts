@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import type { Database } from "@aide/db";
-import { auditLogs, gdprDeleteRequests } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { auditLogs, gdprDeleteRequests } from "@caliber/db";
 import { eq } from "drizzle-orm";
 import { setupTestDb, makeOrg, makeUser } from "../../factories/index.js";
 import { notifyGdprRequested } from "../../../src/services/gdprNotifications.js";

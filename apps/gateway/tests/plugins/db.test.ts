@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 import { dbPlugin } from "../../src/plugins/db.js";
-import { parseServerEnv } from "@aide/config";
+import { parseServerEnv } from "@caliber/config";
 
 const validBase = {
   NODE_ENV: "test",

@@ -11,13 +11,13 @@
  */
 
 import { and, eq, gte, inArray, lt } from "drizzle-orm";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   evaluationReports,
   requestBodies,
   requestBodyFacets,
   usageLogs,
-} from "@aide/db";
+} from "@caliber/db";
 import { decryptBody } from "../../capture/encrypt.js";
 import {
   scoreWithRules,
@@ -25,7 +25,7 @@ import {
   type Report,
   type Rubric,
   type UsageRow,
-} from "@aide/evaluator";
+} from "@caliber/evaluator";
 
 // ── RunRuleBased input / output ───────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
-import { organizations, departments, teams } from "@aide/db";
-import type { Database } from "@aide/db";
+import { organizations, departments, teams } from "@caliber/db";
+import type { Database } from "@caliber/db";
 
 let counter = 0;
 const uniq = () => `${Date.now()}-${counter++}`;

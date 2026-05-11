@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm'
-import type { Database } from '@aide/db'
-import { roleAssignments, organizations, departments, teams } from '@aide/db'
+import type { Database } from '@caliber/db'
+import { roleAssignments, organizations, departments, teams } from '@caliber/db'
 import type { Role, ScopeType } from './actions.js'
 import { expandScope } from './scope.js'
 

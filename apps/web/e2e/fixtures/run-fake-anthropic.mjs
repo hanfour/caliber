@@ -4,7 +4,7 @@
  *
  * Self-contained plain ESM — runs under `node` directly, no tsx / pnpm exec
  * wrapper chain. Deliberately duplicated from fake-anthropic.ts rather than
- * imported, because `pnpm --filter @aide/web exec tsx …` via nohup was
+ * imported, because `pnpm --filter @caliber/web exec tsx …` via nohup was
  * producing a live-but-unreachable child on GitHub Actions runners (the
  * server logged "listening" but wait-on timed out). A plain `node` call
  * has no such ambiguity.

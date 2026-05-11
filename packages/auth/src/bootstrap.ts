@@ -1,6 +1,6 @@
 import { and, eq, gt, isNull } from 'drizzle-orm'
-import type { Database } from '@aide/db'
-import { users, invites } from '@aide/db'
+import type { Database } from '@caliber/db'
+import { users, invites } from '@caliber/db'
 
 export interface BootstrapConfig {
   superAdminEmail: string

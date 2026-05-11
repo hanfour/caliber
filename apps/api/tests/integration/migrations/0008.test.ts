@@ -6,7 +6,7 @@ import {
   upstreamAccounts,
   accountGroups,
   accountGroupMembers,
-} from "@aide/db";
+} from "@caliber/db";
 import { setupTestDb, type TestDb } from "../../factories/db.js";
 import { makeOrg } from "../../factories/org.js";
 import { makeUser } from "../../factories/user.js";

@@ -33,10 +33,10 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @aide/db, @aide/gateway-core)
-        run: pnpm turbo run build --filter=@aide/db --filter=@aide/auth --filter=@aide/config --filter=@aide/gateway-core --filter=@aide/evaluator
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
       - name: Run API integration tests (testcontainers)
-        run: pnpm --filter @aide/api test:integration
+        run: pnpm --filter @caliber/api test:integration
 
   gateway-integration:
     # Separate from the `integration` job because gateway integration tests
@@ -54,19 +54,19 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @aide/db, @aide/gateway-core)
-        run: pnpm turbo run build --filter=@aide/db --filter=@aide/config --filter=@aide/gateway-core --filter=@aide/evaluator
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
       - name: Run Gateway integration tests (testcontainers postgres + redis)
-        run: pnpm --filter @aide/gateway test:integration
+        run: pnpm --filter @caliber/gateway test:integration
       # gateway-core unit tests also run in lint-type-test via `turbo run test`,
       # but plan 1728 names this job as their home too. Kept here so a future
       # gateway-core integration suite lands in the right place without a
       # workflow change.
       - name: Run gateway-core tests
-        run: pnpm --filter @aide/gateway-core test
+        run: pnpm --filter @caliber/gateway-core test
 
   evaluator-integration:
-    # Evaluator tests span multiple packages (@aide/evaluator, @aide/api, @aide/gateway).
+    # Evaluator tests span multiple packages (@caliber/evaluator, @caliber/api, @caliber/gateway).
     # Separate job provides clean failure signals in GitHub PR checks. Uses same
     # testcontainers (postgres + redis) as gateway-integration; parallelising keeps
     # the PR feedback loop short.
@@ -80,14 +80,14 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @aide/db, @aide/auth, @aide/gateway-core, @aide/evaluator)
-        run: pnpm turbo run build --filter=@aide/db --filter=@aide/auth --filter=@aide/config --filter=@aide/gateway-core --filter=@aide/evaluator
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/auth, @caliber/gateway-core, @caliber/evaluator)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
       - name: Run evaluator unit tests
-        run: pnpm --filter @aide/evaluator test
+        run: pnpm --filter @caliber/evaluator test
       - name: Run API integration tests (evaluator-related, testcontainers)
-        run: pnpm --filter @aide/api test:integration contentCapture rubrics reports evaluator gdprNotifications
+        run: pnpm --filter @caliber/api test:integration contentCapture rubrics reports evaluator gdprNotifications
       - name: Run Gateway integration tests (evaluator-related, testcontainers)
-        run: pnpm --filter @aide/gateway test:integration bodyCapture evaluator gdpr bodyPurge
+        run: pnpm --filter @caliber/gateway test:integration bodyCapture evaluator gdpr bodyPurge
 
   coverage:
     runs-on: ubuntu-latest
@@ -100,8 +100,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @aide/db, @aide/gateway-core)
-        run: pnpm turbo run build --filter=@aide/db --filter=@aide/auth --filter=@aide/config --filter=@aide/gateway-core --filter=@aide/evaluator
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
       - name: Coverage gate (packages/{auth,config} ≥ 80%)
         run: pnpm test:coverage
       - name: Upload coverage HTML report on failure
@@ -180,25 +180,25 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Apply migrations
-        run: pnpm --filter @aide/db db:migrate
+        run: pnpm --filter @caliber/db db:migrate
       - name: Build workspaces
-        run: pnpm turbo run build --filter=@aide/api --filter=@aide/web --filter=@aide/gateway
+        run: pnpm turbo run build --filter=@caliber/api --filter=@caliber/web --filter=@caliber/gateway
       - name: Install Playwright browsers
-        run: pnpm --filter @aide/web exec playwright install --with-deps chromium
+        run: pnpm --filter @caliber/web exec playwright install --with-deps chromium
       - name: Start api (NODE_ENV=test + test-seed gate active)
         run: |
           ENABLE_TEST_SEED=true NODE_ENV=test nohup \
-            pnpm --filter @aide/api start > api.log 2>&1 &
+            pnpm --filter @caliber/api start > api.log 2>&1 &
           echo $! > api.pid
       - name: Start web (production build)
         run: |
           NODE_ENV=production nohup \
-            pnpm --filter @aide/web start > web.log 2>&1 &
+            pnpm --filter @caliber/web start > web.log 2>&1 &
           echo $! > web.pid
       - name: Start fake Anthropic upstream
         run: |
           # Run via plain `node` on the self-contained .mjs. Previous iteration
-          # went through `pnpm --filter @aide/web exec tsx …` which produced a
+          # went through `pnpm --filter @caliber/web exec tsx …` which produced a
           # live-but-unreachable child under nohup on GitHub Actions runners
           # (server logged "listening" yet wait-on timed out; kill -0 still
           # passed, pointing at an orphaned wrapper chain).
@@ -227,7 +227,7 @@ jobs:
           # gateway at boot. Matches the api step's inline NODE_ENV=test.
           # LOG_LEVEL=debug is set at the job-level env block so every
           # process in this run uses it consistently.
-          NODE_ENV=test nohup pnpm --filter @aide/gateway start > gateway.log 2>&1 &
+          NODE_ENV=test nohup pnpm --filter @caliber/gateway start > gateway.log 2>&1 &
           echo $! > gateway.pid
           sleep 2
           if ! kill -0 "$(cat gateway.pid)" 2>/dev/null; then
@@ -279,7 +279,7 @@ jobs:
             http://127.0.0.1:4100/ \
             --timeout 120000
       - name: Playwright
-        run: pnpm --filter @aide/web exec playwright test --config e2e/playwright.config.ts
+        run: pnpm --filter @caliber/web exec playwright test --config e2e/playwright.config.ts
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v7

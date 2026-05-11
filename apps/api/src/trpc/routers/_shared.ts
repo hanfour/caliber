@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { teams } from "@aide/db";
-import type { Database } from "@aide/db";
+import { teams } from "@caliber/db";
+import type { Database } from "@caliber/db";
 
 // Cross-tenant integrity guard. `api_keys.team_id` and
 // `upstream_accounts.team_id` are independent FKs to the `teams` table — the

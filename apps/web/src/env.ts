@@ -1,4 +1,4 @@
-import { parseServerEnv, type ServerEnv } from "@aide/config/env";
+import { parseServerEnv, type ServerEnv } from "@caliber/config/env";
 
 let cached: ServerEnv | null = null;
 

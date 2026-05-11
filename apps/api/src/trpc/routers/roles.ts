@@ -5,9 +5,9 @@ import {
   users,
   organizationMembers,
   teamMembers,
-} from "@aide/db";
+} from "@caliber/db";
 import { TRPCError } from "@trpc/server";
-import { can } from "@aide/auth";
+import { can } from "@caliber/auth";
 import {
   protectedProcedure,
   permissionProcedure,

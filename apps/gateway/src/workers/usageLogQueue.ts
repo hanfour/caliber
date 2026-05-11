@@ -25,7 +25,7 @@
 import { Queue, type JobsOptions, type RedisOptions } from "bullmq";
 import type { Redis } from "ioredis";
 import { z } from "zod";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import { writeUsageLogBatch } from "./writeUsageLogBatch.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────

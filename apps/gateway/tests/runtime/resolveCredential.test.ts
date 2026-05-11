@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { encryptCredential } from "@aide/gateway-core";
+import { encryptCredential } from "@caliber/gateway-core";
 import {
   resolveCredential,
   CredentialNotFoundError,

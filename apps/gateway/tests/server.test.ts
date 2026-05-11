@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
 import { buildServer } from "../src/server.js";
-import { parseServerEnv, type ServerEnv } from "@aide/config";
+import { parseServerEnv, type ServerEnv } from "@caliber/config";
 
 const validBase = {
   NODE_ENV: "test",

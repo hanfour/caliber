@@ -37,7 +37,7 @@
 
 import { Worker, type Job, type RedisOptions } from "bullmq";
 import type { Redis } from "ioredis";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   USAGE_LOG_QUEUE_NAME,
   USAGE_LOG_QUEUE_PREFIX,

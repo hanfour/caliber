@@ -22,7 +22,7 @@ import {
   upstreamAccounts,
   accountGroups,
   accountGroupMembers,
-} from "@aide/db";
+} from "@caliber/db";
 import {
   runFailover,
   AllUpstreamsFailed,
@@ -31,7 +31,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

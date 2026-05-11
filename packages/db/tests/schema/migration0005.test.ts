@@ -12,13 +12,13 @@ describe("gateway schema migration", () => {
   );
   if (files.length === 0)
     throw new Error(
-      "No migration files found — run pnpm -F @aide/db db:generate",
+      "No migration files found — run pnpm -F @caliber/db db:generate",
     );
   // Find the 0001_* file which has the table creation
   const file = files.find((f) => f.startsWith("0001_"));
   if (!file)
     throw new Error(
-      "Migration 0001_* not found — run pnpm -F @aide/db db:generate",
+      "Migration 0001_* not found — run pnpm -F @caliber/db db:generate",
     );
   const sql = readFileSync(join(drizzleDir, file), "utf8");
 

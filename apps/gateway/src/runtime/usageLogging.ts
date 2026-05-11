@@ -30,7 +30,7 @@ import {
   type CostBreakdown,
   computeCost,
   type PricingLookup,
-} from "@aide/gateway-core";
+} from "@caliber/gateway-core";
 import {
   enqueueUsageLog,
   type UsageLogJobPayload,
@@ -69,7 +69,7 @@ export function resetPricingCacheForTests(): void {
 
 /**
  * Shape we read off a parsed Anthropic Messages response. The real type is
- * `AnthropicMessagesResponse` from `@aide/gateway-core`, but we accept
+ * `AnthropicMessagesResponse` from `@caliber/gateway-core`, but we accept
  * `unknown` and narrow defensively because the body arrived across the wire
  * and must never trust its shape.
  */

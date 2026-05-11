@@ -1,8 +1,8 @@
 /**
- * Metric-emitting wrapper around `enforceBudget` from `@aide/evaluator`
+ * Metric-emitting wrapper around `enforceBudget` from `@caliber/evaluator`
  * (Plan 4C, Part 7).
  *
- * The pure budget logic lives in `@aide/evaluator/src/budget/enforceBudget`
+ * The pure budget logic lives in `@caliber/evaluator/src/budget/enforceBudget`
  * and stays free of any infrastructure concerns. This adapter binds it to
  * the gateway's Prometheus registry so we can observe:
  *
@@ -29,7 +29,7 @@ import {
   type EnforceBudgetDeps,
   BudgetExceededDegrade,
   BudgetExceededHalt,
-} from "@aide/evaluator";
+} from "@caliber/evaluator";
 import type { GatewayMetrics } from "../../plugins/metrics.js";
 
 const WARNING_THRESHOLD = 0.8;

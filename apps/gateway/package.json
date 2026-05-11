@@ -1,5 +1,5 @@
 {
-  "name": "@aide/gateway",
+  "name": "@caliber/gateway",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -21,10 +21,10 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@aide/config": "workspace:*",
-    "@aide/db": "workspace:*",
-    "@aide/evaluator": "workspace:*",
-    "@aide/gateway-core": "workspace:*",
+    "@caliber/config": "workspace:*",
+    "@caliber/db": "workspace:*",
+    "@caliber/evaluator": "workspace:*",
+    "@caliber/gateway-core": "workspace:*",
     "bullmq": "^5.34.0",
     "drizzle-orm": "^0.36.0",
     "fastify": "^5.1.0",

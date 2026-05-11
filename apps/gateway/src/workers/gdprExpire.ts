@@ -14,8 +14,8 @@
  */
 
 import { and, isNull, lt } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { gdprDeleteRequests } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { gdprDeleteRequests } from "@caliber/db";
 
 export const GDPR_EXPIRE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1 day
 export const GDPR_SLA_DAYS = 30;

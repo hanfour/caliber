@@ -8,12 +8,12 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { organizations, teams, upstreamAccounts } from "@aide/db";
+import { organizations, teams, upstreamAccounts } from "@caliber/db";
 import { selectAccounts } from "../../src/runtime/selectAccount.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

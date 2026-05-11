@@ -171,7 +171,7 @@ released subsystems work as documented above.
   `apps/gateway/src/workers/evaluator/runEvaluation.ts` after rule-based
   signals are computed — was deferred to keep this release focused. The
   integration requires three additional pieces:
-    1. A concrete `LlmClient` (per the `@aide/evaluator/llm` interface)
+    1. A concrete `LlmClient` (per the `@caliber/evaluator/llm` interface)
        that calls the gateway loopback for facet extraction, mirroring
        `runLlm.ts`'s approach for deep analysis.
     2. A `BodyRow → FacetSession` adapter that flattens

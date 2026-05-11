@@ -15,8 +15,8 @@
  * session rather than send an empty prompt to the LLM.
  */
 
-import type { BodyRow } from "@aide/evaluator";
-import type { FacetSession, Turn } from "@aide/evaluator";
+import type { BodyRow } from "@caliber/evaluator";
+import type { FacetSession, Turn } from "@caliber/evaluator";
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
 

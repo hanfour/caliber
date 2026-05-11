@@ -20,15 +20,15 @@
 // benefit from observed reliability.
 
 import { eq } from "drizzle-orm";
-import { upstreamAccounts } from "@aide/db";
-import type { Database } from "@aide/db";
+import { upstreamAccounts } from "@caliber/db";
+import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
 import {
   classifyUpstreamError,
   type AccountStateUpdate,
   type Platform,
   type UpstreamError,
-} from "@aide/gateway-core";
+} from "@caliber/gateway-core";
 import {
   createScheduler,
   NoSchedulableAccountsError,

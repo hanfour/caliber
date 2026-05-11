@@ -36,7 +36,7 @@ Redeploy api + gateway + web (in that order).
 
 ## Step 3 — Run migration 0002
 
-    pnpm -F @aide/db db:migrate
+    pnpm -F @caliber/db db:migrate
 
 Verifies:
 - 4 new tables: `rubrics`, `request_bodies`, `evaluation_reports`, `gdpr_delete_requests`

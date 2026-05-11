@@ -2,10 +2,10 @@ import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { apiKeys, organizationMembers } from "@aide/db";
-import type { Database } from "@aide/db";
-import { generateApiKey, hashApiKey } from "@aide/gateway-core";
-import { can } from "@aide/auth";
+import { apiKeys, organizationMembers } from "@caliber/db";
+import type { Database } from "@caliber/db";
+import { generateApiKey, hashApiKey } from "@caliber/gateway-core";
+import { can } from "@caliber/auth";
 import {
   protectedProcedure,
   permissionProcedure,

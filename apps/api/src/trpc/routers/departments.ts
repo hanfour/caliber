@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { and, eq, isNull } from 'drizzle-orm'
-import { departments } from '@aide/db'
+import { departments } from '@caliber/db'
 import { TRPCError } from '@trpc/server'
 import {
   protectedProcedure,

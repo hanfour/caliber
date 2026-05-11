@@ -1,6 +1,6 @@
 import NextAuth, { type NextAuthConfig, type NextAuthResult } from "next-auth";
-import { createDb } from "@aide/db";
-import { buildAuthConfig } from "@aide/auth";
+import { createDb } from "@caliber/db";
+import { buildAuthConfig } from "@caliber/auth";
 import { getEnv } from "./env.js";
 
 type DbHandle = ReturnType<typeof createDb>;

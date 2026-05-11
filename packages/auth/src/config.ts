@@ -1,7 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
-import type { Database } from "@aide/db";
-import { organizations, organizationMembers, invites, users } from "@aide/db";
-import { roleAssignments } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { organizations, organizationMembers, invites, users } from "@caliber/db";
+import { roleAssignments } from "@caliber/db";
 import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { buildProviders } from "./providers.js";
 import { makeAdapter } from "./drizzle-adapter.js";

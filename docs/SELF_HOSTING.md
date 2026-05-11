@@ -300,7 +300,7 @@ Once `ENABLE_EVALUATOR=true`, admins configure per-org via Settings UI (not env)
 ### 7.4 First-enable workflow
 
 1. Set `ENABLE_EVALUATOR=true` in `docker/.env` and redeploy.
-2. Run `pnpm -F @aide/db db:migrate` to apply migration 0002.
+2. Run `pnpm -F @caliber/db db:migrate` to apply migration 0002.
 3. Navigate to `/dashboard/organizations/[id]/evaluator/settings` and enable
    content capture.
 4. (Optional) Navigate to `/dashboard/organizations/[id]/evaluator/rubrics` to

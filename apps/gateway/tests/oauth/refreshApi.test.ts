@@ -81,7 +81,7 @@ function makeFakeDb(platform: Platform = "openai") {
         },
       };
     },
-  } as unknown as import("@aide/db").Database;
+  } as unknown as import("@caliber/db").Database;
 }
 
 function makeFakeVault(initial: {

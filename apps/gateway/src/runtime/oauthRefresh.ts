@@ -1,13 +1,13 @@
 import { eq, and, isNull } from "drizzle-orm";
 import { request } from "undici";
 import type { Redis } from "ioredis";
-import { credentialVault, upstreamAccounts } from "@aide/db";
-import type { Database } from "@aide/db";
+import { credentialVault, upstreamAccounts } from "@caliber/db";
+import type { Database } from "@caliber/db";
 import {
   encryptCredential,
   decryptCredential,
   safeErrorMessage,
-} from "@aide/gateway-core";
+} from "@caliber/gateway-core";
 import { keys } from "../redis/keys.js";
 import type { ResolvedCredential } from "./resolveCredential.js";
 import {

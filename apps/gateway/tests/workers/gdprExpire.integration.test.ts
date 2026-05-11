@@ -25,12 +25,12 @@ import {
   users,
   gdprDeleteRequests,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import { expireStaleGdprRequests } from "../../src/workers/gdprExpire.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

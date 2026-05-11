@@ -42,14 +42,14 @@ import {
   usageLogs,
   users,
   type Database,
-} from "@aide/db";
-import type { BodyRow } from "@aide/evaluator";
+} from "@caliber/db";
+import type { BodyRow } from "@caliber/evaluator";
 import { runFacetExtraction } from "../../../src/workers/evaluator/runFacetExtraction.js";
 import { LLM_KEY_REDIS_PREFIX } from "../../../src/workers/evaluator/runLlm.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

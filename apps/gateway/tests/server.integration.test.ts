@@ -29,13 +29,13 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import { buildServer } from "../src/server.js";
-import { parseServerEnv, type ServerEnv } from "@aide/config";
+import { parseServerEnv, type ServerEnv } from "@caliber/config";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

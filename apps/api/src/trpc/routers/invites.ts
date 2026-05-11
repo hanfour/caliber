@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
-import { invites } from "@aide/db";
+import { invites } from "@caliber/db";
 import { TRPCError } from "@trpc/server";
-import { can } from "@aide/auth";
+import { can } from "@caliber/auth";
 import {
   protectedProcedure,
   permissionProcedure,

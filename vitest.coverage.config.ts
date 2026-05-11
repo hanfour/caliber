@@ -9,17 +9,17 @@ import { defineConfig } from "vitest/config";
  *
  *   - `apps/api/src/**` (tRPC routers, services, REST handlers) is exercised
  *     by the integration suite against a real Postgres via testcontainers
- *     (`pnpm --filter @aide/api test:integration`). Measuring unit coverage
+ *     (`pnpm --filter @caliber/api test:integration`). Measuring unit coverage
  *     here would reward trivial mocks over real behaviour.
  *   - `apps/web/src/**` (React pages, server components) is covered by the
  *     Playwright E2E flows in `apps/web/e2e/specs/`.
  *   - `packages/db/src/schema/**` is declarative Drizzle tables with no
  *     branches to cover; migrate/seed run as part of integration setup.
  *
- * Per-package gates (e.g. @aide/auth ≥ 95%) live in the package's own
+ * Per-package gates (e.g. @caliber/auth ≥ 95%) live in the package's own
  * `vitest.config.ts` and still run via `pnpm --filter <pkg> test`.
  *
- * Projects run sequentially because @aide/auth spins up testcontainers and
+ * Projects run sequentially because @caliber/auth spins up testcontainers and
  * parallel Docker pulls race.
  */
 export default defineConfig({

@@ -40,19 +40,19 @@ import {
   usageLogs,
   users,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import {
   ensureFacets,
   extractOne,
   type FacetCallDeps,
   type FacetSession,
-} from "@aide/evaluator";
+} from "@caliber/evaluator";
 import { createFacetWriter } from "../../../src/workers/evaluator/facetWriter.js";
 import { createFacetCacheReader } from "../../../src/workers/evaluator/facetCache.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

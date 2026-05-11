@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 import {
   translateOpenAIToAnthropic,
   translateAnthropicToOpenAI,
@@ -12,7 +12,7 @@ import {
   type OpenAIChatRequest,
   type OpenAIStreamChunk,
   type ResponsesUsage,
-} from "@aide/gateway-core";
+} from "@caliber/gateway-core";
 import {
   runFailover,
   AllUpstreamsFailed,

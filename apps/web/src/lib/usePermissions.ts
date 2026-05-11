@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { can } from "@aide/auth/rbac/check";
-import type { Action } from "@aide/auth/rbac/actions";
+import { can } from "@caliber/auth/rbac/check";
+import type { Action } from "@caliber/auth/rbac/actions";
 import { trpc } from "@/lib/trpc/client";
 import { buildPermissionsFromSession } from "./permissions";
 

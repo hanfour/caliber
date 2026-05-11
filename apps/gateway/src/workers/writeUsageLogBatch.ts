@@ -30,8 +30,8 @@
  */
 
 import { eq, sql, type SQL } from "drizzle-orm";
-import { apiKeys, usageLogs } from "@aide/db";
-import type { Database } from "@aide/db";
+import { apiKeys, usageLogs } from "@caliber/db";
+import type { Database } from "@caliber/db";
 import type { UsageLogJobPayload } from "./usageLogQueue.js";
 
 /**

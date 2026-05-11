@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server'
-import { configuredProviderIds } from '@aide/auth'
+import { configuredProviderIds } from '@caliber/auth'
 import { signIn } from '@/auth'
 import { getEnv } from '@/env'
 import { Button } from '@/components/ui/button'

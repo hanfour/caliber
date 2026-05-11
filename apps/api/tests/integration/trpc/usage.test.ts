@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import type { Database } from "@aide/db";
-import { apiKeys, upstreamAccounts, usageLogs } from "@aide/db";
-import { resolvePermissions } from "@aide/auth";
-import type { ServerEnv } from "@aide/config";
+import type { Database } from "@caliber/db";
+import { apiKeys, upstreamAccounts, usageLogs } from "@caliber/db";
+import { resolvePermissions } from "@caliber/auth";
+import type { ServerEnv } from "@caliber/config";
 import {
   setupTestDb,
   makeOrg,

@@ -1,7 +1,7 @@
 import type { SignalResult } from "./types.js";
 
 /**
- * Subset of `FacetRow` (from `@aide/evaluator/facet/extractor`) consumed by
+ * Subset of `FacetRow` (from `@caliber/evaluator/facet/extractor`) consumed by
  * facet-based signal aggregators. We accept this narrower shape (rather than
  * the full FacetRow) so callers can pass either the live extractor output or
  * lightweight test fixtures without coupling the signals layer to the storage

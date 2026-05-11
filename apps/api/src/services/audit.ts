@@ -1,5 +1,5 @@
-import type { Database } from '@aide/db'
-import { auditLogs } from '@aide/db'
+import type { Database } from '@caliber/db'
+import { auditLogs } from '@caliber/db'
 
 // `writeAudit` needs to run inside a transaction as well as against the root
 // `Database`. The transaction callback's parameter type is a narrower

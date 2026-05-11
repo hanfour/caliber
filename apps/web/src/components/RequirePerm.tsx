@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { Action } from "@aide/auth/rbac/actions";
+import type { Action } from "@caliber/auth/rbac/actions";
 import { usePermissions } from "@/lib/usePermissions";
 
 interface Props {

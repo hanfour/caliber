@@ -37,7 +37,7 @@ import {
   usageLogs,
   users,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import {
   createUsageLogQueue,
   enqueueUsageLog,
@@ -53,7 +53,7 @@ import { makeUsageLogJobPayload } from "../factories/usageLogPayload.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 
@@ -63,7 +63,7 @@ let pgContainer: StartedPostgreSqlContainer;
 let pool: pg.Pool;
 // node-postgres drizzle return shape lines up with Database, but TS can't
 // infer through pg.Pool generics without the schema parameter passed to
-// createDb in @aide/db, so we keep a localized cast.
+// createDb in @caliber/db, so we keep a localized cast.
 let db: Database;
 
 let redisContainer: StartedRedisContainer;

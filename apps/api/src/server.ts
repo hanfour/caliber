@@ -1,10 +1,10 @@
 import Fastify from "fastify";
-import { LOG_REDACT_PATHS } from "@aide/gateway-core";
+import { LOG_REDACT_PATHS } from "@caliber/gateway-core";
 import rateLimit from "@fastify/rate-limit";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Redis } from "ioredis";
 import { Queue } from "bullmq";
-import { parseServerEnv } from "@aide/config/env";
+import { parseServerEnv } from "@caliber/config/env";
 import { healthRoutes } from "./rest/health.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";

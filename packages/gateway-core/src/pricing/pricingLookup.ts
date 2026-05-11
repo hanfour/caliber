@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
-import { modelPricing, type Database } from "@aide/db";
+import { modelPricing, type Database } from "@caliber/db";
 import type { ModelPricingRow } from "./computeCost.js";
 
 // Plan 5A §11.1 — DB-backed pricing lookup with in-process TTL cache.

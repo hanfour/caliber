@@ -2,7 +2,7 @@
  * Concrete `getFacet` cache reader for the gateway evaluator worker
  * (Plan 4C Phase 2 Part 15).
  *
- * `ensureFacets` (from `@aide/evaluator`) calls `getFacet(requestId)` once
+ * `ensureFacets` (from `@caliber/evaluator`) calls `getFacet(requestId)` once
  * per session before deciding whether to extract. This factory binds that
  * contract to a real Drizzle `Database`, returning the existing row's
  * `promptVersion` (or null when no row exists) so the caller can compare
@@ -10,8 +10,8 @@
  */
 
 import { eq } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { requestBodyFacets } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { requestBodyFacets } from "@caliber/db";
 
 export function createFacetCacheReader(
   db: Database,

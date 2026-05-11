@@ -10,7 +10,7 @@
 
 import { Worker, type WorkerOptions } from "bullmq";
 import type { Redis } from "ioredis";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   BODY_CAPTURE_QUEUE_NAME,
   BODY_CAPTURE_QUEUE_PREFIX,

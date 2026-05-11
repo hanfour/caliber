@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { upstreamAccounts, credentialVault } from "@aide/db";
-import { encryptCredential } from "@aide/gateway-core";
-import { can } from "@aide/auth";
+import { upstreamAccounts, credentialVault } from "@caliber/db";
+import { encryptCredential } from "@caliber/gateway-core";
+import { can } from "@caliber/auth";
 import {
   protectedProcedure,
   permissionProcedure,

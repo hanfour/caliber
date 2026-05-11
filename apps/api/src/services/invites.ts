@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { and, eq, gt, isNull } from 'drizzle-orm'
-import type { Database } from '@aide/db'
-import { invites, organizationMembers, roleAssignments } from '@aide/db'
-import type { Role, ScopeType } from '@aide/auth'
+import type { Database } from '@caliber/db'
+import { invites, organizationMembers, roleAssignments } from '@caliber/db'
+import type { Role, ScopeType } from '@caliber/auth'
 import { ServiceError } from '../trpc/errors.js'
 import { writeAudit } from './audit.js'
 

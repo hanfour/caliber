@@ -13,7 +13,7 @@ WORKDIR /repo
 ###############################################################################
 # Stage 1 — deps: install workspace deps from manifests only so source-only
 # changes keep the cached layer. Gateway's transitive workspace deps are
-# @aide/config, @aide/db, @aide/gateway-core — nothing else is needed.
+# @caliber/config, @caliber/db, @caliber/gateway-core — nothing else is needed.
 ###############################################################################
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json tsconfig.json ./
@@ -26,7 +26,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
 ###############################################################################
-# Stage 2 — build: compile @aide/gateway and its workspace deps with turbo,
+# Stage 2 — build: compile @caliber/gateway and its workspace deps with turbo,
 # then pnpm-deploy a self-contained prod bundle into /out
 ###############################################################################
 FROM deps AS build
@@ -35,8 +35,8 @@ COPY packages/config packages/config
 COPY packages/db packages/db
 COPY packages/evaluator packages/evaluator
 COPY packages/gateway-core packages/gateway-core
-RUN pnpm turbo run build --filter=@aide/gateway...
-RUN pnpm --filter=@aide/gateway deploy --prod /out
+RUN pnpm turbo run build --filter=@caliber/gateway...
+RUN pnpm --filter=@caliber/gateway deploy --prod /out
 
 # Sanity: confirm runtime resolution of every module gateway imports
 # directly. Prints the exact failing module name if pnpm deploy --prod
@@ -44,12 +44,12 @@ RUN pnpm --filter=@aide/gateway deploy --prod /out
 # than first container boot.
 #
 # Note: pg is intentionally omitted — gateway does not `require('pg')`
-# itself; it goes through `@aide/db`, which declares pg as a runtime dep
+# itself; it goes through `@caliber/db`, which declares pg as a runtime dep
 # and resolves it from its own node_modules subtree. Asserting pg at /out
 # level would fail because pnpm-deploy hoists a direct-dep-only subset
 # and leaves transitive deps in the nested .pnpm store.
 RUN cd /out \
-  && node -e "['fastify','ioredis','bullmq','undici','@aide/gateway-core','@aide/config','@aide/db','@aide/evaluator'].forEach(m => { try { require(m); } catch (e) { console.error('sanity-require failed for', m, '-', e.code || e.message); process.exit(1); } })"
+  && node -e "['fastify','ioredis','bullmq','undici','@caliber/gateway-core','@caliber/config','@caliber/db','@caliber/evaluator'].forEach(m => { try { require(m); } catch (e) { console.error('sanity-require failed for', m, '-', e.code || e.message); process.exit(1); } })"
 
 ###############################################################################
 # Stage 3 — runtime: minimal image, non-root user, healthcheck

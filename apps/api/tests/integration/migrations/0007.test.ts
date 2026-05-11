@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
-import { rubricSchema } from "@aide/evaluator";
+import { rubricSchema } from "@caliber/evaluator";
 import { setupTestDb, type TestDb } from "../../factories/db.js";
 
 /**

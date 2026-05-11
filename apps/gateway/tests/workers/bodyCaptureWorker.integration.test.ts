@@ -37,7 +37,7 @@ import {
   usageLogs,
   users,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import {
   createBodyCaptureQueue,
   enqueueBodyCapture,
@@ -49,7 +49,7 @@ import { decryptBody } from "../../src/capture/encrypt.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

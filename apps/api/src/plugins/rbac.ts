@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { can, type Action } from "@aide/auth";
+import { can, type Action } from "@caliber/auth";
 
 type ActionResolver = (req: FastifyRequest) => Action;
 

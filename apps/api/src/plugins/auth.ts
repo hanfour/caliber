@@ -1,8 +1,8 @@
 import fp from "fastify-plugin";
 import { eq } from "drizzle-orm";
-import { createDb, sessions, users } from "@aide/db";
-import { resolvePermissions, type UserPermissions } from "@aide/auth";
-import type { ServerEnv } from "@aide/config";
+import { createDb, sessions, users } from "@caliber/db";
+import { resolvePermissions, type UserPermissions } from "@caliber/auth";
+import type { ServerEnv } from "@caliber/config";
 
 declare module "fastify" {
   interface FastifyRequest {

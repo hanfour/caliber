@@ -11,9 +11,9 @@
  */
 
 import { and, eq, isNull } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { organizations, rubrics } from "@aide/db";
-import { rubricSchema, type Rubric } from "@aide/evaluator";
+import type { Database } from "@caliber/db";
+import { organizations, rubrics } from "@caliber/db";
+import { rubricSchema, type Rubric } from "@caliber/evaluator";
 
 export const RUBRIC_CACHE_TTL_MS = 5 * 60 * 1000;
 

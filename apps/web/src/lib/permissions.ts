@@ -1,5 +1,5 @@
-import type { UserPermissions } from "@aide/auth/rbac";
-import type { Role, ScopeType } from "@aide/auth/rbac";
+import type { UserPermissions } from "@caliber/auth/rbac";
+import type { Role, ScopeType } from "@caliber/auth/rbac";
 
 export interface SessionPayload {
   user: { id: string };

@@ -16,7 +16,7 @@
 // holder picked their group on purpose.
 
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { Platform } from "@aide/gateway-core";
+import type { Platform } from "@caliber/gateway-core";
 
 export type DispatchHandler = (
   req: FastifyRequest,

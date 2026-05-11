@@ -1,7 +1,7 @@
 import type { Redis } from "ioredis";
-import type { Database } from "@aide/db";
-import { upstreamAccounts } from "@aide/db";
-import { maskCredentialMaterial } from "@aide/gateway-core";
+import type { Database } from "@caliber/db";
+import { upstreamAccounts } from "@caliber/db";
+import { maskCredentialMaterial } from "@caliber/gateway-core";
 import { eq } from "drizzle-orm";
 import {
   OAuthLockTimeoutError,

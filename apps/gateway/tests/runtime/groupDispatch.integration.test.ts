@@ -9,7 +9,7 @@ import { sql } from "drizzle-orm";
 import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { accountGroups, organizations } from "@aide/db";
+import { accountGroups, organizations } from "@caliber/db";
 import {
   isLegacyGroupId,
   resolveGroupContext,
@@ -17,7 +17,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

@@ -6,8 +6,8 @@
  * `request_bodies` with ON CONFLICT DO NOTHING for idempotency.
  */
 
-import type { Database } from "@aide/db";
-import { requestBodies } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { requestBodies } from "@caliber/db";
 import { sanitize } from "../capture/sanitizer.js";
 import { truncate } from "../capture/truncate.js";
 import { encryptBody } from "../capture/encrypt.js";

@@ -1,5 +1,5 @@
-import type { Database } from "@aide/db";
-import { auditLogs } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { auditLogs } from "@caliber/db";
 
 export interface NotifyGdprRequestedInput {
   db: Database;

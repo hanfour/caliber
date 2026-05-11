@@ -36,12 +36,12 @@ import {
   gdprDeleteRequests,
   auditLogs,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import { executeGdprDeletions } from "../../src/workers/gdprDelete.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

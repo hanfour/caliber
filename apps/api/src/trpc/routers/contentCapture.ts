@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
-import { organizations, auditLogs, requestBodies } from "@aide/db";
-import { can } from "@aide/auth";
+import { organizations, auditLogs, requestBodies } from "@caliber/db";
+import { can } from "@caliber/auth";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 

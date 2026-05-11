@@ -1,4 +1,4 @@
-import { encryptBodyRaw, decryptBodyRaw } from '@aide/gateway-core'
+import { encryptBodyRaw, decryptBodyRaw } from '@caliber/gateway-core'
 
 const NONCE_LEN = 12
 const TAG_LEN = 16

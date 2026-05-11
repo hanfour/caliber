@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/usePermissions";
-import type { Action } from "@aide/auth/rbac/actions";
+import type { Action } from "@caliber/auth/rbac/actions";
 
 interface Tab {
   href: string;

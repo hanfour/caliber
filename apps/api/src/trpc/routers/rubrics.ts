@@ -1,10 +1,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
-import { organizations, rubrics, usageLogs } from "@aide/db";
-import { can } from "@aide/auth";
-import { rubricSchema, scoreWithRules } from "@aide/evaluator";
-import type { UsageRow } from "@aide/evaluator";
+import { organizations, rubrics, usageLogs } from "@caliber/db";
+import { can } from "@caliber/auth";
+import { rubricSchema, scoreWithRules } from "@caliber/evaluator";
+import type { UsageRow } from "@caliber/evaluator";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 
@@ -80,7 +80,7 @@ export const rubricsRouter = router({
 
   /**
    * Create a new org-scoped rubric. The `definition` field is validated against
-   * `rubricSchema` from `@aide/evaluator` before insertion.
+   * `rubricSchema` from `@caliber/evaluator` before insertion.
    * Requires `rubric.create` on the org.
    */
   create: evaluatorProcedure

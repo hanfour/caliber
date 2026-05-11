@@ -29,7 +29,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
 ###############################################################################
-# Stage 2 — build: compile @aide/api and its workspace deps with turbo,
+# Stage 2 — build: compile @caliber/api and its workspace deps with turbo,
 # then pnpm-deploy a self-contained prod bundle into /out
 ###############################################################################
 FROM deps AS build
@@ -41,19 +41,19 @@ COPY packages/core packages/core
 COPY packages/db packages/db
 COPY packages/evaluator packages/evaluator
 COPY packages/gateway-core packages/gateway-core
-RUN pnpm turbo run build --filter=@aide/api...
-RUN pnpm --filter=@aide/api deploy --prod /out
+RUN pnpm turbo run build --filter=@caliber/api...
+RUN pnpm --filter=@caliber/api deploy --prod /out
 
 # Strip the test-only seed endpoint from the production image. testSeed.ts
 # is already gated by NODE_ENV + ENABLE_TEST_SEED + TEST_SEED_TOKEN, but
 # removing the compiled output is a third layer of defense.
 RUN rm -f /out/dist/rest/testSeed.js /out/dist/rest/testSeed.js.map
 
-# Sanity: confirm runtime resolution — pg, drizzle-orm, and @aide/db all
+# Sanity: confirm runtime resolution — pg, drizzle-orm, and @caliber/db all
 # reachable. If deploy --prod pruned anything load-bearing, this fails here
 # rather than at container start.
 RUN cd /out \
-  && node -e "require('drizzle-orm'); require('pg'); require('@aide/db'); require('@aide/auth'); require('@aide/config'); require('@aide/evaluator'); require('@aide/gateway-core')"
+  && node -e "require('drizzle-orm'); require('pg'); require('@caliber/db'); require('@caliber/auth'); require('@caliber/config'); require('@caliber/evaluator'); require('@caliber/gateway-core')"
 
 ###############################################################################
 # Stage 3 — runtime: minimal image, non-root user, healthcheck

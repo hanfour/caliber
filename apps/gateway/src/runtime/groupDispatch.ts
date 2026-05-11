@@ -17,11 +17,11 @@
 // confusing "no upstreams" later.
 
 import { and, eq, isNull } from "drizzle-orm";
-import { accountGroups } from "@aide/db";
-import type { Database } from "@aide/db";
-import type { Platform } from "@aide/gateway-core";
+import { accountGroups } from "@caliber/db";
+import type { Database } from "@caliber/db";
+import type { Platform } from "@caliber/gateway-core";
 
-// Mirror of the Platform union from `@aide/gateway-core` for runtime
+// Mirror of the Platform union from `@caliber/gateway-core` for runtime
 // validation. The `satisfies` ensures the literal stays in sync if the
 // type ever expands.
 const KNOWN_PLATFORMS = [

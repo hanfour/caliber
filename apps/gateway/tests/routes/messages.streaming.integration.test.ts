@@ -42,7 +42,7 @@ import type { AddressInfo } from "node:net";
 import { createRequire } from "node:module";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
-import { encryptCredential, hashApiKey } from "@aide/gateway-core";
+import { encryptCredential, hashApiKey } from "@caliber/gateway-core";
 import {
   organizations,
   users,
@@ -50,13 +50,13 @@ import {
   upstreamAccounts,
   credentialVault,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import { buildServer } from "../../src/server.js";
 import type { FastifyInstance } from "fastify";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 
@@ -274,7 +274,7 @@ async function makeApp(
   connectionString: string,
   envOverrides: Record<string, unknown> = {},
 ): Promise<FastifyInstance> {
-  const { parseServerEnv } = await import("@aide/config");
+  const { parseServerEnv } = await import("@caliber/config");
   const env = parseServerEnv(buildEnv(connectionString, envOverrides));
   return buildServer({ env, db, redis: redisMock });
 }

@@ -35,7 +35,7 @@ import {
   usageLogs,
   users,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import { encryptBody } from "../../../src/capture/encrypt.js";
 import {
   runRuleBased,
@@ -45,7 +45,7 @@ import { platformDefaultRubric } from "../../../src/workers/evaluator/fixtures/p
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

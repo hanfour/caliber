@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { and, desc, eq, gte, lte, sql, type SQL } from 'drizzle-orm'
-import { auditLogs, users } from '@aide/db'
+import { auditLogs, users } from '@caliber/db'
 import { TRPCError } from '@trpc/server'
 import { protectedProcedure, router } from '../procedures.js'
 

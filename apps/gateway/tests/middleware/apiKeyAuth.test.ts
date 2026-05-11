@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import fp from "fastify-plugin";
-import { hashApiKey } from "@aide/gateway-core";
+import { hashApiKey } from "@caliber/gateway-core";
 import { apiKeyAuthPlugin } from "../../src/middleware/apiKeyAuth.js";
 
 const PEPPER = "a".repeat(64);

@@ -32,7 +32,7 @@
  */
 
 import { sql, type SQL } from "drizzle-orm";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 

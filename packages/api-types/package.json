@@ -1,5 +1,5 @@
 {
-  "name": "@aide/api-types",
+  "name": "@caliber/api-types",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aide/api": "workspace:*"
+    "@caliber/api": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

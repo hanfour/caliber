@@ -21,9 +21,9 @@
 
 import { and, asc, eq, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import type { Redis } from "ioredis";
-import { accountGroupMembers, accountGroups, upstreamAccounts } from "@aide/db";
-import type { Database } from "@aide/db";
-import type { Platform } from "@aide/gateway-core";
+import { accountGroupMembers, accountGroups, upstreamAccounts } from "@caliber/db";
+import type { Database } from "@caliber/db";
+import type { Platform } from "@caliber/gateway-core";
 import { AccountRuntimeStats } from "./runtimeStats.js";
 import {
   getRespSticky,

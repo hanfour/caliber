@@ -1,7 +1,7 @@
 "use client";
 
 import type { inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "@aide/api-types";
+import type { AppRouter } from "@caliber/api-types";
 import { Card } from "@/components/ui/card";
 import { formatUsd } from "@/lib/money";
 

@@ -20,8 +20,8 @@
  */
 
 import { eq } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { organizations } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { organizations } from "@caliber/db";
 import type { Redis } from "ioredis";
 import {
   callWithCostTracking,
@@ -32,7 +32,7 @@ import {
   type FacetCallDeps,
   type FacetSession,
   type LlmCallParams,
-} from "@aide/evaluator";
+} from "@caliber/evaluator";
 
 import { createBudgetDeps } from "./budgetDeps.js";
 import { createFacetCacheReader } from "./facetCache.js";

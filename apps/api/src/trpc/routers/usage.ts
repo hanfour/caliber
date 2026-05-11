@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { usageLogs } from "@aide/db";
-import { can, type Action } from "@aide/auth";
-import type { UserPermissions } from "@aide/auth";
+import { usageLogs } from "@caliber/db";
+import { can, type Action } from "@caliber/auth";
+import type { UserPermissions } from "@caliber/auth";
 import { protectedProcedure, router } from "../procedures.js";
 
 const uuid = z.string().uuid();

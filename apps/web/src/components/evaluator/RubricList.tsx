@@ -5,7 +5,7 @@ import { Plus, FlaskConical, BookOpen, MoreHorizontal, ShieldAlert } from "lucid
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "@aide/api-types";
+import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
 import { usePermissions } from "@/lib/usePermissions";
 import { Button } from "@/components/ui/button";

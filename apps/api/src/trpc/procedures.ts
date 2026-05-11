@@ -6,8 +6,8 @@ import {
 } from "@trpc/server";
 import type { z } from "zod";
 import type { Redis } from "ioredis";
-import { can, type Action } from "@aide/auth";
-import type { ServerEnv } from "@aide/config";
+import { can, type Action } from "@caliber/auth";
+import type { ServerEnv } from "@caliber/config";
 import type { TrpcContext, TrpcLogger } from "./context.js";
 import type { EvaluatorQueue } from "./routers/reports.js";
 

@@ -1,8 +1,8 @@
 // apps/api/tests/integration/migrations/0009.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
-import { modelPricing } from "@aide/db";
-import { createPricingLookup } from "@aide/gateway-core";
+import { modelPricing } from "@caliber/db";
+import { createPricingLookup } from "@caliber/gateway-core";
 import { setupTestDb, type TestDb } from "../../factories/db.js";
 
 // Plan 5A migration 0009:

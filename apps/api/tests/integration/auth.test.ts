@@ -11,11 +11,11 @@ import { createRequire } from "node:module";
 import Fastify from "fastify";
 import { cookiesPlugin } from "../../src/plugins/cookies.js";
 import { authPlugin } from "../../src/plugins/auth.js";
-import { sessions, users } from "@aide/db";
+import { sessions, users } from "@caliber/db";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 
@@ -64,7 +64,7 @@ function env(overrides: Record<string, unknown> = {}) {
     LOG_LEVEL: "error" as const,
     ENABLE_SWAGGER: false,
     ...overrides,
-  } as unknown as import("@aide/config").ServerEnv;
+  } as unknown as import("@caliber/config").ServerEnv;
 }
 
 describe("authPlugin", () => {

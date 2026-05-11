@@ -108,7 +108,7 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: `pnpm --filter @aide/api dev`,
+          command: `pnpm --filter @caliber/api dev`,
           url: `http://localhost:${API_PORT}/health`,
           timeout: 60_000,
           reuseExistingServer: true,
@@ -124,7 +124,7 @@ export default defineConfig({
           },
         },
         {
-          command: `pnpm --filter @aide/web dev`,
+          command: `pnpm --filter @caliber/web dev`,
           url: `http://localhost:${WEB_PORT}/sign-in`,
           timeout: 120_000,
           reuseExistingServer: true,
@@ -159,7 +159,7 @@ export default defineConfig({
           },
         },
         {
-          command: `pnpm --filter @aide/gateway dev`,
+          command: `pnpm --filter @caliber/gateway dev`,
           url: `http://localhost:${GATEWAY_PORT}/health`,
           timeout: 60_000,
           reuseExistingServer: true,

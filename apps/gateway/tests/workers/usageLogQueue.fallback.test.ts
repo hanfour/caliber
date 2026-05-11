@@ -15,7 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { JobsOptions } from "bullmq";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   enqueueUsageLog,
   UsageLogJobPayload,

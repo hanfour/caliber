@@ -1,6 +1,6 @@
 import { and, eq, gte, lt, sum, count, desc, sql } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { organizations, llmUsageEvents } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { organizations, llmUsageEvents } from "@caliber/db";
 
 export interface CostSummary {
   currentMonthSpendUsd: number;

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 
 export const BODY_PURGE_BATCH_SIZE = 10_000;
 export const BODY_PURGE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4h

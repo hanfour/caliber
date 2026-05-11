@@ -25,8 +25,8 @@ import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { eq } from "drizzle-orm";
-import { organizations, rubrics, type Database } from "@aide/db";
-import { rubricSchema, type Rubric } from "@aide/evaluator";
+import { organizations, rubrics, type Database } from "@caliber/db";
+import { rubricSchema, type Rubric } from "@caliber/evaluator";
 import {
   createRubricResolver,
   RUBRIC_CACHE_TTL_MS,
@@ -35,7 +35,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

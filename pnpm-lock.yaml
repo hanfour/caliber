@@ -45,19 +45,19 @@ importers:
 
   apps/api:
     dependencies:
-      '@aide/auth':
+      '@caliber/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@aide/config':
+      '@caliber/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aide/db':
+      '@caliber/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@aide/evaluator':
+      '@caliber/evaluator':
         specifier: workspace:*
         version: link:../../packages/evaluator
-      '@aide/gateway-core':
+      '@caliber/gateway-core':
         specifier: workspace:*
         version: link:../../packages/gateway-core
       '@fastify/cookie':
@@ -127,16 +127,16 @@ importers:
 
   apps/gateway:
     dependencies:
-      '@aide/config':
+      '@caliber/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aide/db':
+      '@caliber/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@aide/evaluator':
+      '@caliber/evaluator':
         specifier: workspace:*
         version: link:../../packages/evaluator
-      '@aide/gateway-core':
+      '@caliber/gateway-core':
         specifier: workspace:*
         version: link:../../packages/gateway-core
       bullmq:
@@ -209,19 +209,19 @@ importers:
 
   apps/web:
     dependencies:
-      '@aide/api-types':
+      '@caliber/api-types':
         specifier: workspace:^
         version: link:../../packages/api-types
-      '@aide/auth':
+      '@caliber/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@aide/config':
+      '@caliber/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aide/db':
+      '@caliber/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@aide/evaluator':
+      '@caliber/evaluator':
         specifier: workspace:*
         version: link:../../packages/evaluator
       '@hookform/resolvers':
@@ -357,7 +357,7 @@ importers:
 
   packages/api-types:
     dependencies:
-      '@aide/api':
+      '@caliber/api':
         specifier: workspace:*
         version: link:../../apps/api
     devDependencies:
@@ -367,18 +367,18 @@ importers:
 
   packages/auth:
     dependencies:
-      '@aide/config':
-        specifier: workspace:*
-        version: link:../config
-      '@aide/db':
-        specifier: workspace:*
-        version: link:../db
       '@auth/core':
         specifier: ^0.34.3
         version: 0.34.3
       '@auth/drizzle-adapter':
         specifier: ^1.7.0
         version: 1.11.2
+      '@caliber/config':
+        specifier: workspace:*
+        version: link:../config
+      '@caliber/db':
+        specifier: workspace:*
+        version: link:../db
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(@types/react@19.2.14)(better-sqlite3@11.10.0)(pg@8.20.0)(react@19.2.5)
@@ -429,7 +429,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@aide/config':
+      '@caliber/config':
         specifier: workspace:*
         version: link:../config
       drizzle-orm:
@@ -476,7 +476,7 @@ importers:
 
   packages/gateway-core:
     dependencies:
-      '@aide/db':
+      '@caliber/db':
         specifier: workspace:*
         version: link:../db
       drizzle-orm:

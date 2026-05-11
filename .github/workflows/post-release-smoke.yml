@@ -32,7 +32,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @aide/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @caliber/web exec playwright install --with-deps chromium
 
       - name: Run smoke-evaluator.sh
         env:
@@ -49,7 +49,7 @@ jobs:
           CANARY_BASE_URL: ${{ secrets.CANARY_API_BASE_URL }}
           CANARY_SESSION_COOKIE: ${{ secrets.CANARY_ADMIN_SESSION_COOKIE }}
           CANARY_ORG_ID: ${{ secrets.CANARY_ORG_ID }}
-        run: pnpm --filter @aide/web exec playwright test specs/99-post-release-smoke.spec.ts
+        run: pnpm --filter @caliber/web exec playwright test specs/99-post-release-smoke.spec.ts
 
       - name: On failure — open issue
         if: failure()

@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   rubrics,
   organizations,
   usageLogs,
   apiKeys,
   upstreamAccounts,
-} from "@aide/db";
-import { resolvePermissions } from "@aide/auth";
-import type { ServerEnv } from "@aide/config";
+} from "@caliber/db";
+import { resolvePermissions } from "@caliber/auth";
+import type { ServerEnv } from "@caliber/config";
 import {
   setupTestDb,
   makeOrg,

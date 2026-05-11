@@ -13,8 +13,8 @@ import type { AddressInfo } from "node:net";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
 import { eq } from "drizzle-orm";
-import { organizations, upstreamAccounts, credentialVault } from "@aide/db";
-import { encryptCredential, decryptCredential } from "@aide/gateway-core";
+import { organizations, upstreamAccounts, credentialVault } from "@caliber/db";
+import { encryptCredential, decryptCredential } from "@caliber/gateway-core";
 import {
   maybeRefreshOAuth,
   persistRefresh,
@@ -25,7 +25,7 @@ import type { ResolvedCredential } from "../../src/runtime/resolveCredential.js"
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

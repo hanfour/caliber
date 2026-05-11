@@ -13,11 +13,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
 import * as RealRunLlm from "../../../src/workers/evaluator/runLlm.js";
 import { platformDefaultRubric } from "../../../src/workers/evaluator/fixtures/platformDefault.js";
-import type { Report } from "@aide/evaluator";
+import type { Report } from "@caliber/evaluator";
 
 // ── Metric Spy / Recorder ────────────────────────────────────────────────────
 

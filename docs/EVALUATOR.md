@@ -36,7 +36,7 @@ The evaluator has three layers:
 | `apps/api` | Rubric CRUD, score results, GDPR approval/rejection |
 | `apps/web` | Evaluation pages, rubric editor, dry-run preview, GDPR flows |
 | `packages/gateway-core` | Scoring engine (rule interpreter, LLM prompt generation) |
-| `@aide/db` | Schema: `rubrics`, `member_scores`, `score_evidence`, `gdpr_requests` |
+| `@caliber/db` | Schema: `rubrics`, `member_scores`, `score_evidence`, `gdpr_requests` |
 
 ---
 
@@ -283,7 +283,7 @@ outputs are short JSON). When enabled, the evaluator worker classifies
 each captured session against a fixed schema (session type, outcome,
 helpfulness 1–5, friction / bugs caught / codex errors counts) and
 persists the result in `request_body_facets`. The six facet signal
-aggregators in `@aide/evaluator/signals/facet.ts`
+aggregators in `@caliber/evaluator/signals/facet.ts`
 (`facet_session_type_mix`, `facet_outcome_distribution`,
 `facet_avg_helpfulness`, `facet_friction_rate`,
 `facet_bugs_caught_total`, `facet_codex_error_rate`) are then available

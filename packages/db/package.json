@@ -1,5 +1,5 @@
 {
-  "name": "@aide/db",
+  "name": "@caliber/db",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -30,7 +30,7 @@
     "db:studio": "tsx ./node_modules/drizzle-kit/bin.cjs studio"
   },
   "dependencies": {
-    "@aide/config": "workspace:*",
+    "@caliber/config": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "pg": "^8.13.0"
   },

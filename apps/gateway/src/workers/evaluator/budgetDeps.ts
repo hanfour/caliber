@@ -2,7 +2,7 @@
  * Concrete budget deps for the gateway evaluator worker
  * (Plan 4C, Task 3.2; halt_set_at column added in follow-up #6).
  *
- * Wires the abstract `EnforceBudgetDeps` interface from `@aide/evaluator` to
+ * Wires the abstract `EnforceBudgetDeps` interface from `@caliber/evaluator` to
  * a real Drizzle/Postgres `Database`, so the worker can call `enforceBudget`
  * with production storage.
  *
@@ -23,9 +23,9 @@
  */
 
 import { and, eq, gte, lt, sum } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { llmUsageEvents, organizations } from "@aide/db";
-import type { EnforceBudgetDeps } from "@aide/evaluator";
+import type { Database } from "@caliber/db";
+import { llmUsageEvents, organizations } from "@caliber/db";
+import type { EnforceBudgetDeps } from "@caliber/evaluator";
 
 const DEFAULT_OVERAGE_BEHAVIOR = "degrade" as const;
 

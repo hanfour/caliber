@@ -15,7 +15,7 @@ async function main() {
 
   const migrationsFolder =
     process.env.DRIZZLE_MIGRATIONS_FOLDER ??
-    path.resolve(path.dirname(require.resolve("@aide/db/package.json")), "drizzle");
+    path.resolve(path.dirname(require.resolve("@caliber/db/package.json")), "drizzle");
 
   // eslint-disable-next-line no-console
   console.log(`Applying migrations from ${migrationsFolder}`);

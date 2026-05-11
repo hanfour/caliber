@@ -1,4 +1,4 @@
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 
 // TODO(part-7): emit gw_redis_error_total counter (design 4.9 — adjacent to gw_redis_latency_seconds)
 

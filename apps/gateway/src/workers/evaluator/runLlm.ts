@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { usageLogs, organizations } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { usageLogs, organizations } from "@caliber/db";
 import type { Redis } from "ioredis";
 import {
   buildPrompt,
@@ -10,7 +10,7 @@ import {
   type Report,
   type LlmResponse,
   type BodyRow,
-} from "@aide/evaluator";
+} from "@caliber/evaluator";
 
 export const LLM_KEY_REDIS_PREFIX = "aide:gw:llm-eval-key:";
 export const LLM_COST_LOOKUP_MAX_ATTEMPTS = 3;

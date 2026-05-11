@@ -33,8 +33,8 @@ import {
   apiKeys,
   upstreamAccounts,
   type Database,
-} from "@aide/db";
-import type { BodyRow, Report, Rubric } from "@aide/evaluator";
+} from "@caliber/db";
+import type { BodyRow, Report, Rubric } from "@caliber/evaluator";
 import {
   runLlmDeepAnalysis,
   LLM_KEY_REDIS_PREFIX,
@@ -42,7 +42,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

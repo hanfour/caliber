@@ -9,7 +9,7 @@ describe("migration 0002 — evaluator schema", () => {
   );
   if (!file)
     throw new Error(
-      "Migration 0002_* not found — run pnpm -F @aide/db db:generate",
+      "Migration 0002_* not found — run pnpm -F @caliber/db db:generate",
     );
   const sql = readFileSync(join(drizzleDir, file), "utf8");
 

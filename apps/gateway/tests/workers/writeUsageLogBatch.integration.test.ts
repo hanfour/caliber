@@ -32,14 +32,14 @@ import {
   usageLogs,
   users,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import type { UsageLogJobPayload } from "../../src/workers/usageLogQueue.js";
 import { makeUsageLogJobPayload } from "../factories/usageLogPayload.js";
 import { writeUsageLogBatch } from "../../src/workers/writeUsageLogBatch.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

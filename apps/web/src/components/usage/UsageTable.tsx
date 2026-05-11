@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "@aide/api-types";
+import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

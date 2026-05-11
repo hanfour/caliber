@@ -4,7 +4,7 @@
  *
  * Verifies the concrete `insertFacet` and `getFacet` factories wired
  * against a real Postgres testcontainer + Drizzle. The writer is consumed
- * by `extractOne` (from `@aide/evaluator`) to record facet rows; the
+ * by `extractOne` (from `@caliber/evaluator`) to record facet rows; the
  * cache reader is consumed by `ensureFacets` to skip up-to-date
  * sessions.
  *
@@ -41,13 +41,13 @@ import {
   usageLogs,
   users,
   type Database,
-} from "@aide/db";
+} from "@caliber/db";
 import { createFacetWriter } from "../../../src/workers/evaluator/facetWriter.js";
 import { createFacetCacheReader } from "../../../src/workers/evaluator/facetCache.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

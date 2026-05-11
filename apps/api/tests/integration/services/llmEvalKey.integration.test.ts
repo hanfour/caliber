@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { eq, and, isNull } from "drizzle-orm";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
-import { users, apiKeys, organizationMembers } from "@aide/db";
-import { verifyApiKey } from "@aide/gateway-core";
+import { users, apiKeys, organizationMembers } from "@caliber/db";
+import { verifyApiKey } from "@caliber/gateway-core";
 import { setupTestDb, makeOrg, defaultTestEnv } from "../../factories/index.js";
 import { provisionLlmEvalKey } from "../../../src/services/llmEvalKeyProvisioning.js";
 

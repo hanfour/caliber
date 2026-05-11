@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, lt, notInArray, or, sql } from "drizzle-orm";
-import { upstreamAccounts } from "@aide/db";
-import type { Database } from "@aide/db";
+import { upstreamAccounts } from "@caliber/db";
+import type { Database } from "@caliber/db";
 
 export interface SelectAccountInput {
   orgId: string;

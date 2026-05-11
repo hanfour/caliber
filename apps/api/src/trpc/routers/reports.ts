@@ -8,15 +8,15 @@ import {
   requestBodies,
   teamMembers,
   usageLogs,
-} from "@aide/db";
-import { can } from "@aide/auth";
+} from "@caliber/db";
+import { can } from "@caliber/auth";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 import { notifyGdprRequested } from "../../services/gdprNotifications.js";
 import { getFacetSummary } from "../../services/facetSummary.js";
 
 // ─── Evaluator queue constants (duplicated from apps/gateway to avoid cross-package import) ──
-// TODO: extract to a shared @aide/queue package to eliminate this duplication.
+// TODO: extract to a shared @caliber/queue package to eliminate this duplication.
 const EVALUATOR_QUEUE_NAME = "evaluator";
 const EVALUATOR_QUEUE_PREFIX = "aide:gw";
 

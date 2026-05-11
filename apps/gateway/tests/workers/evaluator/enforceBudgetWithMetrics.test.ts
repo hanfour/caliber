@@ -18,7 +18,7 @@ import {
   BudgetExceededHalt,
   type EnforceBudgetDeps,
   type OrgBudgetState,
-} from "@aide/evaluator";
+} from "@caliber/evaluator";
 import { wrapEnforceBudget } from "../../../src/workers/evaluator/enforceBudgetWithMetrics.js";
 
 interface MetricStub {

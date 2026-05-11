@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { credentialVault } from "@aide/db";
-import type { Database } from "@aide/db";
-import { decryptCredential } from "@aide/gateway-core";
+import { credentialVault } from "@caliber/db";
+import type { Database } from "@caliber/db";
+import { decryptCredential } from "@caliber/gateway-core";
 
 export type ResolvedCredential =
   | { type: "api_key"; apiKey: string }

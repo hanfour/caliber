@@ -5,7 +5,7 @@
  * in Part 9; the `rubricResolver` (Task 4.4) will replace this stub.
  */
 
-import type { Rubric } from "@aide/evaluator";
+import type { Rubric } from "@caliber/evaluator";
 
 export const platformDefaultRubric: Rubric = {
   name: "Platform default (Part 4 stub)",

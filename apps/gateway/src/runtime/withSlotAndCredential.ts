@@ -17,7 +17,7 @@
 // bodies in messages.ts / chatCompletions.ts / responses.ts.
 
 import type { FastifyInstance } from "fastify";
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 import type { SelectedAccount } from "./selectAccount.js";
 import { resolveCredential, type ResolvedCredential } from "./resolveCredential.js";
 import { maybeRefreshOAuth } from "./oauthRefresh.js";

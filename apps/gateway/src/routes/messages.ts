@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 import {
   translateAnthropicToResponses,
   translateResponsesResponseToAnthropic,
@@ -8,7 +8,7 @@ import {
   type AnthropicMessagesRequest,
   type AnthropicSSEEvent,
   type ResponsesUsage,
-} from "@aide/gateway-core";
+} from "@caliber/gateway-core";
 import {
   runFailover,
   AllUpstreamsFailed,

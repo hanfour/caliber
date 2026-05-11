@@ -21,8 +21,8 @@
  */
 
 import { and, eq, isNull } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { organizations, organizationMembers, users } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { organizations, organizationMembers, users } from "@caliber/db";
 import {
   enqueueEvaluator,
   type QueueLike as EvaluatorQueueLike,

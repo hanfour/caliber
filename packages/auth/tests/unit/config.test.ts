@@ -9,19 +9,19 @@ import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { eq } from "drizzle-orm";
-import * as schema from "@aide/db/schema";
+import * as schema from "@caliber/db/schema";
 import {
   users,
   organizations,
   organizationMembers,
   invites,
   roleAssignments,
-} from "@aide/db";
+} from "@caliber/db";
 import { buildAuthConfig, type AuthEnv } from "../../src/config";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

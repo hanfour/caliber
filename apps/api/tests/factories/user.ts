@@ -1,6 +1,6 @@
-import { users, roleAssignments, organizationMembers, teamMembers } from '@aide/db'
-import type { Database } from '@aide/db'
-import type { Role, ScopeType } from '@aide/auth'
+import { users, roleAssignments, organizationMembers, teamMembers } from '@caliber/db'
+import type { Database } from '@caliber/db'
+import type { Role, ScopeType } from '@caliber/auth'
 
 let counter = 0
 

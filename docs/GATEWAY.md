@@ -27,7 +27,7 @@ bring-up see [`SELF_HOSTING.md`](./SELF_HOSTING.md); for local development see
       ├─ session-cookie auth                ├─ GET  /health
       │                                     ├─ GET  /metrics
       ▼                                     ▼
-   Postgres (shared)  ◄── @aide/db ────► Postgres (shared)
+   Postgres (shared)  ◄── @caliber/db ────► Postgres (shared)
         ▲                                    ▲
         └──────── Redis ─────────────────────┘   ─► Anthropic upstream
                  (slots, queue, idempotency,
@@ -47,9 +47,9 @@ session cookie auth.
 |---|---|
 | `apps/gateway` | Fastify server, request pipeline, workers, Redis plumbing |
 | `packages/gateway-core` | Shared logic — translation, pricing, state machine, DB helpers — consumed by both `apps/gateway` (runtime) and `apps/api` (admin CRUD) |
-| `@aide/config` | `parseServerEnv` + `ServerEnv` type. All gateway vars live here. |
-| `@aide/db` | Schema, migrations, Drizzle client. Gateway adds `upstream_accounts`, `credential_vault`, `api_keys`, `usage_logs` (see migration `0005_gateway_schema.sql`). |
-| `@aide/auth` | RBAC. Gateway adds `account.*`, `api_key.*`, `usage.*` action families. |
+| `@caliber/config` | `parseServerEnv` + `ServerEnv` type. All gateway vars live here. |
+| `@caliber/db` | Schema, migrations, Drizzle client. Gateway adds `upstream_accounts`, `credential_vault`, `api_keys`, `usage_logs` (see migration `0005_gateway_schema.sql`). |
+| `@caliber/auth` | RBAC. Gateway adds `account.*`, `api_key.*`, `usage.*` action families. |
 
 **Endpoints shipped in 4A.**
 

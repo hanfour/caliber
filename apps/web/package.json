@@ -1,5 +1,5 @@
 {
-  "name": "@aide/web",
+  "name": "@caliber/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,11 +14,11 @@
     "e2e:ui": "playwright test --config e2e/playwright.config.ts --ui"
   },
   "dependencies": {
-    "@aide/api-types": "workspace:^",
-    "@aide/auth": "workspace:*",
-    "@aide/config": "workspace:*",
-    "@aide/db": "workspace:*",
-    "@aide/evaluator": "workspace:*",
+    "@caliber/api-types": "workspace:^",
+    "@caliber/auth": "workspace:*",
+    "@caliber/config": "workspace:*",
+    "@caliber/db": "workspace:*",
+    "@caliber/evaluator": "workspace:*",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",

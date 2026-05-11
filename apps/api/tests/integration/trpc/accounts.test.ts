@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { and, eq } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { credentialVault, upstreamAccounts } from "@aide/db";
-import { decryptCredential } from "@aide/gateway-core";
-import { resolvePermissions } from "@aide/auth";
-import type { ServerEnv } from "@aide/config";
+import type { Database } from "@caliber/db";
+import { credentialVault, upstreamAccounts } from "@caliber/db";
+import { decryptCredential } from "@caliber/gateway-core";
+import { resolvePermissions } from "@caliber/auth";
+import type { ServerEnv } from "@caliber/config";
 import {
   setupTestDb,
   makeOrg,

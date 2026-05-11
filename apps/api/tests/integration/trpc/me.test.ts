@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { organizationMembers } from "@aide/db";
+import { organizationMembers } from "@caliber/db";
 import {
   setupTestDb,
   makeOrg,

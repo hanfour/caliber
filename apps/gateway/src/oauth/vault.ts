@@ -1,4 +1,4 @@
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   readCredential,
   readVaultRotatedAt,

@@ -1,4 +1,4 @@
-# `@aide/gateway`
+# `@caliber/gateway`
 
 Fastify data-plane server exposing `/v1/messages` (Anthropic-native) and
 `/v1/chat/completions` (OpenAI-compatible). Part of Plan 4A, ships in
@@ -23,10 +23,10 @@ debugging). Everything user-facing lives in `GATEWAY.md`.
 
 The workspace packages this depends on:
 
-- `@aide/config` — `parseServerEnv`, `ServerEnv`. Every env var the gateway
+- `@caliber/config` — `parseServerEnv`, `ServerEnv`. Every env var the gateway
   reads is validated here.
-- `@aide/db` — shared schema, Drizzle client, migrations.
-- `@aide/gateway-core` — pricing table, OpenAI↔Anthropic translation,
+- `@caliber/db` — shared schema, Drizzle client, migrations.
+- `@caliber/gateway-core` — pricing table, OpenAI↔Anthropic translation,
   error-classifier state machine, state-machine + pricing helpers.
 
 ---
@@ -40,10 +40,10 @@ From the repo root:
 docker compose -f docker/docker-compose.yml up -d postgres redis
 
 # Run migrations once against the local DB
-pnpm --filter @aide/db migrate
+pnpm --filter @caliber/db migrate
 
 # Dev server with tsx watch
-pnpm --filter @aide/gateway dev
+pnpm --filter @caliber/gateway dev
 ```
 
 `dev` uses `tsx watch` on `src/server.ts` — save-triggered reload.
@@ -58,7 +58,7 @@ export REDIS_URL=redis://localhost:6379
 export CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -hex 32)
 export API_KEY_HASH_PEPPER=$(openssl rand -hex 32)
 export DATABASE_URL=postgresql://aide:aide@localhost:5432/aide
-# …plus the rest of the @aide/config server schema (AUTH_SECRET, OAuth creds,
+# …plus the rest of the @caliber/config server schema (AUTH_SECRET, OAuth creds,
 # BOOTSTRAP_*, NEXTAUTH_URL). A `direnv` .envrc at the repo root is the usual
 # pattern.
 ```
@@ -82,9 +82,9 @@ The test pyramid mirrors `apps/api`:
 
 | Command | What it runs | Needs |
 |---|---|---|
-| `pnpm --filter @aide/gateway test` | Unit tests (vitest) | Nothing external — uses `ioredis-mock` and in-memory fakes |
-| `pnpm --filter @aide/gateway test:integration` | Integration tests (vitest + testcontainers) | Docker daemon running |
-| `pnpm --filter @aide/gateway-core test` | Pure-logic tests from the shared core | Nothing external |
+| `pnpm --filter @caliber/gateway test` | Unit tests (vitest) | Nothing external — uses `ioredis-mock` and in-memory fakes |
+| `pnpm --filter @caliber/gateway test:integration` | Integration tests (vitest + testcontainers) | Docker daemon running |
+| `pnpm --filter @caliber/gateway-core test` | Pure-logic tests from the shared core | Nothing external |
 
 **Unit tests** live in `src/**/*.test.ts`. They exercise routing, middleware,
 and runtime helpers against mocked Redis (`ioredis-mock`) and an in-memory
@@ -132,7 +132,7 @@ failover decisions, Redis command round-trips, and the inline OAuth refresh
 flow. Pair with `pino-pretty` in dev:
 
 ```sh
-LOG_LEVEL=debug pnpm --filter @aide/gateway dev 2>&1 | pnpm dlx pino-pretty
+LOG_LEVEL=debug pnpm --filter @caliber/gateway dev 2>&1 | pnpm dlx pino-pretty
 ```
 
 Credentials and raw API keys are **never** logged — the request logger
@@ -218,7 +218,7 @@ Contracts that should not change without a plan:
 
 - `packages/db/src/schema/*` — see schema policy in
   [`../../docs/GATEWAY.md#9-schema-change-policy`](../../docs/GATEWAY.md#9-schema-change-policy).
-- `@aide/config` env shape — any new var needs a zod-enforced default plus
+- `@caliber/config` env shape — any new var needs a zod-enforced default plus
   a docs entry in `docs/GATEWAY.md`.
 - `/v1/messages` and `/v1/chat/completions` response shapes — must track
   Anthropic / OpenAI on the wire so SDKs keep working.
@@ -231,8 +231,8 @@ Two jobs in `.github/workflows/ci.yml` exercise the gateway on every PR:
 
 - `lint-typecheck-test` — runs `pnpm turbo run lint typecheck test` across
   every package (covers the unit suite here).
-- `gateway-integration` — `pnpm --filter @aide/gateway test:integration` and
-  `pnpm --filter @aide/gateway-core test`, on ubuntu-latest with a Docker
+- `gateway-integration` — `pnpm --filter @caliber/gateway test:integration` and
+  `pnpm --filter @caliber/gateway-core test`, on ubuntu-latest with a Docker
   daemon for testcontainers.
 
 Release images (`ghcr.io/hanfour/aide-gateway:${VERSION}`) are built by

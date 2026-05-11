@@ -1,10 +1,10 @@
 import fp from "fastify-plugin";
 import { and, eq, isNull } from "drizzle-orm";
 import ipaddr from "ipaddr.js";
-import { hashApiKey } from "@aide/gateway-core";
-import { apiKeys, users, organizations } from "@aide/db";
-import type { Database } from "@aide/db";
-import type { ServerEnv } from "@aide/config";
+import { hashApiKey } from "@caliber/gateway-core";
+import { apiKeys, users, organizations } from "@caliber/db";
+import type { Database } from "@caliber/db";
+import type { ServerEnv } from "@caliber/config";
 
 declare module "fastify" {
   interface FastifyRequest {

@@ -1,8 +1,8 @@
 import { randomBytes } from "crypto";
 import { eq, and, isNull } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { users, apiKeys, organizations, organizationMembers } from "@aide/db";
-import { hashApiKey } from "@aide/gateway-core";
+import type { Database } from "@caliber/db";
+import { users, apiKeys, organizations, organizationMembers } from "@caliber/db";
+import { hashApiKey } from "@caliber/gateway-core";
 import type { Redis } from "ioredis";
 
 export interface ProvisionLlmEvalKeyInput {

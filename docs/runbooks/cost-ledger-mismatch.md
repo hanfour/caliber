@@ -47,7 +47,7 @@ curl -s http://gateway:3002/metrics | grep gw_pricing_miss_total
 
 ## Resolution steps
 1. Pull the Anthropic billing CSV for the same period and reconcile per `(model, day)`.
-2. For pricing misses: add the missing model to the pricing table, then run a backfill repricer (`pnpm -F @aide/api admin:reprice --since=YYYY-MM-DD`).
+2. For pricing misses: add the missing model to the pricing table, then run a backfill repricer (`pnpm -F @caliber/api admin:reprice --since=YYYY-MM-DD`).
 3. For double-billing: identify the duplicate `(idempotency_key, model, occurred_at)` rows in `cost_ledger` and delete the duplicates inside a transaction.
 4. For timezone skew: confirm both sides use UTC; this is typically a one-off difference of a few cents and self-corrects next month.
 5. After fix, re-run the hourly audit by restarting the gateway audit job.

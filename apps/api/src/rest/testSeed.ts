@@ -16,8 +16,8 @@ import {
   apiKeys,
   credentialVault,
   upstreamAccounts,
-} from "@aide/db";
-import type { ServerEnv } from "@aide/config/env";
+} from "@caliber/db";
+import type { ServerEnv } from "@caliber/config/env";
 
 const seedUser = z.object({
   id: z.string().uuid().optional(),

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { BodyRow } from "@aide/evaluator";
+import type { BodyRow } from "@caliber/evaluator";
 import { bodyRowToFacetSession } from "../../../src/workers/evaluator/bodyToFacetSession.js";
 
 const ORG_ID = "11111111-1111-1111-1111-111111111111";

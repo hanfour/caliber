@@ -8,14 +8,14 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { schema } from "@aide/db";
-import type { Database } from "@aide/db";
-import { users, organizations, invites } from "@aide/db";
+import { schema } from "@caliber/db";
+import type { Database } from "@caliber/db";
+import { users, organizations, invites } from "@caliber/db";
 import { decideSignUp, type BootstrapConfig } from "../src/bootstrap.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

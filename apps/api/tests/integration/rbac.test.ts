@@ -12,11 +12,11 @@ import Fastify from "fastify";
 import { cookiesPlugin } from "../../src/plugins/cookies.js";
 import { authPlugin } from "../../src/plugins/auth.js";
 import { requirePerm } from "../../src/plugins/rbac.js";
-import { users, sessions, organizations, roleAssignments } from "@aide/db";
+import { users, sessions, organizations, roleAssignments } from "@caliber/db";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 
@@ -88,7 +88,7 @@ function baseEnv() {
     BOOTSTRAP_DEFAULT_ORG_NAME: "Demo",
     LOG_LEVEL: "error" as const,
     ENABLE_SWAGGER: false,
-  } as unknown as import("@aide/config").ServerEnv;
+  } as unknown as import("@caliber/config").ServerEnv;
 }
 
 function buildApp() {

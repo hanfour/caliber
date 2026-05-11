@@ -3,11 +3,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
-import type { Database } from "@aide/db";
-import { apiKeys } from "@aide/db";
-import { verifyApiKey } from "@aide/gateway-core";
-import { resolvePermissions } from "@aide/auth";
-import type { ServerEnv } from "@aide/config";
+import type { Database } from "@caliber/db";
+import { apiKeys } from "@caliber/db";
+import { verifyApiKey } from "@caliber/gateway-core";
+import { resolvePermissions } from "@caliber/auth";
+import type { ServerEnv } from "@caliber/config";
 import {
   setupTestDb,
   makeOrg,

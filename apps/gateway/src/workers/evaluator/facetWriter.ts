@@ -2,7 +2,7 @@
  * Concrete `insertFacet` writer for the gateway evaluator worker
  * (Plan 4C Phase 2 Part 15).
  *
- * `extractOne` (from `@aide/evaluator`) calls `insertFacet(row)` after each
+ * `extractOne` (from `@caliber/evaluator`) calls `insertFacet(row)` after each
  * facet extraction (success or deterministic failure). This factory binds
  * that contract to a real Drizzle `Database`, persisting each call into
  * `request_body_facets`.
@@ -21,9 +21,9 @@
  *     conflict).
  */
 
-import type { Database } from "@aide/db";
-import { requestBodyFacets } from "@aide/db";
-import type { FacetRow } from "@aide/evaluator";
+import type { Database } from "@caliber/db";
+import { requestBodyFacets } from "@caliber/db";
+import type { FacetRow } from "@caliber/evaluator";
 
 export function createFacetWriter(
   db: Database,

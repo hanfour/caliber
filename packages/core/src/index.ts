@@ -1,1 +1,1 @@
-export const CORE_PACKAGE_NAME = '@aide/core'
+export const CORE_PACKAGE_NAME = '@caliber/core'

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import RedisMock from "ioredis-mock";
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 import { redisPlugin } from "../../src/redis/client.js";
 
 function makeEnv(overrides: Partial<ServerEnv> = {}): ServerEnv {

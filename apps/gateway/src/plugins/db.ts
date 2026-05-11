@@ -1,6 +1,6 @@
 import fp from "fastify-plugin";
-import { createDb, type Database } from "@aide/db";
-import type { ServerEnv } from "@aide/config";
+import { createDb, type Database } from "@caliber/db";
+import type { ServerEnv } from "@caliber/config";
 
 declare module "fastify" {
   interface FastifyInstance {

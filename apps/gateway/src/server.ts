@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
-import { parseServerEnv, type ServerEnv } from "@aide/config";
-import { LOG_REDACT_PATHS } from "@aide/gateway-core";
-import type { Database } from "@aide/db";
+import { parseServerEnv, type ServerEnv } from "@caliber/config";
+import { LOG_REDACT_PATHS } from "@caliber/gateway-core";
+import type { Database } from "@caliber/db";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
 import { metricsPlugin } from "./plugins/metrics.js";

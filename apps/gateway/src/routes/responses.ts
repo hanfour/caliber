@@ -27,7 +27,7 @@
 // rejects everything else not enumerated by the schema via `.strict()`.
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { ServerEnv } from "@aide/config";
+import type { ServerEnv } from "@caliber/config";
 import {
   ResponsesRequestSchema,
   translateResponsesToAnthropic,
@@ -37,7 +37,7 @@ import {
   parseOpenAIResponsesSse,
   extractResponsesUsage,
   type ResponsesSSEEvent,
-} from "@aide/gateway-core";
+} from "@caliber/gateway-core";
 import {
   runFailover,
   AllUpstreamsFailed,

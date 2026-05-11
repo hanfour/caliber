@@ -1,7 +1,7 @@
 // apps/api/tests/integration/migrations/0011.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
-import { createPricingLookup } from "@aide/gateway-core";
+import { createPricingLookup } from "@caliber/gateway-core";
 import { setupTestDb, type TestDb } from "../../factories/db.js";
 
 // PR #32 follow-up — migration 0011 adds `cache_read_per_million_micros`

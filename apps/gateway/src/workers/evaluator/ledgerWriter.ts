@@ -2,7 +2,7 @@
  * Concrete `insertLedger` writer for the gateway evaluator worker
  * (Plan 4C, Task 3.3).
  *
- * `callWithCostTracking` (from `@aide/evaluator`) calls `insertLedger(row)`
+ * `callWithCostTracking` (from `@caliber/evaluator`) calls `insertLedger(row)`
  * after each successful LLM response. This factory binds that contract to a
  * real Drizzle `Database`, persisting each call into `llm_usage_events`.
  *
@@ -21,9 +21,9 @@
  * See spec §6 (Cost budget infrastructure).
  */
 
-import type { Database } from "@aide/db";
-import { llmUsageEvents } from "@aide/db";
-import type { LedgerRow } from "@aide/evaluator";
+import type { Database } from "@caliber/db";
+import { llmUsageEvents } from "@caliber/db";
+import type { LedgerRow } from "@caliber/evaluator";
 import type { GatewayMetrics } from "../../plugins/metrics.js";
 
 /**

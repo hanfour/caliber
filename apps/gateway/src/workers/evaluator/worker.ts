@@ -12,8 +12,8 @@
 import { Worker, type WorkerOptions } from "bullmq";
 import type { Redis } from "ioredis";
 import { eq } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { organizations } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { organizations } from "@caliber/db";
 import {
   EVALUATOR_QUEUE_NAME,
   EVALUATOR_QUEUE_PREFIX,

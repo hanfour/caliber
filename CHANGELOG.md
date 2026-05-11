@@ -169,7 +169,7 @@ admin-customizable rubrics, GDPR workflow, labor-law-friendly transparency.
 
 ### Added
 
-- `@aide/evaluator` workspace package (pure-logic scoring engine + LLM prompt 
+- `@caliber/evaluator` workspace package (pure-logic scoring engine + LLM prompt 
   builder)
 - Org settings: `/dashboard/organizations/[id]/evaluator/settings`
 - Rubric management: `/dashboard/organizations/[id]/evaluator/rubrics` (with 

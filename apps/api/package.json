@@ -1,5 +1,5 @@
 {
-  "name": "@aide/api",
+  "name": "@caliber/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -25,11 +25,11 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@aide/auth": "workspace:*",
-    "@aide/config": "workspace:*",
-    "@aide/db": "workspace:*",
-    "@aide/evaluator": "workspace:*",
-    "@aide/gateway-core": "workspace:*",
+    "@caliber/auth": "workspace:*",
+    "@caliber/config": "workspace:*",
+    "@caliber/db": "workspace:*",
+    "@caliber/evaluator": "workspace:*",
+    "@caliber/gateway-core": "workspace:*",
     "@fastify/cookie": "^11.0.0",
     "@fastify/rate-limit": "^10.3.0",
     "@trpc/server": "^11.0.0",

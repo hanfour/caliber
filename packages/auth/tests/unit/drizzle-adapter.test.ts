@@ -5,7 +5,7 @@ import {
 } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import * as schema from "@aide/db/schema";
+import * as schema from "@caliber/db/schema";
 import { makeAdapter } from "../../src/drizzle-adapter";
 
 let container: StartedPostgreSqlContainer;

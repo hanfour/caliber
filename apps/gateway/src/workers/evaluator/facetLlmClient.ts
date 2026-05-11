@@ -3,7 +3,7 @@
  *
  * Adapts an Anthropic-style POST against the gateway's own /v1/messages
  * endpoint to the abstract `LlmClient` interface that
- * `callWithCostTracking` (from `@aide/evaluator`) expects.
+ * `callWithCostTracking` (from `@caliber/evaluator`) expects.
  *
  * Mirrors the fetch pattern from `runLlmDeepAnalysis` in `runLlm.ts` so the
  * loopback flow is identical: gateway → its own /v1/messages → upstream
@@ -19,7 +19,7 @@
  */
 
 import type { Redis } from "ioredis";
-import type { LlmClient } from "@aide/evaluator";
+import type { LlmClient } from "@caliber/evaluator";
 import { LLM_KEY_REDIS_PREFIX } from "./runLlm.js";
 
 export interface FacetLlmClientDeps {

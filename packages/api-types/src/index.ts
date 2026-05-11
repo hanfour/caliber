@@ -1,1 +1,1 @@
-export type { AppRouter } from '@aide/api/trpc'
+export type { AppRouter } from '@caliber/api/trpc'

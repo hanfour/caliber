@@ -14,14 +14,14 @@ import {
   teams,
   users,
   roleAssignments,
-} from "@aide/db";
-import * as schema from "@aide/db/schema";
+} from "@caliber/db";
+import * as schema from "@caliber/db/schema";
 import { resolvePermissions } from "../../../src/rbac/permissions";
 import { can } from "../../../src/rbac/check";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
-  path.dirname(require.resolve("@aide/db/package.json")),
+  path.dirname(require.resolve("@caliber/db/package.json")),
   "drizzle",
 );
 

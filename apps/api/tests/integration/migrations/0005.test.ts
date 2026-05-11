@@ -1,14 +1,14 @@
 // apps/api/tests/integration/migrations/0005.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   apiKeys,
   requestBodies,
   requestBodyFacets,
   upstreamAccounts,
   usageLogs,
-} from "@aide/db";
+} from "@caliber/db";
 import { setupTestDb, type TestDb } from "../../factories/db.js";
 import { makeOrg } from "../../factories/org.js";
 import { makeUser } from "../../factories/user.js";

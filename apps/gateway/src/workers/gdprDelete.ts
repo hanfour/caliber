@@ -22,13 +22,13 @@
  */
 
 import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
-import type { Database } from "@aide/db";
+import type { Database } from "@caliber/db";
 import {
   gdprDeleteRequests,
   requestBodies,
   evaluationReports,
   auditLogs,
-} from "@aide/db";
+} from "@caliber/db";
 
 export const GDPR_DELETE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 

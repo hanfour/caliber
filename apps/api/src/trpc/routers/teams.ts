@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
-import { teams, teamMembers } from '@aide/db'
+import { teams, teamMembers } from '@caliber/db'
 import { TRPCError } from '@trpc/server'
 import {
   protectedProcedure,

@@ -1,6 +1,6 @@
 import { and, eq, gte, lte } from "drizzle-orm";
-import type { Database } from "@aide/db";
-import { requestBodyFacets, usageLogs } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { requestBodyFacets, usageLogs } from "@caliber/db";
 
 /**
  * Aggregate facet stats for one (org, user, period) window.

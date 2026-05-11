@@ -1,7 +1,7 @@
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import type { Adapter } from "next-auth/adapters";
-import type { Database } from "@aide/db";
-import { users, accounts, sessions, verificationTokens } from "@aide/db";
+import type { Database } from "@caliber/db";
+import { users, accounts, sessions, verificationTokens } from "@caliber/db";
 
 export function makeAdapter(db: Database): Adapter {
   return DrizzleAdapter(db, {
