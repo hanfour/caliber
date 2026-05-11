@@ -1,12 +1,12 @@
-# aide-keychain-helper
+# caliber-keychain-helper
 
-Tiny TCP bridge that lets the aide gateway Docker container read the
+Tiny TCP bridge that lets the caliber gateway Docker container read the
 host macOS Keychain entry `Claude Code-credentials` without giving
 the container itself any privileged access.
 
 Solves option A/B' from
 [`docs/OAUTH_REFRESH_DESIGN.md`](../../docs/OAUTH_REFRESH_DESIGN.md):
-when the OAuth access_token expires, aide can ask the keychain
+when the OAuth access_token expires, caliber can ask the keychain
 (where the Claude Code app on the same host writes its rotated
 tokens) for a fresh bundle instead of immediately calling anthropic.
 This eliminates the rotation race that auto-pauses accounts with
@@ -24,7 +24,7 @@ and Linux Docker Engine alike.
 
 - **macOS only.** Uses `/usr/bin/security find-generic-password`.
   Linux + Windows operators get nothing from this.
-- **READ + WRITE.** When aide refreshes the bundle itself (anthropic
+- **READ + WRITE.** When caliber refreshes the bundle itself (anthropic
   fallback path), it pushes the new bundle back to keychain so the
   Claude Code app inherits it on its next read. Write op:
   `add-generic-password -U` with merge-existing-fields to preserve
@@ -44,16 +44,16 @@ What it does:
 1. Verifies node is on PATH (substitutes the absolute path into the
    plist so launchd can find it without nvm shims).
 2. Generates (or reuses) a 256-bit bearer token at
-   `~/.aide/keychain.token` (mode `0600`).
+   `~/.caliber/keychain.token` (mode `0600`).
 3. Places + loads a launchd LaunchAgent at
-   `~/Library/LaunchAgents/com.hanfour.aide.keychain-helper.plist`.
+   `~/Library/LaunchAgents/com.hanfour.caliber.keychain-helper.plist`.
 4. Starts the helper listening on `127.0.0.1:47823` (override via
-   `AIDE_KEYCHAIN_PORT` or `AIDE_KEYCHAIN_HOST`).
+   `CALIBER_KEYCHAIN_PORT` or `CALIBER_KEYCHAIN_HOST`).
 5. Waits for the port to be reachable, then prints the token path
    and a test command.
 
 Re-run any time to pick up source changes (it unloads + reloads).
-Logs land at `~/Library/Logs/aide-keychain-helper.log`.
+Logs land at `~/Library/Logs/caliber-keychain-helper.log`.
 
 ## Uninstall
 
@@ -63,13 +63,13 @@ Logs land at `~/Library/Logs/aide-keychain-helper.log`.
 
 The token file is preserved so `install.sh` round-trips don't
 invalidate any container side that's already mounted it. Delete
-`~/.aide/keychain.token` manually if you want a fresh token on the
+`~/.caliber/keychain.token` manually if you want a fresh token on the
 next install.
 
 ## Test it manually
 
 ```bash
-TOKEN=$(cat ~/.aide/keychain.token)
+TOKEN=$(cat ~/.caliber/keychain.token)
 
 # expect: {"ok":true,"pong":true}
 echo "{\"op\":\"ping\",\"auth\":\"$TOKEN\"}" | nc 127.0.0.1 47823
@@ -85,7 +85,7 @@ helper unattended thereafter.
 ## Wire format
 
 Newline-delimited JSON. Each request must include `auth` matching
-the bearer token in `~/.aide/keychain.token`.
+the bearer token in `~/.caliber/keychain.token`.
 
 | op | request | response |
 |---|---|---|
@@ -108,9 +108,9 @@ gateway container and configures the env knobs:
 ```yaml
 environment:
   GATEWAY_KEYCHAIN_HELPER_ENDPOINT: host.docker.internal:47823
-  GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH: /run/aide-keychain.token
+  GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH: /run/caliber-keychain.token
 volumes:
-  - ${HOME}/.aide/keychain.token:/run/aide-keychain.token:ro
+  - ${HOME}/.caliber/keychain.token:/run/caliber-keychain.token:ro
 extra_hosts:
   - "host.docker.internal:host-gateway"
 ```

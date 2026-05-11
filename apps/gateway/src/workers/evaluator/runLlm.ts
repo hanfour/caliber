@@ -12,7 +12,7 @@ import {
   type BodyRow,
 } from "@caliber/evaluator";
 
-export const LLM_KEY_REDIS_PREFIX = "aide:gw:llm-eval-key:";
+export const LLM_KEY_REDIS_PREFIX = "caliber:gw:llm-eval-key:";
 export const LLM_COST_LOOKUP_MAX_ATTEMPTS = 3;
 export const LLM_COST_LOOKUP_DELAY_MS = 250;
 

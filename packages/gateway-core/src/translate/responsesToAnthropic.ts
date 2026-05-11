@@ -47,7 +47,7 @@ import type {
 //     scheduler before invoking translation.
 //   - `store` is silently dropped by the route handler before Zod
 //     parsing (see SILENTLY_DROPPED_FIELDS in routes/responses.ts) so
-//     the translator never sees it. aide doesn't honour OpenAI's
+//     the translator never sees it. caliber doesn't honour OpenAI's
 //     server-side response storage either way.
 
 const DEFAULT_MAX_TOKENS = 4096;

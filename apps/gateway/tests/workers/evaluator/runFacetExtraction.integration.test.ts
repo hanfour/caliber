@@ -54,7 +54,7 @@ const migrationsFolder = path.resolve(
 );
 
 const STUB_FACET_MODEL = "claude-haiku-4-5";
-const STUB_RAW_KEY = "aide-eval-deadbeefdeadbeefdeadbeefdeadbeef";
+const STUB_RAW_KEY = "caliber-eval-deadbeefdeadbeefdeadbeefdeadbeef";
 
 let pgContainer: StartedPostgreSqlContainer;
 let pool: pg.Pool;

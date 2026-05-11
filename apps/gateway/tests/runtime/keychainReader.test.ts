@@ -22,7 +22,7 @@ const silentLogger = { warn: () => {} };
 beforeEach(() => {
   socketPath = path.join(
     os.tmpdir(),
-    `aide-keychain-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`,
+    `caliber-keychain-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`,
   );
   serverConnections = new Set();
 });

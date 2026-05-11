@@ -242,7 +242,7 @@ async function seedAccount(
 }
 
 function makeRedisMock(): Redis {
-  return new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+  return new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
 }
 
 async function makeApp(
@@ -375,7 +375,7 @@ describe("/v1/responses", () => {
 
   it("3. silently-dropped fields (codex CLI compat) — 200, not forwarded upstream", async () => {
     // codex CLI / openai SDK send these fields unconditionally on every
-    // /v1/responses call. aide treats them as no-ops for now (route
+    // /v1/responses call. caliber treats them as no-ops for now (route
     // strips pre-Zod) so .strict() doesn't 400 against them. Each
     // field × representative value must:
     //   a) succeed with 200

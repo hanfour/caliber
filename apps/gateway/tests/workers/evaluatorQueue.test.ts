@@ -73,7 +73,7 @@ const STUB_CONNECTION = { host: "localhost", port: 6379 } as const;
 describe("evaluatorQueue constants", () => {
   it("exports the design-doc queue identifier as prefix + name", () => {
     expect(`${EVALUATOR_QUEUE_PREFIX}:${EVALUATOR_QUEUE_NAME}`).toBe(
-      "aide:gw:evaluator",
+      "caliber:gw:evaluator",
     );
   });
 

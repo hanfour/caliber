@@ -84,10 +84,10 @@ export const defaultTestEnv: ServerEnv = {
 
 // ioredis-mock honors keyPrefix the same way the real client does, so tests
 // asserting against the underlying keyspace can use the prefixed form
-// (`aide:gw:key-reveal:<token>`) and verify both the gateway namespace
+// (`caliber:gw:key-reveal:<token>`) and verify both the gateway namespace
 // contract and the api-side stash semantics in one shot.
 export function makeTestRedis(): Redis {
-  return new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+  return new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
 }
 
 export const defaultTestRedis: Redis = makeTestRedis();

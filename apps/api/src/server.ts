@@ -66,7 +66,7 @@ export async function buildServer() {
     await app.register(testSeedRoutes(env));
   }
 
-  // Share the gateway's `aide:gw:` namespace so admin-issued api-key reveal
+  // Share the gateway's `caliber:gw:` namespace so admin-issued api-key reveal
   // tokens stashed by the api land in the same keyspace the gateway can see.
   // env.REDIS_URL is required at parse time when ENABLE_GATEWAY=true.
   let redis: Redis;
@@ -74,7 +74,7 @@ export async function buildServer() {
     redis = new Redis(env.REDIS_URL!, {
       enableAutoPipelining: true,
       maxRetriesPerRequest: 3,
-      keyPrefix: "aide:gw:",
+      keyPrefix: "caliber:gw:",
     });
     redis.on("error", (err: Error) => {
       app.log.warn({ err: err.message }, "redis error");

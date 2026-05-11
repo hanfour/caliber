@@ -24,7 +24,7 @@ function redisKeyFor(orgId: string): string {
 }
 
 function rawRedisKeyFor(orgId: string): string {
-  return `aide:gw:llm-eval-key:${orgId}`;
+  return `caliber:gw:llm-eval-key:${orgId}`;
 }
 
 async function findValidApiKeyRow(
@@ -161,7 +161,7 @@ export async function provisionLlmEvalKey(
 
   // 6. Generate a new api key.
   const rawSuffix = randomBytes(32).toString("hex");
-  const rawKey = `aide-eval-${rawSuffix}`;
+  const rawKey = `caliber-eval-${rawSuffix}`;
   const keyPrefix = rawKey.slice(0, 12);
   const keyHash = hashApiKey(apiKeyHashPepper, rawKey);
 

@@ -97,7 +97,7 @@ async function attachToGroup(
 }
 
 function newRedis(): Redis {
-  return new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+  return new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
 }
 
 function buildScheduler(

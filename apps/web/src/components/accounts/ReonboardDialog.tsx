@@ -55,7 +55,7 @@ interface ReonboardDialogProps {
  * Re-onboard dialog for OAuth accounts auto-paused by
  * `oauth_invalid_grant` (issue #92 sub-task 2 follow-up).
  *
- * The aide gateway runs in Docker; the macOS Keychain lives on the
+ * The caliber gateway runs in Docker; the macOS Keychain lives on the
  * host. We can't extract the bundle from inside the container, so the
  * operator runs a one-liner in their host terminal and pastes the
  * result here. The mutation handles encryption + DB update + state

@@ -13,7 +13,7 @@ describe("checkApiKeyRateLimit", () => {
   let redis: Redis;
 
   beforeEach(async () => {
-    redis = new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+    redis = new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
     // ioredis-mock instances share an underlying in-memory store by
     // default; flush between tests so counters from one test don't
     // leak into another's bucket.

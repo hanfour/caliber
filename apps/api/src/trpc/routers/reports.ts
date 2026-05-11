@@ -18,7 +18,7 @@ import { getFacetSummary } from "../../services/facetSummary.js";
 // ─── Evaluator queue constants (duplicated from apps/gateway to avoid cross-package import) ──
 // TODO: extract to a shared @caliber/queue package to eliminate this duplication.
 const EVALUATOR_QUEUE_NAME = "evaluator";
-const EVALUATOR_QUEUE_PREFIX = "aide:gw";
+const EVALUATOR_QUEUE_PREFIX = "caliber:gw";
 
 // Minimal Queue interface — matches the BullMQ Queue surface we need.
 // When ctx.evaluatorQueue is undefined (test mode / queue not wired), rerun

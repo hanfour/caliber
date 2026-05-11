@@ -59,25 +59,25 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 WORKDIR /app
-RUN addgroup -g 1001 -S aide && adduser -u 1001 -S aide -G aide
+RUN addgroup -g 1001 -S caliber && adduser -u 1001 -S caliber -G caliber
 
 # The standalone output is rooted at the repo root (outputFileTracingRoot),
 # so .next/standalone/ contains: apps/web/server.js + packages/ + node_modules.
 # Copy that whole tree to /app, then layer .next/static and public on top.
-COPY --from=build --chown=aide:aide /repo/apps/web/.next/standalone /app
-COPY --from=build --chown=aide:aide /repo/apps/web/.next/static /app/apps/web/.next/static
-COPY --from=build --chown=aide:aide /repo/apps/web/public /app/apps/web/public
+COPY --from=build --chown=caliber:caliber /repo/apps/web/.next/standalone /app
+COPY --from=build --chown=caliber:caliber /repo/apps/web/.next/static /app/apps/web/.next/static
+COPY --from=build --chown=caliber:caliber /repo/apps/web/public /app/apps/web/public
 # scripts/ holds the API_INTERNAL_URL substitution helper; not included in the
 # Next.js standalone bundle by default, so copy explicitly.
-COPY --from=build --chown=aide:aide /repo/apps/web/scripts /app/apps/web/scripts
+COPY --from=build --chown=caliber:caliber /repo/apps/web/scripts /app/apps/web/scripts
 
 # Runtime entrypoint substitutes the API_INTERNAL_URL placeholder into the
 # baked routes-manifest.json before booting node. See the script + comment in
 # apps/web/next.config.mjs for the full rationale.
-COPY --chown=aide:aide docker/web-entrypoint.sh /app/web-entrypoint.sh
+COPY --chown=caliber:caliber docker/web-entrypoint.sh /app/web-entrypoint.sh
 RUN chmod +x /app/web-entrypoint.sh
 
-USER aide
+USER caliber
 EXPOSE 3000
 # Probe /sign-in because "/" returns a 307 redirect and busybox wget doesn't
 # follow redirects by default. /sign-in is a static 200 regardless of env.

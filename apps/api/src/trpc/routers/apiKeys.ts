@@ -20,7 +20,7 @@ const uuid = z.string().uuid();
 // expiration window stays in lockstep with the cache stash.
 const REVEAL_TOKEN_TTL_SEC = 24 * 60 * 60;
 
-// Redis key suffix (the ioredis client prepends `aide:gw:` via keyPrefix).
+// Redis key suffix (the ioredis client prepends `caliber:gw:` via keyPrefix).
 function revealKey(token: string): string {
   return `key-reveal:${token}`;
 }
@@ -195,7 +195,7 @@ export const apiKeysRouter = router({
   // Org-admin issues a key for another user. The admin never sees the raw
   // value: a one-time reveal URL is returned which the target user can claim
   // exactly once within REVEAL_TOKEN_TTL_SEC. The raw is stashed in Redis
-  // (under the gateway's `aide:gw:` namespace) keyed by the random token.
+  // (under the gateway's `caliber:gw:` namespace) keyed by the random token.
   issueForUser: permissionProcedure(
     z.object({
       orgId: uuid,

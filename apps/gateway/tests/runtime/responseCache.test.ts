@@ -78,7 +78,7 @@ describe("pickCacheableHeaders", () => {
 describe("maybeCacheStore + tryCacheRead", () => {
   let redis: Redis;
   beforeEach(async () => {
-    redis = new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+    redis = new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
     await redis.flushall();
   });
 

@@ -499,7 +499,7 @@ describe("bodyCaptureWorker — end-to-end + idempotency", () => {
 describe("bodyCaptureWorker pure helpers", () => {
   it("module exports the expected queue identifier shape", () => {
     expect(`${BODY_CAPTURE_QUEUE_PREFIX}:${BODY_CAPTURE_QUEUE_NAME}`).toBe(
-      "aide:gw:body-capture",
+      "caliber:gw:body-capture",
     );
   });
 });

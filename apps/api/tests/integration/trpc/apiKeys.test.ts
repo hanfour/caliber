@@ -65,7 +65,7 @@ afterAll(async () => {
 beforeEach(() => {
   // Fresh in-memory store per test so reveal-token stashes don't leak between
   // cases. Mirrors gateway tests' pattern.
-  redis = new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+  redis = new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
 });
 
 describe("apiKeys router", () => {
@@ -124,7 +124,7 @@ describe("apiKeys router", () => {
     });
   });
 
-  it("issueForUser: returns revealUrl (no raw); persists revealTokenHash; redis stash holds raw under aide:gw:key-reveal:<token>", async () => {
+  it("issueForUser: returns revealUrl (no raw); persists revealTokenHash; redis stash holds raw under caliber:gw:key-reveal:<token>", async () => {
     const org = await makeOrg(t.db);
     const admin = await makeUser(t.db, {
       role: "org_admin",

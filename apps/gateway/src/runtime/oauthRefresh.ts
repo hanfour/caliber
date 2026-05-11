@@ -150,10 +150,10 @@ export interface OAuthRefreshOptions {
   /** Override for tests. */
   clientId?: string;
   /**
-   * `host:port` of the aide-keychain-helper TCP server. When set,
+   * `host:port` of the caliber-keychain-helper TCP server. When set,
    * `maybeRefreshOAuth` consults the host Keychain *before* calling
    * the anthropic OAuth endpoint — the Claude Code app on the same
-   * host may have already rotated the bundle, in which case aide
+   * host may have already rotated the bundle, in which case caliber
    * just inherits the new tokens for free (no upstream call, no
    * race). Only falls back to anthropic refresh when the keychain
    * bundle is also stale or unavailable. See issue #93 / option B'.
@@ -287,7 +287,7 @@ export async function maybeRefreshOAuth(
       //
       // Only attempted when keychainEndpoint is wired (helper opt-in).
       // Always best-effort — DB vault is the source of truth either
-      // way; aide doesn't fail the user request because keychain
+      // way; caliber doesn't fail the user request because keychain
       // sync hiccupped.
       if (opts.keychainEndpoint) {
         const ok = await maybeWriteKeychainBundle({
@@ -491,7 +491,7 @@ export async function persistRefresh(
  * - `rate_limited` (429): does NOT increment fail_count. Sets a Redis
  *   backoff lock (60→120→240→…s, doubling per consecutive 429) so
  *   subsequent requests in the lead window skip refresh entirely
- *   until the lock expires. This stops aide from feedback-looping
+ *   until the lock expires. This stops caliber from feedback-looping
  *   into anthropic's rate limiter and prevents transient throttling
  *   from auto-pausing the account.
  *

@@ -64,7 +64,7 @@ const redis = new RedisMock() as unknown as Redis;
 const STUB_LLM_MODEL = "claude-haiku-4-5";
 const STUB_REQUEST_ID = "req-llm-deep-001";
 const STUB_RAW_KEY =
-  "aide-eval-aabbccddee112233445566778899aabbccddee112233445566778899aabbccddee";
+  "caliber-eval-aabbccddee112233445566778899aabbccddee112233445566778899aabbccddee";
 
 // Minimal rubric for tests
 const STUB_RUBRIC: Rubric = {

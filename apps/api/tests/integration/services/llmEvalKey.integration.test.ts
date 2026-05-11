@@ -24,7 +24,7 @@ beforeEach(() => {
   // Fresh in-memory store per test to prevent key leakage between cases.
   // keyPrefix mirrors the gateway namespace so Redis key format assertions
   // can verify the full canonical path.
-  redis = new RedisMock({ keyPrefix: "aide:gw:" }) as unknown as Redis;
+  redis = new RedisMock({ keyPrefix: "caliber:gw:" }) as unknown as Redis;
 });
 
 describe("provisionLlmEvalKey", () => {
@@ -41,7 +41,7 @@ describe("provisionLlmEvalKey", () => {
     expect(result.created).toBe(true);
     expect(result.keyId).toBeTruthy();
     expect(result.systemUserId).toBeTruthy();
-    expect(result.redisSecretKey).toBe(`aide:gw:llm-eval-key:${org.id}`);
+    expect(result.redisSecretKey).toBe(`caliber:gw:llm-eval-key:${org.id}`);
 
     // Verify the system user was created with the correct email.
     const [sysUser] = await t.db
@@ -70,7 +70,7 @@ describe("provisionLlmEvalKey", () => {
     // Verify the raw key was stored in Redis and can roundtrip via verifyApiKey.
     const storedRaw = await redis.get(`llm-eval-key:${org.id}`);
     expect(storedRaw).not.toBeNull();
-    expect(storedRaw!.startsWith("aide-eval-")).toBe(true);
+    expect(storedRaw!.startsWith("caliber-eval-")).toBe(true);
     expect(verifyApiKey(TEST_PEPPER, storedRaw!, keyRow!.keyHash)).toBe(true);
   });
 
@@ -127,7 +127,7 @@ describe("provisionLlmEvalKey", () => {
     expect(memberRows).toHaveLength(0);
   });
 
-  it("Redis secret key format: key is aide:gw:llm-eval-key:{orgId} with raw key as value", async () => {
+  it("Redis secret key format: key is caliber:gw:llm-eval-key:{orgId} with raw key as value", async () => {
     const org = await makeOrg(t.db);
 
     const result = await provisionLlmEvalKey({
@@ -138,15 +138,15 @@ describe("provisionLlmEvalKey", () => {
     });
 
     // The canonical full Redis key reported in the result.
-    expect(result.redisSecretKey).toBe(`aide:gw:llm-eval-key:${org.id}`);
+    expect(result.redisSecretKey).toBe(`caliber:gw:llm-eval-key:${org.id}`);
 
-    // With keyPrefix="aide:gw:", the mock exposes the value via the suffix.
+    // With keyPrefix="caliber:gw:", the mock exposes the value via the suffix.
     const value = await redis.get(`llm-eval-key:${org.id}`);
     expect(value).not.toBeNull();
     // Raw key must use the distinguishing prefix.
-    expect(value!.startsWith("aide-eval-")).toBe(true);
+    expect(value!.startsWith("caliber-eval-")).toBe(true);
     // The raw key suffix should be 64 hex chars (32 random bytes).
-    expect(value).toMatch(/^aide-eval-[0-9a-f]{64}$/);
+    expect(value).toMatch(/^caliber-eval-[0-9a-f]{64}$/);
   });
 
   it("revoked api_key triggers re-provisioning: creates new key and revokes old", async () => {
@@ -200,7 +200,7 @@ describe("provisionLlmEvalKey", () => {
     // Redis has the new raw key.
     const newRaw = await redis.get(`llm-eval-key:${org.id}`);
     expect(newRaw).not.toBeNull();
-    expect(newRaw!.startsWith("aide-eval-")).toBe(true);
+    expect(newRaw!.startsWith("caliber-eval-")).toBe(true);
     expect(verifyApiKey(TEST_PEPPER, newRaw!, newKeyRow!.status)).toBe(false); // just status not keyHash
     // Roundtrip check against keyHash.
     const [newKey] = await t.db

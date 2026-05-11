@@ -1,7 +1,7 @@
 /**
  * Usage log batched worker (Plan 4A Part 7, Task 7.2).
  *
- * Drains the BullMQ `aide:gw:usage-log` queue in batches of up to 100 jobs OR
+ * Drains the BullMQ `caliber:gw:usage-log` queue in batches of up to 100 jobs OR
  * a 1000ms flush interval, whichever comes first. Each batch:
  *   1. Opens a Drizzle transaction.
  *   2. Performs a single multi-row INSERT into `usage_logs`.
@@ -102,7 +102,7 @@ export interface UsageLogWorkerOptions {
   flushIntervalMs?: number;
   /** Optional metric gauges to keep in sync. */
   metrics?: UsageLogWorkerMetrics;
-  /** Override prefix (matches the queue's prefix). Defaults to `aide:gw`. */
+  /** Override prefix (matches the queue's prefix). Defaults to `caliber:gw`. */
   prefix?: string;
 }
 

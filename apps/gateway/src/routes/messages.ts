@@ -121,7 +121,7 @@ export function makeMessagesAnthropicHandler(
     // `context_management` (its own context-window-trimming hint)
     // unconditionally, but the anthropic Messages API doesn't accept
     // it on the OAuth path. Without stripping, every claude code
-    // request → 400 invalid_request_error → unusable through aide.
+    // request → 400 invalid_request_error → unusable through caliber.
     // Mirrors the codex CLI compat strategy on /v1/responses.
     const sanitizedBody: Record<string, unknown> = { ...body };
     for (const key of ANTHROPIC_SILENTLY_DROPPED_FIELDS) {

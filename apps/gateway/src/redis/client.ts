@@ -26,7 +26,7 @@ export const redisPlugin = fp<RedisPluginOptions>(
       new Redis(url, {
         enableAutoPipelining: true,
         maxRetriesPerRequest: 3,
-        keyPrefix: "aide:gw:",
+        keyPrefix: "caliber:gw:",
       });
 
     client.on("reconnecting", (delayMs: number) => {

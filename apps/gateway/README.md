@@ -142,38 +142,38 @@ will flag stray `console.log` on PRs).
 
 ### Redis inspection
 
-The gateway uses the `aide:gw:` key prefix (via `ioredis` `keyPrefix`). To
+The gateway uses the `caliber:gw:` key prefix (via `ioredis` `keyPrefix`). To
 see what's there:
 
 ```sh
-docker compose exec redis redis-cli --scan --pattern 'aide:gw:*' | head
+docker compose exec redis redis-cli --scan --pattern 'caliber:gw:*' | head
 # Shapes shipped in 4A (see apps/gateway/src/redis/keys.ts for the single
-# source of truth — ioredis prepends the `aide:gw:` prefix automatically):
-#   aide:gw:slots:account:{accountId}   — per-account concurrency slot
-#   aide:gw:slots:user:{userId}         — per-user concurrency slot
-#   aide:gw:state:account:{accountId}   — cached account state snapshot
-#   aide:gw:oauth-refresh:{accountId}   — per-account OAuth refresh lock
-#   aide:gw:key-reveal:{token}          — one-time URL reveal token (EXPIRE 86400)
-#   aide:gw:usage-log:*                 — BullMQ queue internals (see below)
+# source of truth — ioredis prepends the `caliber:gw:` prefix automatically):
+#   caliber:gw:slots:account:{accountId}   — per-account concurrency slot
+#   caliber:gw:slots:user:{userId}         — per-user concurrency slot
+#   caliber:gw:state:account:{accountId}   — cached account state snapshot
+#   caliber:gw:oauth-refresh:{accountId}   — per-account OAuth refresh lock
+#   caliber:gw:key-reveal:{token}          — one-time URL reveal token (EXPIRE 86400)
+#   caliber:gw:usage-log:*                 — BullMQ queue internals (see below)
 #
-# `aide:gw:{wait,idem,sticky}:*` are reserved by keys.ts but not populated
+# `caliber:gw:{wait,idem,sticky}:*` are reserved by keys.ts but not populated
 # in 4A — the wait-queue / idempotency / sticky features land in Plan 4B/4C.
 ```
 
 BullMQ sets its own key namespace separately from ioredis's `keyPrefix`
 (its Lua scripts compute keys directly). `usageLogQueue.ts` sets BullMQ's
-prefix to `aide:gw` so its keys colocate with the rest — see the module
+prefix to `caliber:gw` so its keys colocate with the rest — see the module
 header.
 
 ### BullMQ queue stats
 
-The usage-log queue is `aide:gw:usage-log`. Expose via any BullMQ UI
+The usage-log queue is `caliber:gw:usage-log`. Expose via any BullMQ UI
 (Bull Board / Arena), or poll directly:
 
 ```sh
-docker compose exec redis redis-cli --raw ZCARD aide:gw:usage-log:wait
-docker compose exec redis redis-cli --raw ZCARD aide:gw:usage-log:delayed
-docker compose exec redis redis-cli --raw LRANGE aide:gw:usage-log:failed 0 -1
+docker compose exec redis redis-cli --raw ZCARD caliber:gw:usage-log:wait
+docker compose exec redis redis-cli --raw ZCARD caliber:gw:usage-log:delayed
+docker compose exec redis redis-cli --raw LRANGE caliber:gw:usage-log:failed 0 -1
 ```
 
 Or scrape `/metrics`:
@@ -206,7 +206,7 @@ apps/gateway/src/
   middleware/apiKeyAuth.ts   # Bearer + x-api-key resolution, IP allowlist, authblock
   plugins/metrics.ts         # prom-client registry, gateway-scoped counters/histograms
   plugins/db.ts              # Drizzle decoration + test injection seam
-  redis/client.ts            # ioredis plugin with aide:gw: prefix
+  redis/client.ts            # ioredis plugin with caliber:gw: prefix
   redis/slots.ts             # Lua-atomic concurrency slot acquire/release
   routes/messages.ts         # POST /v1/messages (streaming + non-streaming)
   routes/chatCompletions.ts  # POST /v1/chat/completions (non-streaming in 4A)
@@ -235,6 +235,6 @@ Two jobs in `.github/workflows/ci.yml` exercise the gateway on every PR:
   `pnpm --filter @caliber/gateway-core test`, on ubuntu-latest with a Docker
   daemon for testcontainers.
 
-Release images (`ghcr.io/hanfour/aide-gateway:${VERSION}`) are built by
+Release images (`ghcr.io/hanfour/caliber-gateway:${VERSION}`) are built by
 `.github/workflows/release.yml` on every `v*` tag, multi-arch
 `linux/amd64,linux/arm64`.

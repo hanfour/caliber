@@ -26,7 +26,7 @@ const nextConfig = {
     // live, so the placeholder dance isn't needed there.
     const apiInternal =
       process.env.NODE_ENV === 'production'
-        ? 'http://aide-internal-api-url-placeholder'
+        ? 'http://caliber-internal-api-url-placeholder'
         : (process.env.API_INTERNAL_URL ?? 'http://localhost:3001')
     return [
       { source: '/trpc/:path*', destination: `${apiInternal}/trpc/:path*` },

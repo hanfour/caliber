@@ -77,7 +77,7 @@ const STUB_CONNECTION = { host: "localhost", port: 6379 } as const;
 describe("bodyCaptureQueue constants", () => {
   it("exports the design-doc queue identifier as prefix + name", () => {
     expect(`${BODY_CAPTURE_QUEUE_PREFIX}:${BODY_CAPTURE_QUEUE_NAME}`).toBe(
-      "aide:gw:body-capture",
+      "caliber:gw:body-capture",
     );
   });
 

@@ -1,5 +1,5 @@
 /**
- * Client for the host-side `aide-keychain-helper` TCP server.
+ * Client for the host-side `caliber-keychain-helper` TCP server.
  *
  * Phase 2 of the OAuth refresh redesign (issue #93, option B').
  * Lets the gateway fetch the macOS Keychain bundle without itself
@@ -11,7 +11,7 @@
  * Wire format defined in scripts/keychain-helper/README.md. Each
  * request must include a bearer `auth` token; the gateway reads
  * the token from a file the operator bind-mounts at
- * `/run/aide-keychain.token` (path overridable via env).
+ * `/run/caliber-keychain.token` (path overridable via env).
  *
  * Why TCP, not unix-socket: Docker Desktop on macOS bind-mounts unix
  * sockets through VirtioFS, which doesn't preserve socket inode
@@ -101,7 +101,7 @@ interface ReadKeychainOptions {
   /**
    * Path to the bearer token file. Read fresh on every call (cheap
    * — token is ~64 chars; file IO is microseconds). Operator
-   * bind-mounts the host's ~/.aide/keychain.token into the
+   * bind-mounts the host's ~/.caliber/keychain.token into the
    * container at this path. Required when endpoint is TCP; ignored
    * for unix socket (legacy).
    */
@@ -299,7 +299,7 @@ export type KeychainWriter = (opts: WriteKeychainOptions) => Promise<boolean>;
  * Returns true on success, false on any failure (helper unavailable,
  * token missing, helper returned ok:false). Never throws — caller
  * (oauthRefresh.persistRefresh) treats this as best-effort
- * housekeeping; aide's own DB vault is the source of truth either
+ * housekeeping; caliber's own DB vault is the source of truth either
  * way.
  *
  * Same TCP/token plumbing as readKeychainBundle; both call the same
