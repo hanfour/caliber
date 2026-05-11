@@ -1,6 +1,6 @@
 # Gateway
 
-The **aide gateway** is an opt-in data plane that lets your users (and their
+The **Caliber gateway** is an opt-in data plane that lets your users (and their
 tools — Claude Code, Cursor, OpenAI-compatible clients, etc.) call Anthropic
 through a shared pool of upstream accounts managed by an organisation.
 
@@ -157,7 +157,7 @@ project-scoped `sk-` keys with different priorities + spend caps.
 
 **Credentials** live in a separate `credential_vault` table and are encrypted
 with AES-256-GCM, sub-key derived via HKDF-SHA256 from
-`CREDENTIAL_ENCRYPTION_KEY` with `salt=account_id` and `info="aide-gateway-credential-v1"`.
+`CREDENTIAL_ENCRYPTION_KEY` with `salt=account_id` and `info="aide-gateway-credential-v1"` (v1, will become `caliber-gateway-credential-v2` in #121).
 The gateway decrypts on each failover attempt (cache: none in 4A).
 
 **Adding an account.**
@@ -227,7 +227,7 @@ Flow:
    expires_at, target user)
 2. Backend creates `api_keys` row with `key_hash` + generates a one-time
    reveal token (32 random bytes) stored in Redis under
-   `aide:gw:key-reveal:<token>` with `EXPIRE 86400`
+   `caliber:gw:key-reveal:<token>` with `EXPIRE 86400`
 3. Response returns the reveal URL: `${GATEWAY_BASE_URL}/api-keys/reveal/<token>`
    — admin copies it
 4. Admin delivers the URL out-of-band (Slack DM, email, in person)
@@ -355,7 +355,7 @@ counter stays at zero.
 ## 6. Usage + billing
 
 Every request writes one `usage_logs` row asynchronously via a BullMQ queue
-(`aide:gw:queue:usage-log`). The queue writer batches into Postgres on a
+(`caliber:gw:queue:usage-log`). The queue writer batches into Postgres on a
 small timer. If the enqueue itself fails (Redis loss), the gateway falls
 through to an inline single-row insert so no request ever billed-but-unlogged
 in strict mode.
@@ -615,7 +615,7 @@ applies to every plan after 4A.
 3. **Do not** run a down-migration. The 4 new tables stay in place —
    rolling forward reuses the data.
 4. Optional: flush Redis gateway state with `redis-cli --scan --pattern
-   'aide:gw:*' | xargs -r redis-cli del`.
+   'caliber:gw:*' | xargs -r redis-cli del`.
 
 `usage_logs` and `credential_vault` survive rollback, so the next rollout
 picks up historical data and existing credentials.

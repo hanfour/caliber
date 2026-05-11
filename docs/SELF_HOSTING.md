@@ -1,12 +1,12 @@
-# Self-hosting aide
+# Self-hosting Caliber
 
-This guide walks you through running `aide` (platform mode) on your own
+This guide walks you through running Caliber (platform mode) on your own
 infrastructure using the published Docker images. For CLI mode, see the root
 `README.md`.
 
 > **Just want to try it locally first?** See
 > [`LOCAL_DEPLOY.md`](./LOCAL_DEPLOY.md) — a 5-minute path to running
-> aide on your laptop with Docker Desktop, plus escalations to
+> Caliber on your laptop with Docker Desktop, plus escalations to
 > "local + real OpenAI key" and "on-prem production". Strongly
 > recommended before committing to any cloud bill.
 >
@@ -31,13 +31,13 @@ infrastructure using the published Docker images. For CLI mode, see the root
 ## 1. Prerequisites
 
 - **Docker 27+** with the `compose` plugin (`docker compose version`).
-- A **domain name** you control (e.g. `aide.example.com`) pointing at the host.
+- A **domain name** you control (e.g. `caliber.example.com`) pointing at the host.
 - **OAuth applications** registered with:
   - Google Cloud Console — OAuth 2.0 Client ID
   - GitHub Developer Settings — OAuth App
 - For each provider, set the authorized redirect URL to:
   `https://<your-domain>/api/auth/callback/<provider>`
-  (e.g. `https://aide.example.com/api/auth/callback/google`).
+  (e.g. `https://caliber.example.com/api/auth/callback/google`).
 
 A reverse proxy (Caddy, Traefik, Nginx) in front of the web container handles
 TLS termination. The compose stack itself only exposes web on port 3000.
@@ -45,8 +45,8 @@ TLS termination. The compose stack itself only exposes web on port 3000.
 ## 2. Grab the compose files
 
 ```sh
-git clone https://github.com/hanfour/aide.git
-cd aide/docker
+git clone https://github.com/hanfour/aide.git caliber
+cd caliber/docker
 cp .env.example .env
 ```
 
@@ -104,21 +104,21 @@ approach: scheduled `pg_dump` from the running container.
 ```sh
 docker compose exec -T postgres \
   pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc \
-  > "aide-$(date +%F).dump"
+  > "caliber-$(date +%F).dump"
 ```
 
 Restore into a fresh volume with:
 
 ```sh
 docker compose exec -T postgres \
-  pg_restore -U "$DB_USER" -d "$DB_NAME" --clean < aide-YYYY-MM-DD.dump
+  pg_restore -U "$DB_USER" -d "$DB_NAME" --clean < caliber-YYYY-MM-DD.dump
 ```
 
 Keep backups encrypted and off-host.
 
 ## 6. (Optional) Enable the gateway
 
-aide ships an optional **gateway** service (Plan 4A, v0.3.0+) that exposes
+Caliber ships an optional **gateway** service (Plan 4A, v0.3.0+) that exposes
 Anthropic-compatible `/v1/messages` and OpenAI-compatible `/v1/chat/completions`
 endpoints to your users. It is fully opt-in — the base compose stack above
 runs api + web without it.
@@ -217,7 +217,7 @@ the OpenAI parts if you're starting with Anthropic.)
 
 1. **Provision OpenAI org / project** — sign in at
    <https://platform.openai.com/>, create an org if needed, set a monthly
-   spend cap, and create a Project (e.g. `aide-prod`) under that org with
+   spend cap, and create a Project (e.g. `caliber-prod`) under that org with
    its own per-project spend cap.  Mint a **project API key**
    (`sk-proj-...`) scoped to inference only. Full step-by-step in
    [`admin/openai-account-setup.md`](./admin/openai-account-setup.md).

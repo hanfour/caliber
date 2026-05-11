@@ -1,11 +1,11 @@
-# Multi-device personal use — share your Claude Max via aide gateway
+# Multi-device personal use — share your Claude Max via Caliber gateway
 
 > **First time?** Read [`GETTING_STARTED.md`](./GETTING_STARTED.md)
 > first — it's the linear walkthrough from "fresh git clone" to
 > "Claude Code on a second device working". This doc is the deeper
 > reference the tutorial cross-links to.
 
-The killer use case for self-hosted aide isn't a multi-tenant SaaS — it's
+The killer use case for self-hosted Caliber isn't a multi-tenant SaaS — it's
 **you, on multiple of your own devices, all proxying through one gateway
 that's wired to your personal Claude Max / Pro subscription**. This guide
 covers the workflow `LOCAL_DEPLOY.md` Mode 2 only hints at:
@@ -41,7 +41,7 @@ use; the gateway just does the credential plumbing.
 ### 1.1 Extract the bundle from Claude Code's keychain
 
 Claude Code stores the OAuth bundle in macOS Keychain under
-`Claude Code-credentials`. Pull it and reshape into the schema the aide
+`Claude Code-credentials`. Pull it and reshape into the schema the Caliber
 form expects (snake_case keys, **ISO 8601** `expires_at`):
 
 ```bash
@@ -63,7 +63,7 @@ print(json.dumps(out))
 
 **Why the transform?**
 
-| Keychain stores | aide form wants | Reason |
+| Keychain stores | Caliber form wants | Reason |
 |---|---|---|
 | `claudeAiOauth.accessToken` (camelCase, nested) | `access_token` (snake_case, flat) | Form schema |
 | `expiresAt: 1777976972522` (unix-ms) | `"2026-05-05T10:29:32.522Z"` (ISO) | Gateway runtime requires ISO — see [#73](https://github.com/hanfour/aide/issues/73) |
@@ -230,11 +230,11 @@ local Claude Code account and the gateway per-command:
 
 ```bash
 # add to ~/.zshrc on the client device
-export AIDE_GATEWAY_URL="http://h4.tail325fd5.ts.net:3002"   # your Tailscale URL
-export AIDE_GATEWAY_KEY="ak_..."                             # this device's ak_ key
+export CALIBER_GATEWAY_URL="http://h4.tail325fd5.ts.net:3002"   # your Tailscale URL
+export CALIBER_GATEWAY_KEY="ak_..."                             # this device's ak_ key
 
-alias claude-aide='ANTHROPIC_BASE_URL=$AIDE_GATEWAY_URL ANTHROPIC_AUTH_TOKEN=$AIDE_GATEWAY_KEY claude'
-alias aide-ping='curl -sS -o /dev/null -w "%{http_code}\n" $AIDE_GATEWAY_URL/health'
+alias claude-caliber='ANTHROPIC_BASE_URL=$CALIBER_GATEWAY_URL ANTHROPIC_AUTH_TOKEN=$CALIBER_GATEWAY_KEY claude'
+alias caliber-ping='curl -sS -o /dev/null -w "%{http_code}\n" $CALIBER_GATEWAY_URL/health'
 ```
 
 After `source ~/.zshrc`:
@@ -242,8 +242,8 @@ After `source ~/.zshrc`:
 | Command | Does what |
 |---|---|
 | `claude` | Uses *this* device's keychain Claude Code account, hits `api.anthropic.com` directly |
-| `claude-aide` | Routes through your gateway, consumes the gateway-host's subscription quota |
-| `aide-ping` | Prints `200` if Tailscale is up and the gateway is reachable |
+| `claude-caliber` | Routes through your gateway, consumes the gateway-host's subscription quota |
+| `caliber-ping` | Prints `200` if Tailscale is up and the gateway is reachable |
 
 Both paths coexist — no `unset` required to switch.
 

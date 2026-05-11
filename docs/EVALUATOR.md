@@ -1,6 +1,6 @@
 # Evaluator
 
-The **aide evaluator** is an opt-in subsystem that captures user interactions
+The **Caliber evaluator** is an opt-in subsystem that captures user interactions
 (messages, code, terminal sessions) and scores them against configurable rubrics.
 It powers member feedback, team insights, and organizational transparency on
 code quality and collaboration patterns.
