@@ -10,6 +10,9 @@ const FIXED_MASTER = "a".repeat(64);
 const FIXED_REQUEST = "req-test-1";
 const FIXED_PLAINTEXT = "hello body v1";
 
+// v1 fixture — pre-recorded ciphertext for (FIXED_MASTER, FIXED_REQUEST,
+// FIXED_PLAINTEXT) under HKDF info "aide-gateway-body-v1".
+// Regenerate by running the body-cipher node script in plan Task 3 Step 1.
 const V1_FIXTURE = {
   nonce: Buffer.from("070707070707070707070707", "hex"),
   ciphertext: Buffer.from("9b521c6bb683a0986f0eaba4e1", "hex"),
@@ -48,7 +51,7 @@ describe("bodyCipher", () => {
     expect(recovered).toBe(FIXED_PLAINTEXT);
   });
 
-  it("v1 ciphertext with version: 2 throws", () => {
+  it("v1 ciphertext with version: 2 throws (auth tag mismatch)", () => {
     expect(() =>
       decryptBodyRaw({
         masterKeyHex: FIXED_MASTER,
@@ -92,4 +95,8 @@ describe("bodyCipher", () => {
       }),
     ).toThrow();
   });
+
+  // Master-key validation and tampered-ciphertext detection are covered
+  // once via credentialCipher.test.ts because that behavior lives in the
+  // shared aesGcmHkdf primitive, not in the body-cipher dispatch layer.
 });
