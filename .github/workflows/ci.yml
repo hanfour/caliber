@@ -119,12 +119,12 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: aide
-          POSTGRES_PASSWORD: aide_ci
-          POSTGRES_DB: aide
+          POSTGRES_USER: caliber
+          POSTGRES_PASSWORD: caliber_ci
+          POSTGRES_DB: caliber
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U aide -d aide"
+          --health-cmd "pg_isready -U caliber -d caliber"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -139,7 +139,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://aide:aide_ci@localhost:5432/aide
+      DATABASE_URL: postgresql://caliber:caliber_ci@localhost:5432/caliber
       AUTH_SECRET: ci-00000000000000000000000000000000
       NEXTAUTH_URL: http://localhost:3000
       API_INTERNAL_URL: http://localhost:3001

@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     ports: ["5432:5432"]
     environment:
-      POSTGRES_DB: aide
-      POSTGRES_USER: aide
-      POSTGRES_PASSWORD: aide_dev
+      POSTGRES_DB: caliber
+      POSTGRES_USER: caliber
+      POSTGRES_PASSWORD: caliber_dev
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aide"]
+      test: ["CMD-SHELL", "pg_isready -U caliber"]
       interval: 5s
       timeout: 5s
       retries: 10

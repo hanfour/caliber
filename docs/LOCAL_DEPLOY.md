@@ -297,7 +297,7 @@ docker compose --profile gateway up -d
 Drop into root's crontab (`sudo crontab -e`):
 
 ```cron
-0 3 * * * cd /opt/aide/docker && docker compose exec -T postgres pg_dumpall -U aide | gzip -9 > /backups/aide-$(date -u +\%F).sql.gz && find /backups -name 'aide-*.sql.gz' -mtime +14 -delete
+0 3 * * * cd /opt/caliber/docker && docker compose exec -T postgres pg_dumpall -U caliber | gzip -9 > /backups/caliber-$(date -u +\%F).sql.gz && find /backups -name 'caliber-*.sql.gz' -mtime +14 -delete
 ```
 
 Full procedure (including restore) in
@@ -360,7 +360,7 @@ You haven't onboarded an OpenAI account yet (Mode 2 step 2), or the
 account is `status='oauth_invalid' / 'revoked'`. Check via SQL:
 
 ```sh
-docker compose exec postgres psql -U aide -d aide -c \
+docker compose exec postgres psql -U caliber -d caliber -c \
   "SELECT id, name, status, schedulable FROM upstream_accounts;"
 ```
 

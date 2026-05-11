@@ -192,16 +192,16 @@ All data is read **locally and read-only**. No data is sent to any external serv
 ### Recommended: Install from npm / 建議：從 npm 安裝
 
 ```bash
-npm install -g @hanfour.huang/aide
+npm install -g @hanfour.huang/caliber
 
 # Verify installation
-aide --version
+caliber --version
 ```
 
 ### Update / 更新
 
 ```bash
-npm install -g @hanfour.huang/aide@latest
+npm install -g @hanfour.huang/caliber@latest
 ```
 
 ### Existing local-clone users / 已使用 clone 安裝的使用者
@@ -209,8 +209,8 @@ npm install -g @hanfour.huang/aide@latest
 If you previously installed from a cloned repo or `npm link`, migrate to the npm package:
 
 ```bash
-npm unlink -g aide
-npm install -g @hanfour.huang/aide@latest
+npm unlink -g aide 2>/dev/null || npm uninstall -g @hanfour.huang/aide
+npm install -g @hanfour.huang/caliber@latest
 ```
 
 ### Development mode / 開發模式

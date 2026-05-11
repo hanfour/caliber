@@ -1,6 +1,6 @@
-# Deploy aide to Fly.io
+# Deploy Caliber to Fly.io
 
-Three Fly apps (`aide-web`, `aide-api`, `aide-gateway`) plus Fly's
+Three Fly apps (`caliber-web`, `caliber-api`, `caliber-gateway`) plus Fly's
 managed Postgres + an external Upstash Redis.
 
 Fly doesn't have a true "click here to deploy" button — the closest
@@ -23,7 +23,7 @@ Either use Fly's managed Postgres or external (Neon / Supabase). Fly is
 simplest:
 
 ```sh
-fly postgres create --name aide-postgres --region iad --vm-size shared-cpu-1x --volume-size 10
+fly postgres create --name caliber-postgres --region iad --vm-size shared-cpu-1x --volume-size 10
 ```
 
 Save the `DATABASE_URL` it prints — needed in §3.
@@ -36,8 +36,8 @@ If using Upstash directly:
 
 Or use Fly's bundled Redis (same Upstash backend, integrated billing):
 ```sh
-fly redis create --name aide-redis --region iad --plan free
-fly redis status aide-redis  # prints the URL
+fly redis create --name caliber-redis --region iad --plan free
+fly redis status caliber-redis  # prints the URL
 ```
 
 ## 3. Launch each app
@@ -49,23 +49,23 @@ repo root:
 # Web (Next.js admin UI)
 fly launch --copy-config --config deploy/fly/web.toml --no-deploy
 # Set secrets (web reads everything except infra IDs from env)
-fly secrets set --app aide-web \
+fly secrets set --app caliber-web \
   AUTH_SECRET="$(openssl rand -base64 48)" \
-  NEXTAUTH_URL="https://aide-web.fly.dev" \
+  NEXTAUTH_URL="https://caliber-web.fly.dev" \
   GOOGLE_CLIENT_ID="..." \
   GOOGLE_CLIENT_SECRET="..." \
   GITHUB_CLIENT_ID="..." \
   GITHUB_CLIENT_SECRET="..." \
   BOOTSTRAP_SUPER_ADMIN_EMAIL="admin@example.com" \
   DATABASE_URL="<from step 1>" \
-  API_INTERNAL_URL="http://aide-api.flycast:3001"
+  API_INTERNAL_URL="http://caliber-api.flycast:3001"
 fly deploy --config deploy/fly/web.toml
 
 # API (private — no public IP)
 fly launch --copy-config --config deploy/fly/api.toml --no-deploy
-fly secrets set --app aide-api \
+fly secrets set --app caliber-api \
   AUTH_SECRET="<same value as web>" \
-  NEXTAUTH_URL="https://aide-web.fly.dev" \
+  NEXTAUTH_URL="https://caliber-web.fly.dev" \
   GOOGLE_CLIENT_ID="..." \
   GOOGLE_CLIENT_SECRET="..." \
   GITHUB_CLIENT_ID="..." \
@@ -75,14 +75,14 @@ fly secrets set --app aide-api \
   REDIS_URL="<from step 2>"
 fly deploy --config deploy/fly/api.toml
 # IMPORTANT — disable public ingress on this app:
-fly ips list --app aide-api
-fly ips release --app aide-api  # release any auto-assigned public IPs
+fly ips list --app caliber-api
+fly ips release --app caliber-api  # release any auto-assigned public IPs
 
 # Gateway (public — customer SDK target)
 fly launch --copy-config --config deploy/fly/gateway.toml --no-deploy
-fly secrets set --app aide-gateway \
+fly secrets set --app caliber-gateway \
   AUTH_SECRET="<same value>" \
-  NEXTAUTH_URL="https://aide-web.fly.dev" \
+  NEXTAUTH_URL="https://caliber-web.fly.dev" \
   GOOGLE_CLIENT_ID="..." \
   GOOGLE_CLIENT_SECRET="..." \
   GITHUB_CLIENT_ID="..." \
@@ -90,7 +90,7 @@ fly secrets set --app aide-gateway \
   BOOTSTRAP_SUPER_ADMIN_EMAIL="admin@example.com" \
   DATABASE_URL="<from step 1>" \
   REDIS_URL="<from step 2>" \
-  GATEWAY_BASE_URL="https://aide-gateway.fly.dev" \
+  GATEWAY_BASE_URL="https://caliber-gateway.fly.dev" \
   CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
   API_KEY_HASH_PEPPER="$(openssl rand -hex 32)"
 fly deploy --config deploy/fly/gateway.toml
@@ -102,7 +102,7 @@ Fly doesn't have a native one-shot job runner like the docker-compose
 `migrate` service. Run inside the api container:
 
 ```sh
-fly ssh console --app aide-api -C "node dist/migrate.js"
+fly ssh console --app caliber-api -C "node dist/migrate.js"
 ```
 
 Repeat after every release that adds migrations.
@@ -110,16 +110,16 @@ Repeat after every release that adds migrations.
 ## 5. Register OAuth callback URLs
 
 Update Google + GitHub OAuth apps with redirect URIs:
-- `https://aide-web.fly.dev/api/auth/callback/google`
-- `https://aide-web.fly.dev/api/auth/callback/github`
+- `https://caliber-web.fly.dev/api/auth/callback/google`
+- `https://caliber-web.fly.dev/api/auth/callback/github`
 
 (Or your custom domain after attaching one via `fly certs add`.)
 
 ## 6. Smoke test
 
 ```sh
-curl -fsS https://aide-web.fly.dev/api/health
-curl -fsS https://aide-gateway.fly.dev/health
+curl -fsS https://caliber-web.fly.dev/api/health
+curl -fsS https://caliber-gateway.fly.dev/health
 ```
 
 Then sign in to the web app and walk through the OpenAI onboarding —
@@ -128,13 +128,13 @@ Then sign in to the web app and walk through the OpenAI onboarding —
 ## 7. Custom domain (optional)
 
 ```sh
-fly certs add --app aide-web aide.example.com
-fly certs add --app aide-gateway gateway.example.com
+fly certs add --app caliber-web caliber.example.com
+fly certs add --app caliber-gateway gateway.example.com
 # Update DNS as Fly instructs.
 # Then update NEXTAUTH_URL + GATEWAY_BASE_URL secrets to use the new hosts:
-fly secrets set --app aide-web NEXTAUTH_URL=https://aide.example.com
-fly secrets set --app aide-api NEXTAUTH_URL=https://aide.example.com
-fly secrets set --app aide-gateway NEXTAUTH_URL=https://aide.example.com GATEWAY_BASE_URL=https://gateway.example.com
+fly secrets set --app caliber-web NEXTAUTH_URL=https://caliber.example.com
+fly secrets set --app caliber-api NEXTAUTH_URL=https://caliber.example.com
+fly secrets set --app caliber-gateway NEXTAUTH_URL=https://caliber.example.com GATEWAY_BASE_URL=https://gateway.example.com
 # Re-register OAuth callbacks under the new hosts.
 ```
 
@@ -142,9 +142,9 @@ fly secrets set --app aide-gateway NEXTAUTH_URL=https://aide.example.com GATEWAY
 
 | Service | $/month |
 |---|---|
-| `aide-web` (shared-cpu-1x, 512 MB, 1 instance) | ~$2 |
-| `aide-api` (same shape, internal-only) | ~$2 |
-| `aide-gateway` (shared-cpu-1x, 1 GB, 1 instance) | ~$5 |
+| `caliber-web` (shared-cpu-1x, 512 MB, 1 instance) | ~$2 |
+| `caliber-api` (same shape, internal-only) | ~$2 |
+| `caliber-gateway` (shared-cpu-1x, 1 GB, 1 instance) | ~$5 |
 | Fly Postgres (shared-cpu-1x, 10 GB volume) | ~$15 |
 | Upstash Redis (free tier) | $0 |
 | **Total** | **~$24/month** |
@@ -157,7 +157,7 @@ via `fly regions add ...`.
 ### "Failed to start machine" with config error
 The container's `parseServerEnv` is rejecting your env. View logs:
 ```sh
-fly logs --app aide-gateway
+fly logs --app caliber-gateway
 ```
 Look for `Invalid environment configuration:` lines naming the
 offending var. Fix with `fly secrets set ...` and the machine

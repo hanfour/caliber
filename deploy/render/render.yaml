@@ -1,9 +1,9 @@
-# Render Blueprint for aide (web + api + gateway + Postgres).
+# Render Blueprint for Caliber (web + api + gateway + Postgres).
 #
 # Render does NOT ship a native managed Redis at the time of writing.
 # Recommended: provision an Upstash Redis instance separately
 # (https://upstash.com/), then set the `REDIS_URL` env var on the
-# `aide-gateway` service via the Render dashboard.
+# `caliber-gateway` service via the Render dashboard.
 #
 # All three services pull pre-built images from ghcr.io. To build from
 # source instead, replace `image:` with `runtime: docker` + `dockerfilePath`.
@@ -12,19 +12,19 @@
 # (admin sign-in, OpenAI account onboarding, smoke test).
 
 databases:
-  - name: aide-postgres
+  - name: caliber-postgres
     plan: starter # 256 MB RAM / 1 GB storage — fine for evaluation; upgrade for prod
     postgresMajorVersion: 16
-    databaseName: aide
-    user: aide
+    databaseName: caliber
+    user: caliber
 
 services:
   # ── Web (Next.js admin UI) ──────────────────────────────────────────────
   - type: web
-    name: aide-web
+    name: caliber-web
     runtime: image
     image:
-      url: ghcr.io/hanfour/aide-web:latest
+      url: ghcr.io/hanfour/caliber-web:latest
     plan: starter
     healthCheckPath: /api/health
     autoDeploy: false # bump tag manually, then redeploy
@@ -35,7 +35,7 @@ services:
         value: "3000"
       - key: DATABASE_URL
         fromDatabase:
-          name: aide-postgres
+          name: caliber-postgres
           property: connectionString
       - key: AUTH_SECRET
         sync: false # generate with `openssl rand -base64 48`, paste in dashboard
@@ -56,14 +56,14 @@ services:
       - key: BOOTSTRAP_DEFAULT_ORG_NAME
         value: Demo
       - key: API_INTERNAL_URL
-        value: http://aide-api:3001 # internal Render service-to-service URL
+        value: http://caliber-api:3001 # internal Render service-to-service URL
 
   # ── API (Fastify + tRPC admin plane) ────────────────────────────────────
   - type: pserv # private service, not internet-facing
-    name: aide-api
+    name: caliber-api
     runtime: image
     image:
-      url: ghcr.io/hanfour/aide-api:latest
+      url: ghcr.io/hanfour/caliber-api:latest
     plan: starter
     autoDeploy: false
     envVars:
@@ -73,7 +73,7 @@ services:
         value: "3001"
       - key: DATABASE_URL
         fromDatabase:
-          name: aide-postgres
+          name: caliber-postgres
           property: connectionString
       - key: REDIS_URL
         sync: false # paste your Upstash Redis URL here
@@ -98,10 +98,10 @@ services:
 
   # ── Gateway (customer-facing /v1/* proxy) ──────────────────────────────
   - type: web
-    name: aide-gateway
+    name: caliber-gateway
     runtime: image
     image:
-      url: ghcr.io/hanfour/aide-gateway:latest
+      url: ghcr.io/hanfour/caliber-gateway:latest
     plan: starter
     healthCheckPath: /health
     autoDeploy: false
@@ -116,7 +116,7 @@ services:
         value: "3002"
       - key: DATABASE_URL
         fromDatabase:
-          name: aide-postgres
+          name: caliber-postgres
           property: connectionString
       - key: REDIS_URL
         sync: false # same Upstash URL as the api service

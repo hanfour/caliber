@@ -1,4 +1,4 @@
-# Reverse-proxy configs for aide
+# Reverse-proxy configs for Caliber
 
 Two example configs that put TLS in front of the gateway + web
 services. Pick whichever you already operate.
@@ -9,7 +9,7 @@ services. Pick whichever you already operate.
 | `nginx.example.conf` | Existing nginx infrastructure or stricter org policy on TLS / module configuration |
 
 Both configs assume the docker-compose stack is running with default
-service names (`aide-web`, `aide-gateway`); for managed deploys
+service names (`caliber-web`, `caliber-gateway`); for managed deploys
 (Render / Fly / Railway) the platform handles ingress for you and
 these configs aren't relevant.
 
@@ -17,7 +17,7 @@ these configs aren't relevant.
 
 The configs assume two public origins:
 
-- `aide.example.com` → web (admin UI). NextAuth callback hosts must
+- `caliber.example.com` → web (admin UI). NextAuth callback hosts must
   match this.
 - `gateway.example.com` → gateway (`/v1/*` customer-facing endpoints).
   This is what end-user SDKs hit.
@@ -87,11 +87,11 @@ Caddy auto-renews certs every 30 days; nothing else to do.
 
 1. Provision certs first (certbot example):
    ```sh
-   certbot certonly --standalone -d aide.example.com -d gateway.example.com
+   certbot certonly --standalone -d caliber.example.com -d gateway.example.com
    ```
-2. Drop `nginx.example.conf` into `/etc/nginx/sites-available/aide`,
+2. Drop `nginx.example.conf` into `/etc/nginx/sites-available/caliber`,
    edit hostnames + cert paths.
-3. `ln -s /etc/nginx/sites-available/aide /etc/nginx/sites-enabled/aide`.
+3. `ln -s /etc/nginx/sites-available/caliber /etc/nginx/sites-enabled/caliber`.
 4. `nginx -t && systemctl reload nginx`.
 5. Cert renewal is on you — set up the certbot timer if you haven't
    already.
@@ -102,7 +102,7 @@ After reload:
 
 ```sh
 # TLS cert + HTTP/2
-curl -fsSI https://aide.example.com/api/health
+curl -fsSI https://caliber.example.com/api/health
 curl -fsSI https://gateway.example.com/health
 
 # Streaming end-to-end (see chunks arrive immediately, not in bursts)

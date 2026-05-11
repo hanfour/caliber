@@ -21,15 +21,15 @@ Recommended: a host-level cron that snapshots Postgres nightly. Sample:
 
 ```bash
 # Add to host crontab — daily 03:00 UTC, retain 14 days.
-0 3 * * * cd /opt/aide/docker && \
-  docker compose exec -T postgres pg_dumpall -U aide \
-  | gzip -9 > /backups/aide-$(date -u +\%F).sql.gz \
-  && find /backups -name 'aide-*.sql.gz' -mtime +14 -delete
+0 3 * * * cd /opt/caliber/docker && \
+  docker compose exec -T postgres pg_dumpall -U caliber \
+  | gzip -9 > /backups/caliber-$(date -u +\%F).sql.gz \
+  && find /backups -name 'caliber-*.sql.gz' -mtime +14 -delete
 ```
 
 Notes:
 - `pg_dumpall` is logical (SQL text), portable across pg versions, larger
-  on disk than `pg_basebackup`. Fine for the workload size aide handles.
+  on disk than `pg_basebackup`. Fine for the workload size Caliber handles.
 - Compress with `gzip -9` — typical compression 8-15× on this schema.
 - 14-day retention is a starting point — adjust per your data-retention
   policy. `usage_logs` is the bulk of the database size; if you have a
@@ -89,7 +89,7 @@ Use case: ransomware, accidental TRUNCATE, regional cloud outage.
    ```
 2. **Confirm the backup file** integrity:
    ```sh
-   gzip -t /backups/aide-2026-05-15.sql.gz && echo OK
+   gzip -t /backups/caliber-2026-05-15.sql.gz && echo OK
    ```
 3. **Confirm secrets match the backup era** — `API_KEY_HASH_PEPPER` and
    `CREDENTIAL_ENCRYPTION_KEY` MUST be the same values that were live when
@@ -102,12 +102,12 @@ Use case: ransomware, accidental TRUNCATE, regional cloud outage.
 ```sh
 # Drop + recreate the target database.  The pg_dumpall output contains
 # CREATE DATABASE so we restore against `template1` to bootstrap.
-docker compose exec postgres psql -U aide -d template1 -c "DROP DATABASE IF EXISTS aide;"
-gunzip -c /backups/aide-2026-05-15.sql.gz \
-  | docker compose exec -T postgres psql -U aide -d template1
+docker compose exec postgres psql -U caliber -d template1 -c "DROP DATABASE IF EXISTS caliber;"
+gunzip -c /backups/caliber-2026-05-15.sql.gz \
+  | docker compose exec -T postgres psql -U caliber -d template1
 
 # Verify a known-good row count.
-docker compose exec postgres psql -U aide -d aide -c "
+docker compose exec postgres psql -U caliber -d caliber -c "
   SELECT 'users' AS t, COUNT(*) FROM users
   UNION ALL SELECT 'orgs', COUNT(*) FROM organizations
   UNION ALL SELECT 'accounts', COUNT(*) FROM upstream_accounts
@@ -153,15 +153,15 @@ You need:
 Then:
 
 ```sh
-git clone https://github.com/hanfour/aide.git /opt/aide
-cd /opt/aide/docker
+git clone https://github.com/hanfour/aide.git /opt/caliber
+cd /opt/caliber/docker
 # Drop in your saved .env (with VERSION pinned to the backup era).
-cp /secure/aide.env .env
+cp /secure/caliber.env .env
 # Bring up postgres + redis bare (without api/web/gateway).
 docker compose up -d postgres redis
 # Restore.
-gunzip -c /backups/aide-latest.sql.gz \
-  | docker compose exec -T postgres psql -U aide -d template1
+gunzip -c /backups/caliber-latest.sql.gz \
+  | docker compose exec -T postgres psql -U caliber -d template1
 # Bring up the rest.
 docker compose up -d migrate
 docker compose --profile gateway up -d

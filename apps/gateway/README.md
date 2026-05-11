@@ -57,7 +57,7 @@ export GATEWAY_BASE_URL=http://localhost:3002
 export REDIS_URL=redis://localhost:6379
 export CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -hex 32)
 export API_KEY_HASH_PEPPER=$(openssl rand -hex 32)
-export DATABASE_URL=postgresql://aide:aide@localhost:5432/aide
+export DATABASE_URL=postgresql://caliber:caliber@localhost:5432/caliber
 # …plus the rest of the @caliber/config server schema (AUTH_SECRET, OAuth creds,
 # BOOTSTRAP_*, NEXTAUTH_URL). A `direnv` .envrc at the repo root is the usual
 # pattern.
@@ -190,7 +190,7 @@ Common inspection queries are in [`../../docs/GATEWAY.md#8-runbook`](../../docs/
 For ad-hoc dev:
 
 ```sh
-docker compose exec postgres psql -U aide -d aide
+docker compose exec postgres psql -U caliber -d caliber
 # \dt — list tables
 # SELECT id, name, status, priority, concurrency FROM upstream_accounts WHERE deleted_at IS NULL;
 # SELECT SUM(total_cost) FROM usage_logs WHERE api_key_id = '<id>';

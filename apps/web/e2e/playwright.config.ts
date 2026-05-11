@@ -33,7 +33,7 @@ const SEED_TOKEN =
 const appEnvDefaults: Record<string, string> = {
   DATABASE_URL:
     process.env.DATABASE_URL ??
-    "postgresql://aide:aide_dev@localhost:5432/aide",
+    "postgresql://caliber:caliber_dev@localhost:5432/caliber",
   AUTH_SECRET: process.env.AUTH_SECRET ?? "0".repeat(48),
   NEXTAUTH_URL: process.env.NEXTAUTH_URL ?? `http://localhost:${WEB_PORT}`,
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? "e2e",
