@@ -731,6 +731,92 @@ describe("/v1/responses", () => {
     await app.close();
   });
 
+  it("7-compact. openai-platform group → /v1/responses/compact passthrough", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_resp_oai_compact_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      "openai",
+      groupId,
+    );
+
+    const compactResponse = {
+      id: "resp_compact_test",
+      object: "response.compaction",
+      created_at: 1700000000,
+      output: [
+        {
+          id: "msg_x",
+          type: "message",
+          role: "user",
+          status: "completed",
+          content: [],
+        },
+      ],
+    };
+    nextUpstreamResponse = {
+      status: 200,
+      body: JSON.stringify(compactResponse),
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses/compact",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { model: "gpt-5", input: "summarise this" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: "resp_compact_test",
+      object: "response.compaction",
+    });
+    expect(lastUpstreamRequest).not.toBeNull();
+    expect(lastUpstreamRequest!.url).toBe("/v1/responses/compact");
+    await app.close();
+  });
+
+  it("7-compact-anthropic. anthropic-platform group → /v1/responses/compact rejected", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId, "anthropic");
+    const rawKey = `ak_resp_anth_compact_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-ant-test" }),
+      "anthropic",
+      groupId,
+    );
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses/compact",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { model: "claude-3-haiku", input: "summarise this" },
+    });
+
+    // Compact is OpenAI-only; anthropic-platform key gets a clean
+    // 400 instead of being routed to an Anthropic upstream that
+    // doesn't speak Responses.
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: "compact_not_supported_on_platform",
+      platform: "anthropic",
+    });
+    await app.close();
+  });
+
   it("7b. openai upstream 4xx error → forwards status to client", async () => {
     const orgId = await seedOrg();
     const userId = await seedUser();

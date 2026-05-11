@@ -98,3 +98,49 @@ export async function callUpstreamResponses(
   };
   return result;
 }
+
+/**
+ * `POST /v1/responses/compact` upstream call. Codex CLI hits this
+ * endpoint when its auto-compaction threshold is reached to ask the
+ * server to summarise the conversation. Same auth conventions as
+ * `callUpstreamResponses`, but the compact endpoint is strictly
+ * request/response — no streaming branch needed.
+ */
+export async function callUpstreamResponsesCompact(
+  input: OpenAIUpstreamCallInput,
+): Promise<NonStreamUpstreamResult> {
+  const url = new URL("/v1/responses/compact", input.baseUrl).toString();
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json",
+    ...input.forwardHeaders,
+    ...buildOpenAIAuthHeaders(input.credential),
+  };
+  delete headers["host"];
+  delete headers["content-length"];
+  delete headers["connection"];
+
+  const timeout = input.timeoutMs ?? 60_000;
+
+  const res = await request(url, {
+    method: "POST",
+    headers,
+    body: input.body,
+    signal: input.signal,
+    bodyTimeout: timeout,
+    headersTimeout: timeout,
+  });
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of res.body) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return {
+    kind: "non-stream",
+    status: res.statusCode,
+    headers: res.headers as Record<string, string | string[] | undefined>,
+    body: Buffer.concat(chunks),
+  };
+}

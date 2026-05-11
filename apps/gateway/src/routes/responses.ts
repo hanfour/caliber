@@ -44,7 +44,10 @@ import {
   FatalUpstreamError,
 } from "../runtime/failoverLoop.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
-import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
+import {
+  callUpstreamResponses,
+  callUpstreamResponsesCompact,
+} from "../runtime/upstreamCallOpenai.js";
 import {
   checkRouteCache,
   tryStoreOnSuccess,
@@ -436,6 +439,116 @@ export async function responsesRoutes(
   opts: ResponsesRouteOptions,
 ): Promise<void> {
   app.post("/v1/responses", makeResponsesRouteHandler(app, opts));
+  app.post("/v1/responses/compact", makeResponsesCompactRouteHandler(app, opts));
+}
+
+/**
+ * `POST /v1/responses/compact` — passthrough.
+ *
+ * Codex CLI calls this when its `model_auto_compact_token_limit` is
+ * approached: ask the OpenAI Responses upstream to compact the
+ * conversation server-side. The compact endpoint is OpenAI-specific
+ * (no anthropic equivalent), strictly request/response (non-stream),
+ * and aide forwards the request body verbatim — no translation, no
+ * usage accounting, no body capture. The upstream owns validation;
+ * aide just provides the gateway auth/routing surface.
+ *
+ * Returns the upstream response body and status code as-is. On
+ * `AllUpstreamsFailed` returns 503; on `FatalUpstreamError` mirrors
+ * the upstream status the same way the main `/v1/responses` route does.
+ */
+export function makeResponsesCompactRouteHandler(
+  app: FastifyInstance,
+  opts: ResponsesRouteOptions,
+): (req: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!req.apiKey || !req.gwUser || !req.gwOrg) {
+      reply.code(401).send({ error: "missing_api_key" });
+      return;
+    }
+    const ctx = req.gwGroupContext;
+    if (!ctx) {
+      reply.code(403).send({ error: "group_required" });
+      return;
+    }
+    if (ctx.platform !== "openai") {
+      reply.code(400).send({
+        error: "compact_not_supported_on_platform",
+        platform: ctx.platform,
+      });
+      return;
+    }
+
+    const rawBody = req.body as Record<string, unknown> | undefined;
+    if (!rawBody || typeof rawBody !== "object") {
+      reply.code(400).send({ error: "invalid_body" });
+      return;
+    }
+
+    const upstreamBodyBuf = Buffer.from(JSON.stringify(rawBody));
+    const requestId = req.id;
+    const ac = new AbortController();
+    const onClose = () => ac.abort();
+    req.raw.once("close", onClose);
+
+    try {
+      const upstream = await runFailover({
+        db: app.db,
+        orgId: req.apiKey.orgId,
+        teamId: req.apiKey.teamId,
+        groupId: req.apiKey?.groupId ?? null,
+        platform: ctx.platform,
+        maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
+        scheduler: app.gwScheduler,
+        attempt: async (account) =>
+          withSlotAndCredential(
+            app,
+            opts,
+            account,
+            requestId,
+            async (credential) => {
+              const res = await callUpstreamResponsesCompact({
+                baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
+                body: upstreamBodyBuf,
+                credential,
+                signal: ac.signal,
+              });
+              if (res.status < 200 || res.status >= 300) {
+                throw buildUpstreamHttpError(res);
+              }
+              return res;
+            },
+          ),
+      });
+
+      reply
+        .code(upstream.status)
+        .header(
+          "content-type",
+          (upstream.headers["content-type"] as string | undefined) ??
+            "application/json",
+        )
+        .send(upstream.body);
+    } catch (err) {
+      if (err instanceof AllUpstreamsFailed) {
+        reply.code(503).send({
+          error: "all_upstreams_failed",
+          attempted_count: err.attemptedIds.length,
+          request_id: requestId,
+        });
+        return;
+      }
+      if (err instanceof FatalUpstreamError) {
+        reply
+          .code(err.statusCode)
+          .send(fatalUpstreamReplyBody(err, requestId));
+        return;
+      }
+      throw err;
+    } finally {
+      req.raw.removeListener("close", onClose);
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
