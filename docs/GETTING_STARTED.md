@@ -15,14 +15,14 @@
           \--- Tailscale mesh VPN ---/
                        |
                        v
-              [Your Mac] aide gateway
+              [Your Mac] caliber gateway
                        |
                        v
                 api.anthropic.com
               (your Claude Max quota)
 ```
 
-Each device runs `claude-aide` (or any Anthropic-SDK client pointed at
+Each device runs `claude-caliber` (or any Anthropic-SDK client pointed at
 the gateway) → gateway proxies to Anthropic using your OAuth bundle →
 your Claude Max subscription handles the inference.
 
@@ -30,8 +30,8 @@ your Claude Max subscription handles the inference.
 
 | Need | Why | How |
 |---|---|---|
-| **macOS** with [Docker Desktop](https://www.docker.com/products/docker-desktop/) **or** [OrbStack](https://orbstack.dev/) installed and running | The aide stack runs in containers | OrbStack is recommended on Apple Silicon — lighter, faster |
-| **GitHub account** | To sign in to the aide admin dashboard | Free, you probably have one |
+| **macOS** with [Docker Desktop](https://www.docker.com/products/docker-desktop/) **or** [OrbStack](https://orbstack.dev/) installed and running | The caliber stack runs in containers | OrbStack is recommended on Apple Silicon — lighter, faster |
+| **GitHub account** | To sign in to the caliber admin dashboard | Free, you probably have one |
 | **Claude.ai Pro or Max subscription** | The upstream that gateway proxies to. Pro = $20/mo, Max = $200/mo. Both work. | <https://claude.ai/upgrade> |
 | **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) installed and logged in** | We extract the OAuth bundle from its keychain entry | `npm install -g @anthropic-ai/claude-code` then `claude auth login` |
 | **`git`, `curl`, `python3`** in PATH | Standard tools for this walkthrough | macOS has all three by default |
@@ -48,20 +48,20 @@ your Claude Max subscription handles the inference.
 ### 1.1 Clone the repo
 
 ```bash
-git clone https://github.com/hanfour/aide.git
-cd aide
+git clone https://github.com/hanfour/aide.git caliber
+cd caliber
 ```
 
 ### 1.2 Register a GitHub OAuth app for sign-in
 
-The aide admin dashboard authenticates users via OAuth. We use GitHub
+The caliber admin dashboard authenticates users via OAuth. We use GitHub
 for simplicity — Google works too, both are optional individually but
 **at least one** must be configured.
 
 1. Go to <https://github.com/settings/developers> → **OAuth Apps** →
    **New OAuth App**
 2. Fill in:
-   - **Application name**: `aide local` (or anything)
+   - **Application name**: `caliber local` (or anything)
    - **Homepage URL**: `http://localhost:3000`
    - **Authorization callback URL**: `http://localhost:3000/api/auth/callback/github` *(must be exact)*
 3. Click **Register application**
@@ -218,7 +218,7 @@ quota you're already paying for — **no extra billing**.
 
 Claude Code stores its OAuth tokens in macOS Keychain under the entry
 named `Claude Code-credentials`. Pull it and reshape into the JSON
-schema the aide admin form expects:
+schema the caliber admin form expects:
 
 ```bash
 security find-generic-password -s 'Claude Code-credentials' -w \
@@ -234,7 +234,7 @@ out = {
                           .isoformat().replace("+00:00", "Z"),
 }
 print(json.dumps(out))
-' | tee /tmp/aide-anthropic-oauth.json
+' | tee /tmp/caliber-anthropic-oauth.json
 ```
 
 You'll see something like:
@@ -245,7 +245,7 @@ You'll see something like:
 
 **Why the transform**: keychain stores camelCase keys nested under
 `claudeAiOauth`, with `expiresAt` as a unix-millisecond integer. The
-aide form needs flat snake_case + ISO 8601 expires_at. The Python
+caliber form needs flat snake_case + ISO 8601 expires_at. The Python
 one-liner does both jobs. (See
 [#73](https://github.com/hanfour/aide/issues/73) for why this is
 necessary today.)
@@ -259,7 +259,7 @@ manually:
 
 ```bash
 docker compose exec -T postgres \
-  psql -U aide -d aide -tAc "SELECT id FROM organizations WHERE slug='local';"
+  psql -U caliber -d caliber -tAc "SELECT id FROM organizations WHERE slug='local';"
 ```
 
 You'll get something like `7549a089-b355-4f6d-b286-25154e02c856`. Keep
@@ -276,7 +276,7 @@ this UUID handy.
    - **Platform**: **Anthropic**
    - **Type**: ⚠️ **OAuth (JSON)** — see gotcha below
    - **Scope**: Organization
-   - **Credentials**: paste the JSON from `/tmp/aide-anthropic-oauth.json`
+   - **Credentials**: paste the JSON from `/tmp/caliber-anthropic-oauth.json`
 3. Click **Create account**.
 
 > **OAuth-radio gotcha** ([#72](https://github.com/hanfour/aide/issues/72)):
@@ -324,7 +324,7 @@ Expected: a JSON response with `"content":[{"type":"text","text":"pong"}]`,
 header matching your Claude.ai org.
 
 If you get `503 all_upstreams_failed`, the OAuth bundle's `expires_at`
-format is wrong — check that the JSON in `/tmp/aide-anthropic-oauth.json`
+format is wrong — check that the JSON in `/tmp/caliber-anthropic-oauth.json`
 has a string ISO date, not a number.
 
 ✅ **End of Part 2**: gateway proxies to Anthropic via your Claude Max
@@ -401,19 +401,19 @@ see [Troubleshooting](#troubleshooting) — but it's almost always
 "Tailscale not actually logged in on one side" or "the host Mac is
 sleeping".
 
-### 3.5 Set up the `claude-aide` alias
+### 3.5 Set up the `claude-caliber` alias
 
 Append this to `~/.zshrc` on the **other device** (not the host):
 
 ```bash
 cat >> ~/.zshrc <<'EOF'
 
-# ── aide gateway via Tailscale ────────────────────────────────
-export AIDE_GATEWAY_URL="http://<dns-from-§3.2>:3002"
-export AIDE_GATEWAY_KEY="<ak_-from-§3.3>"
+# ── caliber gateway via Tailscale ────────────────────────────────
+export CALIBER_GATEWAY_URL="http://<dns-from-§3.2>:3002"
+export CALIBER_GATEWAY_KEY="<ak_-from-§3.3>"
 
-alias claude-aide='ANTHROPIC_BASE_URL=$AIDE_GATEWAY_URL ANTHROPIC_AUTH_TOKEN=$AIDE_GATEWAY_KEY claude'
-alias aide-ping='curl -sS -o /dev/null -w "%{http_code}\n" $AIDE_GATEWAY_URL/health'
+alias claude-caliber='ANTHROPIC_BASE_URL=$CALIBER_GATEWAY_URL ANTHROPIC_AUTH_TOKEN=$CALIBER_GATEWAY_KEY claude'
+alias caliber-ping='curl -sS -o /dev/null -w "%{http_code}\n" $CALIBER_GATEWAY_URL/health'
 EOF
 
 source ~/.zshrc
@@ -424,16 +424,16 @@ Now on that device:
 | Command | Behaviour |
 |---|---|
 | `claude` | Uses **this device's own** `claude auth login` credentials, hits `api.anthropic.com` directly |
-| `claude-aide` | Routes via your Tailscale → host Mac's gateway → host's Claude Max subscription |
-| `aide-ping` | Prints `200` if the path is healthy, anything else if broken |
+| `claude-caliber` | Routes via your Tailscale → host Mac's gateway → host's Claude Max subscription |
+| `caliber-ping` | Prints `200` if the path is healthy, anything else if broken |
 
-Both `claude` and `claude-aide` coexist — no `unset` required.
+Both `claude` and `claude-caliber` coexist — no `unset` required.
 
 ### 3.6 Test it
 
 ```bash
-aide-ping              # → 200
-claude-aide --print "say hi via aide"
+caliber-ping              # → 200
+claude-caliber --print "say hi via caliber"
 ```
 
 Should respond like a normal Claude conversation. Token usage is
@@ -452,13 +452,13 @@ Day-2 looks like:
 
 ```bash
 # On the host Mac — bring stack back up (~30 sec)
-cd /path/to/aide/docker
+cd /path/to/caliber/docker
 docker compose --profile gateway up -d
 docker compose ps                          # all 5 should turn healthy
 
 # On any device — verify
-aide-ping                                  # → 200
-claude-aide --print "test"                 # → real response
+caliber-ping                                  # → 200
+claude-caliber --print "test"                 # → real response
 ```
 
 Done. The DB volume is preserved across `down` / `up`, so user, org,
@@ -481,36 +481,36 @@ docker compose --profile gateway down -v   # stop + WIPE DB (forces full re-onbo
 
 Typing the multi-step `cd … && docker compose …` chain every time gets
 old. Drop these three helpers into the host Mac's `~/.zshrc` (or
-`~/.bashrc`) so day-2 collapses to a single `aide-up`:
+`~/.bashrc`) so day-2 collapses to a single `caliber-up`:
 
 ```bash
-# ── aide gateway lifecycle ─────────────────────────────────────────
-export AIDE_DIR="$HOME/path/to/aide/docker"     # ← edit to your checkout
-export AIDE_PORT="3002"                         # ← match GATEWAY_PORT in .env
+# ── caliber gateway lifecycle ─────────────────────────────────────────
+export CALIBER_DIR="$HOME/path/to/caliber/docker"     # ← edit to your checkout
+export CALIBER_PORT="3002"                         # ← match GATEWAY_PORT in .env
 
-aide-up() {
-  (cd "$AIDE_DIR" && docker compose --profile gateway up -d) || return 1
+caliber-up() {
+  (cd "$CALIBER_DIR" && docker compose --profile gateway up -d) || return 1
   sleep 6
   curl -sS -o /dev/null -w "gateway: HTTP %{http_code}\n" \
-    "http://localhost:${AIDE_PORT}/health"
+    "http://localhost:${CALIBER_PORT}/health"
   pgrep -qf 'caffeinate -d -i' >/dev/null 2>&1 || (caffeinate -d -i &)
-  echo "✅ aide up + caffeinate keeping mac awake"
+  echo "✅ caliber up + caffeinate keeping mac awake"
 }
 
-aide-down() {
+caliber-down() {
   # Kills ANY `caffeinate -d -i` — if you run caffeinate for another
   # purpose, narrow this filter or stop that process separately.
   pkill -f 'caffeinate -d -i' 2>/dev/null
-  (cd "$AIDE_DIR" && docker compose --profile gateway down)
-  echo "✅ aide down + caffeinate killed (mac can sleep again)"
+  (cd "$CALIBER_DIR" && docker compose --profile gateway down)
+  echo "✅ caliber down + caffeinate killed (mac can sleep again)"
 }
 
-aide-status() {
-  (cd "$AIDE_DIR" && docker compose ps \
+caliber-status() {
+  (cd "$CALIBER_DIR" && docker compose ps \
     --format 'table {{.Name}}\t{{.Status}}')
   echo
   curl -sS -o /dev/null -w "gateway: HTTP %{http_code}\n" \
-    "http://localhost:${AIDE_PORT}/health" 2>&1
+    "http://localhost:${CALIBER_PORT}/health" 2>&1
   pgrep -qf 'caffeinate -d -i' \
     && echo "caffeinate: running" \
     || echo "caffeinate: not running"
@@ -521,15 +521,15 @@ aide-status() {
 
 | Command | Behaviour |
 |---|---|
-| `aide-up` | Boots the stack, waits ~6s, prints gateway health, ensures `caffeinate` is running so other devices stay reachable |
-| `aide-down` | Stops the stack (keeps DB volume) and kills `caffeinate` so the Mac can sleep |
-| `aide-status` | Prints container state + gateway HTTP code + caffeinate status |
+| `caliber-up` | Boots the stack, waits ~6s, prints gateway health, ensures `caffeinate` is running so other devices stay reachable |
+| `caliber-down` | Stops the stack (keeps DB volume) and kills `caffeinate` so the Mac can sleep |
+| `caliber-status` | Prints container state + gateway HTTP code + caffeinate status |
 
-DB volume is preserved across `aide-down`/`aide-up` cycles, so user,
+DB volume is preserved across `caliber-down`/`caliber-up` cycles, so user,
 org, OAuth account, and `ak_…` keys all stay intact — no re-onboarding.
 
 > **Auto-start on Mac login** is left as an exercise — launchd plists
-> invoke binaries (not zsh functions), so you'd wrap `aide-up` in a
+> invoke binaries (not zsh functions), so you'd wrap `caliber-up` in a
 > standalone script and reference that script from the plist. Most
 > operators find the explicit alias more intuitive anyway: you control
 > when the stack (and its battery cost) is running.
@@ -569,8 +569,8 @@ org, OAuth account, and `ak_…` keys all stay intact — no re-onboarding.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `aide-ping` → `Couldn't connect after 2ms` | Host Mac sleeping, or `docker compose down`'d, or Tailscale logged out one side | Wake the Mac, `up -d`, or re-login Tailscale |
-| `aide-ping` works but `claude-aide` errors | Old expired `ak_...` in alias, or alias not sourced | `echo $AIDE_GATEWAY_KEY` to verify; `source ~/.zshrc` if env empty |
+| `caliber-ping` → `Couldn't connect after 2ms` | Host Mac sleeping, or `docker compose down`'d, or Tailscale logged out one side | Wake the Mac, `up -d`, or re-login Tailscale |
+| `caliber-ping` works but `claude-caliber` errors | Old expired `ak_...` in alias, or alias not sourced | `echo $CALIBER_GATEWAY_KEY` to verify; `source ~/.zshrc` if env empty |
 | Direct LAN (`http://192.168.x.x:3002`) refused | Router has client isolation, or hotspot isolates clients (iOS), or macOS firewall + OrbStack interaction | Use Tailscale instead; LAN-direct in untrusted environments rarely works |
 
 For deeper LAN troubleshooting, see
@@ -623,7 +623,7 @@ Symptoms: gateway logs flood with `refresh failed: 401` or `403`. Fix:
 # On the host Mac
 claude logout
 claude login                                                # opens browser, re-authenticates
-# Re-run §2.2 to regenerate /tmp/aide-anthropic-oauth.json
+# Re-run §2.2 to regenerate /tmp/caliber-anthropic-oauth.json
 # Delete the stale OAuth account in admin UI and re-add with the new JSON
 ```
 

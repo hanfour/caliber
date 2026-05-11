@@ -1,13 +1,13 @@
-# Deploy aide to Railway
+# Deploy Caliber to Railway
 
 Railway provisions Postgres + Redis natively as plugin services, so a
 typical deployment ends up with five Railway services in one project:
 
-- `aide-postgres` (Postgres plugin)
-- `aide-redis` (Redis plugin)
-- `aide-web`
-- `aide-api`
-- `aide-gateway`
+- `caliber-postgres` (Postgres plugin)
+- `caliber-redis` (Redis plugin)
+- `caliber-web`
+- `caliber-api`
+- `caliber-gateway`
 
 There's no single Railway template URL today (Railway's template
 system requires the maintainer to publish a template through their
@@ -50,8 +50,8 @@ the same project, each pointing at a different docker image.
 ```sh
 # Via Railway dashboard:
 # - New Service → Deploy from Docker image
-# - Image: ghcr.io/hanfour/aide-web:latest
-# - Service name: aide-web
+# - Image: ghcr.io/hanfour/caliber-web:latest
+# - Service name: caliber-web
 # - Port: 3000
 
 # Then set env vars (Variables tab):
@@ -67,12 +67,12 @@ GITHUB_CLIENT_SECRET=...
 BOOTSTRAP_SUPER_ADMIN_EMAIL=admin@example.com
 BOOTSTRAP_DEFAULT_ORG_SLUG=demo
 BOOTSTRAP_DEFAULT_ORG_NAME=Demo
-API_INTERNAL_URL=http://aide-api.railway.internal:3001
+API_INTERNAL_URL=http://caliber-api.railway.internal:3001
 ```
 
 ### API
 
-Same pattern, image `ghcr.io/hanfour/aide-api:latest`, port `3001`:
+Same pattern, image `ghcr.io/hanfour/caliber-api:latest`, port `3001`:
 
 ```sh
 NODE_ENV=production
@@ -95,7 +95,7 @@ needs to reach it via Railway's internal network.
 
 ### Gateway
 
-Image `ghcr.io/hanfour/aide-gateway:latest`, port `3002`:
+Image `ghcr.io/hanfour/caliber-gateway:latest`, port `3002`:
 
 ```sh
 NODE_ENV=production
@@ -130,11 +130,11 @@ Railway doesn't have a native one-shot job runner. Two options:
 **Option A — exec into the api container:**
 
 ```sh
-railway run --service aide-api -- node dist/migrate.js
+railway run --service caliber-api -- node dist/migrate.js
 ```
 
 **Option B — preDeploy on api service:**
-Set the `Build Command` on `aide-api` to:
+Set the `Build Command` on `caliber-api` to:
 ```
 node dist/migrate.js && node dist/server.js
 ```
@@ -159,11 +159,11 @@ evaluation traffic with the smallest-tier services:
 
 | Service | $/month |
 |---|---|
-| `aide-postgres` plugin | ~$5 |
-| `aide-redis` plugin | ~$5 |
-| `aide-web` | ~$5 |
-| `aide-api` | ~$5 |
-| `aide-gateway` | ~$5 |
+| `caliber-postgres` plugin | ~$5 |
+| `caliber-redis` plugin | ~$5 |
+| `caliber-web` | ~$5 |
+| `caliber-api` | ~$5 |
+| `caliber-gateway` | ~$5 |
 | **Total** | **~$25/month** |
 
 Resource-based billing means real cost depends on RPS / DB size.

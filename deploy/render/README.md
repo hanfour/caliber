@@ -1,13 +1,13 @@
-# Deploy aide to Render
+# Deploy Caliber to Render
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/hanfour/aide)
 
 Render Blueprint that provisions:
 
-- `aide-postgres` — managed Postgres 16 (`starter` plan, upgrade for prod)
-- `aide-web` — Next.js admin UI (public web service)
-- `aide-api` — Fastify + tRPC admin plane (private service)
-- `aide-gateway` — customer-facing `/v1/*` proxy (public web service)
+- `caliber-postgres` — managed Postgres 16 (`starter` plan, upgrade for prod)
+- `caliber-web` — Next.js admin UI (public web service)
+- `caliber-api` — Fastify + tRPC admin plane (private service)
+- `caliber-gateway` — customer-facing `/v1/*` proxy (public web service)
 
 **External Redis required** — Render does not ship a native managed
 Redis. Provision an Upstash instance (free tier) and paste the URL
@@ -31,8 +31,8 @@ during setup. See §1.
    safe default).
 3. After creation, copy the **Redis URL** that starts with
    `redis://default:<password>@...:<port>`.
-4. Hold onto this URL — you'll paste it into both `aide-api` and
-   `aide-gateway` during the Render setup.
+4. Hold onto this URL — you'll paste it into both `caliber-api` and
+   `caliber-gateway` during the Render setup.
 
 ## 2. Click Deploy to Render
 
@@ -53,7 +53,7 @@ pre-loaded. You'll be prompted to:
      `https://<your-render-web-host>/api/auth/callback/{google,github}`.
    - `BOOTSTRAP_SUPER_ADMIN_EMAIL` — the email that becomes
      super_admin on first sign-in.
-   - `REDIS_URL` (on both `aide-api` and `aide-gateway`) — paste the
+   - `REDIS_URL` (on both `caliber-api` and `caliber-gateway`) — paste the
      Upstash URL from §1.
 3. Click "Apply" and wait ~5-10 min for the initial build.
 
@@ -63,28 +63,28 @@ Render Blueprints don't ship a `migrate` job equivalent today. Run it
 manually after first deploy:
 
 ```sh
-# From the Render dashboard → aide-api → Shell:
+# From the Render dashboard → caliber-api → Shell:
 node dist/migrate.js
 ```
 
-Or if you prefer, configure a `preDeploy` hook on the `aide-api`
+Or if you prefer, configure a `preDeploy` hook on the `caliber-api`
 service via the dashboard — it'll run before each subsequent deploy.
 
 ## 4. Wire up your domain
 
 After first deploy, Render assigns hostnames like:
 
-- `aide-web-xyzw.onrender.com`
-- `aide-gateway-xyzw.onrender.com`
+- `caliber-web-xyzw.onrender.com`
+- `caliber-gateway-xyzw.onrender.com`
 
 You can either use these directly or attach your own domains.
 
 Then update the env vars (Render dashboard → service → Environment):
 
-- `aide-web` & `aide-api` & `aide-gateway`: set `NEXTAUTH_URL` to the
-  web hostname (`https://aide-web-xyzw.onrender.com` or your custom
+- `caliber-web` & `caliber-api` & `caliber-gateway`: set `NEXTAUTH_URL` to the
+  web hostname (`https://caliber-web-xyzw.onrender.com` or your custom
   domain).
-- `aide-gateway`: set `GATEWAY_BASE_URL` to the gateway hostname.
+- `caliber-gateway`: set `GATEWAY_BASE_URL` to the gateway hostname.
 - Re-register the OAuth redirect URIs with Google / GitHub under the
   new hostnames if they changed.
 
@@ -118,16 +118,16 @@ Same as the self-hosting guide:
 
 | Service | Plan | $/month |
 |---|---|---|
-| `aide-postgres` (starter) | Render | ~$7 |
-| `aide-web` (starter) | Render | ~$7 |
-| `aide-api` (starter, private) | Render | ~$7 |
-| `aide-gateway` (starter) | Render | ~$7 |
+| `caliber-postgres` (starter) | Render | ~$7 |
+| `caliber-web` (starter) | Render | ~$7 |
+| `caliber-api` (starter, private) | Render | ~$7 |
+| `caliber-gateway` (starter) | Render | ~$7 |
 | Upstash Redis (free tier) | external | $0 |
 | **Total** | | **~$28/month** |
 
 Plus your OpenAI / Anthropic API spend, which scales with usage.
 
-For production, upgrade `aide-postgres` to `standard` (1 GB RAM, $20/mo)
+For production, upgrade `caliber-postgres` to `standard` (1 GB RAM, $20/mo)
 and the web/gateway services to higher tiers based on RPS.
 
 ## Troubleshooting

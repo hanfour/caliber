@@ -7,7 +7,7 @@ export default defineConfig({
   dbCredentials: {
     url:
       process.env.DATABASE_URL ??
-      "postgresql://aide:aide_dev@localhost:5432/aide",
+      "postgresql://caliber:caliber_dev@localhost:5432/caliber",
   },
   strict: true,
   verbose: true,
