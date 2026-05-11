@@ -3,6 +3,7 @@ import {
   uuid,
   customType,
   timestamp,
+  smallint,
   index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -25,6 +26,7 @@ export const credentialVault = pgTable(
     nonce: bytea("nonce").notNull(),
     ciphertext: bytea("ciphertext").notNull(),
     authTag: bytea("auth_tag").notNull(),
+    cipherVersion: smallint("cipher_version").notNull().default(1),
     oauthExpiresAt: timestamp("oauth_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

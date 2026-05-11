@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, jsonb, customType, boolean, timestamp, index } from 'drizzle-orm/pg-core'
+import { pgTable, text, uuid, jsonb, customType, boolean, timestamp, smallint, index } from 'drizzle-orm/pg-core'
 import { organizations } from './org.js'
 import { usageLogs } from './usageLogs.js'
 
@@ -11,6 +11,7 @@ export const requestBodies = pgTable('request_bodies', {
   responseBodySealed: bytea('response_body_sealed').notNull(),
   thinkingBodySealed: bytea('thinking_body_sealed'),
   attemptErrorsSealed: bytea('attempt_errors_sealed'),
+  cipherVersion: smallint('cipher_version').notNull().default(1),
   requestParams: jsonb('request_params'),
   stopReason: text('stop_reason'),
   clientUserAgent: text('client_user_agent'),
