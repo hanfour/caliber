@@ -6,15 +6,17 @@ const MASTER_KEY = "a".repeat(64); // 32-byte hex string
 describe("encryptBody / decryptBody", () => {
   it("round-trips UTF-8 plaintext", () => {
     const plaintext = JSON.stringify({ message: "hello 測試 🚀" });
-    const sealed = encryptBody({
+    const enc = encryptBody({
       masterKeyHex: MASTER_KEY,
       requestId: "req-1",
       plaintext,
     });
+    expect(enc.version).toBe(2);
     const decrypted = decryptBody({
       masterKeyHex: MASTER_KEY,
       requestId: "req-1",
-      sealed,
+      sealed: enc.sealed,
+      version: enc.version,
     });
     expect(decrypted).toBe(plaintext);
   });
@@ -31,29 +33,39 @@ describe("encryptBody / decryptBody", () => {
       requestId: "r",
       plaintext,
     });
-    expect(a.equals(b)).toBe(false);
+    expect(a.sealed.equals(b.sealed)).toBe(false);
   });
 
   it("fails to decrypt with wrong requestId (salt mismatch)", () => {
-    const sealed = encryptBody({
+    const enc = encryptBody({
       masterKeyHex: MASTER_KEY,
       requestId: "right",
       plaintext: "x",
     });
     expect(() =>
-      decryptBody({ masterKeyHex: MASTER_KEY, requestId: "wrong", sealed }),
+      decryptBody({
+        masterKeyHex: MASTER_KEY,
+        requestId: "wrong",
+        sealed: enc.sealed,
+        version: 2,
+      }),
     ).toThrow();
   });
 
   it("fails to decrypt with wrong master key", () => {
-    const sealed = encryptBody({
+    const enc = encryptBody({
       masterKeyHex: MASTER_KEY,
       requestId: "r",
       plaintext: "x",
     });
     const WRONG = "b".repeat(64);
     expect(() =>
-      decryptBody({ masterKeyHex: WRONG, requestId: "r", sealed }),
+      decryptBody({
+        masterKeyHex: WRONG,
+        requestId: "r",
+        sealed: enc.sealed,
+        version: 2,
+      }),
     ).toThrow();
   });
 
@@ -63,29 +75,33 @@ describe("encryptBody / decryptBody", () => {
         masterKeyHex: MASTER_KEY,
         requestId: "r",
         sealed: Buffer.from("x"),
+        version: 2,
       }),
     ).toThrow(/too small/);
   });
 
   it("encrypt output format: nonce(12) || ciphertext || authTag(16)", () => {
-    const sealed = encryptBody({
+    const enc = encryptBody({
       masterKeyHex: MASTER_KEY,
       requestId: "r",
       plaintext: "hello",
     });
     // Min: 12 nonce + 1 ciphertext + 16 tag = 29
-    expect(sealed.length).toBeGreaterThanOrEqual(12 + 1 + 16);
+    expect(enc.sealed.length).toBeGreaterThanOrEqual(12 + 1 + 16);
   });
 
   it("different info (body vs credential) produces incompatible ciphertexts", () => {
-    // If a body-encrypted blob were mis-read as credential blob, decryption should fail.
-    // We can't test this directly here (no credential import), but round-trip with body API must succeed.
-    const sealed = encryptBody({
+    const enc = encryptBody({
       masterKeyHex: MASTER_KEY,
       requestId: "r",
       plaintext: "p",
     });
-    const r = decryptBody({ masterKeyHex: MASTER_KEY, requestId: "r", sealed });
+    const r = decryptBody({
+      masterKeyHex: MASTER_KEY,
+      requestId: "r",
+      sealed: enc.sealed,
+      version: 2,
+    });
     expect(r).toBe("p");
   });
 });
