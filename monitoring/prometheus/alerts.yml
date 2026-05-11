@@ -1,4 +1,4 @@
-# Prometheus alerting rules for aide.
+# Prometheus alerting rules for Caliber.
 #
 # Each alert maps to a runbook under docs/runbooks/. Severity tiers:
 #   critical — pages on-call immediately
@@ -7,47 +7,47 @@
 #              routing usually drops these)
 #
 # Labels:
-#   service    — which aide component (gateway / api)
+#   service    — which Caliber component (gateway / api)
 #   runbook    — relative path under docs/runbooks/ (Alertmanager
 #                templates can render this into the notification)
 
 groups:
 
 # ── Liveness ───────────────────────────────────────────────────────────────
-- name: aide-liveness
+- name: caliber-liveness
   interval: 30s
   rules:
     - alert: GatewayDown
-      expr: up{job="aide-gateway"} == 0
+      expr: up{job="caliber-gateway"} == 0
       for: 2m
       labels:
         severity: critical
         service: gateway
       annotations:
-        summary: "aide-gateway is unreachable"
-        description: "Prometheus has been unable to scrape aide-gateway for 2+ minutes. /v1/* traffic is failing."
+        summary: "caliber-gateway is unreachable"
+        description: "Prometheus has been unable to scrape caliber-gateway for 2+ minutes. /v1/* traffic is failing."
         runbook: "(none — check container / infra)"
 
     - alert: ApiDown
-      expr: up{job="aide-api"} == 0
+      expr: up{job="caliber-api"} == 0
       for: 2m
       labels:
         severity: critical
         service: api
       annotations:
-        summary: "aide-api is unreachable"
-        description: "Prometheus has been unable to scrape aide-api for 2+ minutes. Admin UI tRPC calls are failing."
+        summary: "caliber-api is unreachable"
+        description: "Prometheus has been unable to scrape caliber-api for 2+ minutes. Admin UI tRPC calls are failing."
         runbook: "(none — check container / infra)"
 
 # ── Rate limiting (PR #56) ────────────────────────────────────────────────
-- name: aide-rate-limit
+- name: caliber-rate-limit
   interval: 1m
   rules:
     - alert: GatewayRateLimitTripping
       # Sustained 429 rate above 1 rps on the gateway = something hot
       # is hitting the RPM cap.
       expr: |
-        sum(rate(http_requests_total{job="aide-gateway", status_code="429"}[5m])) > 1
+        sum(rate(http_requests_total{job="caliber-gateway", status_code="429"}[5m])) > 1
       for: 5m
       labels:
         severity: warning
@@ -73,12 +73,12 @@ groups:
         runbook: "docs/runbooks/rpm-limit-triggered.md (last section)"
 
 # ── Failover loop / scheduler ─────────────────────────────────────────────
-- name: aide-failover
+- name: caliber-failover
   interval: 1m
   rules:
     - alert: GatewayAllUpstreamsFailed
       expr: |
-        sum(rate(http_requests_total{job="aide-gateway", status_code="503"}[5m])) > 0.5
+        sum(rate(http_requests_total{job="caliber-gateway", status_code="503"}[5m])) > 0.5
       for: 5m
       labels:
         severity: critical
@@ -100,7 +100,7 @@ groups:
         description: "Every selected upstream account hit its concurrency cap. Either raise per-account `concurrency`, add more accounts, or lower client RPS."
 
 # ── OAuth refresh (Plan 5A) ───────────────────────────────────────────────
-- name: aide-oauth
+- name: caliber-oauth
   interval: 1m
   rules:
     - alert: GatewayOAuthAccountDead
@@ -116,7 +116,7 @@ groups:
         runbook: "(check upstream_accounts WHERE status='oauth_invalid'; re-onboard via Admin UI)"
 
 # ── BullMQ workers ────────────────────────────────────────────────────────
-- name: aide-workers
+- name: caliber-workers
   interval: 1m
   rules:
     - alert: GatewayQueueSaturated
@@ -154,7 +154,7 @@ groups:
         runbook: "docs/runbooks/evaluator-dlq.md"
 
 # ── Billing / cost ledger ─────────────────────────────────────────────────
-- name: aide-billing
+- name: caliber-billing
   interval: 5m
   rules:
     - alert: GatewayPricingMissing
@@ -212,7 +212,7 @@ groups:
         runbook: "docs/runbooks/llm-budget.md"
 
 # ── GDPR / retention ──────────────────────────────────────────────────────
-- name: aide-gdpr
+- name: caliber-gdpr
   interval: 5m
   rules:
     - alert: GatewayBodyPurgeLagging

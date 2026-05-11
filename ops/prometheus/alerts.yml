@@ -7,7 +7,7 @@
 #
 # Validate with `promtool check rules ops/prometheus/alerts.yml`.
 groups:
-  - name: aide-evaluator
+  - name: caliber-evaluator
     rules:
       - alert: EvaluatorDLQBacklog
         expr: gw_eval_dlq_count > 10
@@ -70,7 +70,7 @@ groups:
             and the prompt template.
           runbook: "docs/runbooks/facet-extraction.md"
 
-  - name: aide-body-capture
+  - name: caliber-body-capture
     rules:
       - alert: BodyPurgeLagging
         expr: gw_body_purge_lag_hours > 6
@@ -97,7 +97,7 @@ groups:
             obligations may be at risk. Page on-call and DPO.
           runbook: "docs/runbooks/body-purge-lag.md"
 
-  - name: aide-gdpr
+  - name: caliber-gdpr
     rules:
       # Proxy metric: we don't yet have a "request age (days)" gauge, so we
       # alert on executor failures instead. Replace with proper
@@ -129,7 +129,7 @@ groups:
             approved or denied and were auto-rejected. Notify DPO/legal.
           runbook: "docs/runbooks/gdpr-sla.md"
 
-  - name: aide-llm-cost
+  - name: caliber-llm-cost
     rules:
       - alert: LLMBudgetWarning
         expr: rate(gw_llm_budget_warn_total[1h]) > 0

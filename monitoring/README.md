@@ -1,4 +1,4 @@
-# aide monitoring + alerting
+# Caliber monitoring + alerting
 
 Drop-in Prometheus alert rules + scrape config that hook the
 runbooks under `docs/runbooks/` to actual signals.
@@ -32,7 +32,7 @@ runbooks under `docs/runbooks/` to actual signals.
    Reference `alerts.yml` from your `prometheus.yml`:
    ```yaml
    rule_files:
-     - /etc/prometheus/aide-alerts.yml
+     - /etc/prometheus/caliber-alerts.yml
    ```
    Reload Prometheus (`SIGHUP` or `/-/reload`).
 
@@ -40,8 +40,8 @@ runbooks under `docs/runbooks/` to actual signals.
    ```sh
    curl -s http://prometheus:9090/api/v1/rules | jq '.data.groups[].name'
    ```
-   Should list `aide-liveness`, `aide-rate-limit`, `aide-failover`,
-   `aide-oauth`, `aide-workers`, `aide-billing`, `aide-gdpr`.
+   Should list `caliber-liveness`, `caliber-rate-limit`, `caliber-failover`,
+   `caliber-oauth`, `caliber-workers`, `caliber-billing`, `caliber-gdpr`.
 
 5. **Wire Alertmanager → notification channel**
    Recommended routing:
@@ -63,13 +63,13 @@ runbooks under `docs/runbooks/` to actual signals.
 
 ## Known gaps
 
-These alerts can't be expressed without infrastructure outside aide
+These alerts can't be expressed without infrastructure outside Caliber
 itself:
 
 - **Backup freshness** — runbook prescribes daily pg_dumpall but no
   alert if a backup is missed; needs a node-exporter textfile collector
   on the backup host (write a sentinel file after each successful
-  backup; alert if `node_textfile_mtime_seconds{file="aide-backup"}`
+  backup; alert if `node_textfile_mtime_seconds{file="caliber-backup"}`
   is more than 25 hours old).
 - **Cert expiry** — your reverse proxy's TLS cert. Use Prometheus
   blackbox-exporter (`probe_ssl_earliest_cert_expiry`) on the public
