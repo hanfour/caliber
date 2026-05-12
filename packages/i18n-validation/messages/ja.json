@@ -1,0 +1,66 @@
+{
+  "validation": {
+    "codes": {
+      "invalid_type": "{expected} が必要ですが、{received} を受け取りました",
+      "required": "必須項目です",
+      "invalid_literal": "{expected} が必要です",
+      "invalid_union": "入力形式が正しくありません",
+      "invalid_union_discriminator": "識別値が正しくありません。{options} のいずれかを指定してください",
+      "invalid_enum_value": "{options} のいずれかが必要ですが、「{received}」を受け取りました",
+      "unrecognized_keys": "未定義のキーが含まれています: {keys}",
+      "invalid_arguments": "関数の引数が正しくありません",
+      "invalid_return_type": "関数の戻り値が正しくありません",
+      "invalid_date": "日付の形式が正しくありません",
+      "not_multiple_of": "{multipleOf} の倍数である必要があります",
+      "not_finite": "有限の数値である必要があります",
+      "invalid_intersection_types": "交差型を統合できませんでした",
+      "custom": "入力形式が正しくありません",
+      "invalid_string": {
+        "email": "有効なメールアドレスを入力してください",
+        "url": "有効な URL を入力してください",
+        "uuid": "UUID の形式が正しくありません",
+        "regex": "形式が正しくありません",
+        "datetime": "日時の形式が正しくありません",
+        "cuid": "CUID の形式が正しくありません",
+        "default": "文字列の形式が正しくありません"
+      },
+      "too_small": {
+        "string": {
+          "inclusive": "{minimum} 文字以上で入力してください",
+          "exclusive": "{minimum} 文字より多く入力してください"
+        },
+        "number": {
+          "inclusive": "{minimum} 以上の値を入力してください",
+          "exclusive": "{minimum} より大きい値を入力してください"
+        },
+        "array": {
+          "inclusive": "{minimum} 個以上の項目が必要です",
+          "exclusive": "{minimum} 個より多くの項目が必要です"
+        },
+        "date": {
+          "inclusive": "{minimum} 以降の日付を指定してください",
+          "exclusive": "{minimum} より後の日付を指定してください"
+        }
+      },
+      "too_big": {
+        "string": {
+          "inclusive": "{maximum} 文字以下で入力してください",
+          "exclusive": "{maximum} 文字未満で入力してください"
+        },
+        "number": {
+          "inclusive": "{maximum} 以下の値を入力してください",
+          "exclusive": "{maximum} 未満の値を入力してください"
+        },
+        "array": {
+          "inclusive": "{maximum} 個以下の項目にしてください",
+          "exclusive": "{maximum} 個未満の項目にしてください"
+        },
+        "date": {
+          "inclusive": "{maximum} 以前の日付を指定してください",
+          "exclusive": "{maximum} より前の日付を指定してください"
+        }
+      }
+    },
+    "custom": {}
+  }
+}
