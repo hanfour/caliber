@@ -1,0 +1,66 @@
+{
+  "validation": {
+    "codes": {
+      "invalid_type": "應為 {expected}，但收到 {received}",
+      "required": "必填",
+      "invalid_literal": "應為 {expected}",
+      "invalid_union": "輸入格式不正確",
+      "invalid_union_discriminator": "辨識值不正確，應為 {options} 之一",
+      "invalid_enum_value": "應為 {options} 之一，但收到「{received}」",
+      "unrecognized_keys": "物件包含未知欄位：{keys}",
+      "invalid_arguments": "函式參數不正確",
+      "invalid_return_type": "函式回傳值不正確",
+      "invalid_date": "日期格式不正確",
+      "not_multiple_of": "必須為 {multipleOf} 的倍數",
+      "not_finite": "數值必須為有限數",
+      "invalid_intersection_types": "交集型別無法合併",
+      "custom": "輸入格式不正確",
+      "invalid_string": {
+        "email": "請輸入有效的電子郵件地址",
+        "url": "請輸入有效的網址",
+        "uuid": "UUID 格式不正確",
+        "regex": "格式不正確",
+        "datetime": "日期時間格式不正確",
+        "cuid": "CUID 格式不正確",
+        "default": "字串格式不正確"
+      },
+      "too_small": {
+        "string": {
+          "inclusive": "至少需 {minimum} 個字元",
+          "exclusive": "需多於 {minimum} 個字元"
+        },
+        "number": {
+          "inclusive": "需大於或等於 {minimum}",
+          "exclusive": "需大於 {minimum}"
+        },
+        "array": {
+          "inclusive": "至少需 {minimum} 個項目",
+          "exclusive": "需多於 {minimum} 個項目"
+        },
+        "date": {
+          "inclusive": "日期需於 {minimum} 之後（含當日）",
+          "exclusive": "日期需於 {minimum} 之後"
+        }
+      },
+      "too_big": {
+        "string": {
+          "inclusive": "至多 {maximum} 個字元",
+          "exclusive": "少於 {maximum} 個字元"
+        },
+        "number": {
+          "inclusive": "需小於或等於 {maximum}",
+          "exclusive": "需小於 {maximum}"
+        },
+        "array": {
+          "inclusive": "至多 {maximum} 個項目",
+          "exclusive": "少於 {maximum} 個項目"
+        },
+        "date": {
+          "inclusive": "日期需於 {maximum} 之前（含當日）",
+          "exclusive": "日期需於 {maximum} 之前"
+        }
+      }
+    },
+    "custom": {}
+  }
+}

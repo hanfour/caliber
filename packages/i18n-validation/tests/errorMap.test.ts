@@ -147,4 +147,52 @@ describe("createErrorMap", () => {
       expect(out.message).toBe("Unrecognised key(s) in object: foo, bar");
     });
   });
+
+  describe("zh-TW translations", () => {
+    it("required field", async () => {
+      const messages = await loadValidationMessages("zh-TW");
+      const map = createErrorMap(messages);
+      const out = map(
+        {
+          code: z.ZodIssueCode.invalid_type,
+          expected: "string",
+          received: "undefined",
+          path: ["name"],
+        },
+        { defaultError: "x", data: undefined },
+      );
+      expect(out.message).toBe("必填");
+    });
+
+    it("too_small string inclusive 1", async () => {
+      const messages = await loadValidationMessages("zh-TW");
+      const map = createErrorMap(messages);
+      const out = map(
+        {
+          code: z.ZodIssueCode.too_small,
+          type: "string",
+          minimum: 1,
+          inclusive: true,
+          exact: false,
+          path: ["name"],
+        },
+        { defaultError: "x", data: undefined },
+      );
+      expect(out.message).toBe("至少需 1 個字元");
+    });
+
+    it("invalid_string.email", async () => {
+      const messages = await loadValidationMessages("zh-TW");
+      const map = createErrorMap(messages);
+      const out = map(
+        {
+          code: z.ZodIssueCode.invalid_string,
+          validation: "email",
+          path: ["email"],
+        },
+        { defaultError: "x", data: undefined },
+      );
+      expect(out.message).toBe("請輸入有效的電子郵件地址");
+    });
+  });
 });
