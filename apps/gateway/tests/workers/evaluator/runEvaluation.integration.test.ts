@@ -239,12 +239,12 @@ async function seedRequestBody(requestId: string): Promise<void> {
     stop_reason: "end_turn",
   });
 
-  const requestBodySealed = encryptBody({
+  const requestBodyEnc = encryptBody({
     masterKeyHex: TEST_MASTER_KEY,
     requestId,
     plaintext: requestBodyStr,
   });
-  const responseBodySealed = encryptBody({
+  const responseBodyEnc = encryptBody({
     masterKeyHex: TEST_MASTER_KEY,
     requestId,
     plaintext: responseBodyStr,
@@ -253,8 +253,9 @@ async function seedRequestBody(requestId: string): Promise<void> {
   await db.insert(requestBodies).values({
     requestId,
     orgId,
-    requestBodySealed,
-    responseBodySealed,
+    requestBodySealed: requestBodyEnc.sealed,
+    responseBodySealed: responseBodyEnc.sealed,
+    cipherVersion: requestBodyEnc.version,
     stopReason: "end_turn",
     clientUserAgent: "test-agent/1.0",
     clientSessionId: null,

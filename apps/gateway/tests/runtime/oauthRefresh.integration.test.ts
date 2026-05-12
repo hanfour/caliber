@@ -153,6 +153,7 @@ async function seedVault(
     nonce: sealed.nonce,
     ciphertext: sealed.ciphertext,
     authTag: sealed.authTag,
+    cipherVersion: sealed.version,
     oauthExpiresAt: credential.expiresAt,
   });
 }
@@ -557,6 +558,7 @@ describe("maybeRefreshOAuth", () => {
           nonce: sealed.nonce,
           ciphertext: sealed.ciphertext,
           authTag: sealed.authTag,
+          cipherVersion: sealed.version,
           oauthExpiresAt: freshExpiry,
           rotatedAt: new Date(),
         })
@@ -692,6 +694,7 @@ describe("maybeRefreshOAuth", () => {
         ciphertext: vaultRow!.ciphertext,
         authTag: vaultRow!.authTag,
       },
+      version: 2,
     });
     const parsed = JSON.parse(plaintext) as Record<string, unknown>;
     expect(parsed.access_token).toBe("e2e-access-token");
@@ -968,6 +971,7 @@ describe("maybeRefreshOAuth", () => {
           ciphertext: vaultRow!.ciphertext,
           authTag: vaultRow!.authTag,
         },
+        version: 2,
       }),
     );
     expect(decrypted.access_token).toBe("fresh-from-keychain");

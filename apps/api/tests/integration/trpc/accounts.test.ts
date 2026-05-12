@@ -194,6 +194,7 @@ describe("accounts router", () => {
         ciphertext: vault1!.ciphertext,
         authTag: vault1!.authTag,
       },
+      version: 2,
     });
     // accounts.create wraps the raw UI-supplied credential with the gateway
     // envelope ({type, api_key}) so resolveCredential can discriminate on
@@ -270,6 +271,7 @@ describe("accounts router", () => {
         ciphertext: vault!.ciphertext,
         authTag: vault!.authTag,
       },
+      version: 2,
     });
     const decoded = JSON.parse(plain);
     // Stored as ISO, not as the unix-ms integer the user pasted —
@@ -317,6 +319,7 @@ describe("accounts router", () => {
         ciphertext: vault!.ciphertext,
         authTag: vault!.authTag,
       },
+      version: 2,
     });
     expect(JSON.parse(plain).expires_at).toBe(expectedIso);
   });
@@ -359,6 +362,7 @@ describe("accounts router", () => {
         ciphertext: vault!.ciphertext,
         authTag: vault!.authTag,
       },
+      version: 2,
     });
     expect(JSON.parse(plain)).toEqual({
       type: "api_key",
@@ -543,6 +547,7 @@ describe("accounts router", () => {
         ciphertext: after!.ciphertext,
         authTag: after!.authTag,
       },
+      version: 2,
     });
     // rotate wraps the same way create does — see buildCredentialPlaintext.
     expect(JSON.parse(decrypted)).toEqual({
