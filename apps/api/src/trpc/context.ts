@@ -7,6 +7,25 @@ import type { Locale } from "@caliber/i18n-validation";
 import { LOCALE_COOKIE, resolveLocale } from "@caliber/i18n-validation";
 import type { EvaluatorQueue } from "./routers/reports.js";
 
+// Parse a single cookie value out of the raw `Cookie:` header. Implemented
+// inline rather than relying on @fastify/cookie's `req.cookies` type
+// augmentation because this file is also reachable from `apps/web`'s
+// typecheck (via the tRPC AppRouter type graph) where `@fastify/cookie`
+// isn't installed and its module augmentation isn't visible.
+function readRawCookie(
+  headerValue: string | undefined,
+  name: string,
+): string | undefined {
+  if (!headerValue) return undefined;
+  for (const pair of headerValue.split(";")) {
+    const eq = pair.indexOf("=");
+    if (eq < 0) continue;
+    if (pair.slice(0, eq).trim() !== name) continue;
+    return decodeURIComponent(pair.slice(eq + 1).trim());
+  }
+  return undefined;
+}
+
 // Fastify module augmentation for decorators set up by the api plugins.
 // Declared here (in addition to plugins/auth.ts) so that downstream consumers
 // of `@caliber/api/trpc` — which only import this file's type graph — pick it up.
@@ -77,7 +96,7 @@ export function createContextFactory(deps: CreateContextDeps) {
       perm: opts.req.perm,
       reqId: opts.req.id,
       locale: resolveLocale({
-        cookie: opts.req.cookies[LOCALE_COOKIE],
+        cookie: readRawCookie(opts.req.headers.cookie, LOCALE_COOKIE),
         acceptLanguage: opts.req.headers["accept-language"] ?? null,
       }),
       env: deps.env,

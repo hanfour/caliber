@@ -4,7 +4,7 @@ import { initTRPC } from "@trpc/server";
 import {
   runWithLocale,
   setGlobalLocaleErrorMap,
-} from "@caliber/i18n-validation";
+} from "@caliber/i18n-validation/server";
 
 // Lightweight integration: bypass Fastify and exercise the same code path
 // (Zod input parse → global errorMap → AsyncLocalStorage lookup). We do

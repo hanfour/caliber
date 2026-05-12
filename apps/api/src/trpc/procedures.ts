@@ -8,7 +8,8 @@ import type { z } from "zod";
 import type { Redis } from "ioredis";
 import { can, type Action } from "@caliber/auth";
 import type { ServerEnv } from "@caliber/config";
-import { runWithLocale, type Locale } from "@caliber/i18n-validation";
+import { runWithLocale } from "@caliber/i18n-validation/server";
+import type { Locale } from "@caliber/i18n-validation";
 import type { TrpcContext, TrpcLogger } from "./context.js";
 import type { EvaluatorQueue } from "./routers/reports.js";
 
