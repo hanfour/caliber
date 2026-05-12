@@ -79,10 +79,10 @@ Dashboards assume the Caliber gateway emits these Prometheus metrics. Missing me
 - `gw_eval_llm_failed_total{reason}` — LLM failure counter with reason label
 - `gw_eval_llm_parse_failed_total` — JSON / schema parse failure counter
 - `gw_eval_dlq_count` — DLQ depth gauge
-- `gw_eval_llm_cost_usd_total` — cumulative evaluator cost counter
+- `gw_eval_llm_cost_usd` — cumulative evaluator cost counter
 - `gw_facet_extract_total{org_id, result}` — facet extraction counter
 - `gw_facet_extract_duration_ms_bucket{org_id}` — facet duration histogram
-- `gw_facet_cache_hit_total{org_id, result}` — facet cache hit/miss
+- `gw_facet_cache_hit_total{org_id}` — facet cache hits (misses inferred as `gw_facet_extract_total − gw_facet_cache_hit_total`)
 - `gw_llm_cost_usd_total{org_id, event_type, model}` — per-org cost counter
 
 **GDPR:**
@@ -117,7 +117,7 @@ The `org_id` label is only present on the evaluator's facet + cost metrics. Body
 | Parse failures | `sum(rate(gw_eval_llm_parse_failed_total[5m]))` |
 | Failed by reason | `sum by (reason) (rate(gw_eval_llm_failed_total[5m]))` |
 | DLQ depth | `gw_eval_dlq_count` |
-| Evaluator LLM cost (USD/hour) | `sum(rate(gw_eval_llm_cost_usd_total[1h])) * 3600` |
+| Evaluator LLM cost (USD/hour) | `increase(gw_eval_llm_cost_usd[1h])` |
 | Facet extraction by result | `sum by (result) (rate(gw_facet_extract_total{org_id=~"$org_id"}[5m]))` |
 | Facet duration heatmap | `sum by (le) (rate(gw_facet_extract_duration_ms_bucket{org_id=~"$org_id"}[5m]))` |
 | Facet cache hit rate | hit / total over `gw_facet_cache_hit_total{org_id=~"$org_id"}` |
