@@ -8,7 +8,7 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "description": "GDPR delete-request executions per hour (5-min cron).",
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
@@ -16,7 +16,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "sum(rate(gw_gdpr_delete_executed_total[1h]))",
           "legendFormat": "executions/sec",
           "refId": "A"
@@ -26,7 +26,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "description": "Bodies and reports deleted by the GDPR cron, both expressed as a rate.",
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
@@ -34,13 +34,13 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "sum(rate(gw_gdpr_bodies_deleted_total[1h]))",
           "legendFormat": "bodies",
           "refId": "A"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "sum(rate(gw_gdpr_reports_deleted_total[1h]))",
           "legendFormat": "reports",
           "refId": "B"
@@ -50,7 +50,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "description": "GDPR delete requests auto-rejected after 30-day SLA expiry (daily cron).",
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
@@ -58,7 +58,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "sum(rate(gw_gdpr_auto_rejected_total[24h]))",
           "legendFormat": "auto-rejected",
           "refId": "A"
@@ -68,7 +68,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "description": "GDPR delete requests that failed during execution.",
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
@@ -76,7 +76,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "sum(rate(gw_gdpr_failures_total[1h]))",
           "legendFormat": "failures/sec",
           "refId": "A"
@@ -89,13 +89,29 @@
   "refresh": "1m",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["aide", "gdpr", "plan-4c"],
-  "templating": { "list": [] },
+  "tags": ["caliber", "gateway", "gdpr"],
+  "folderUid": "caliber",
+  "folderTitle": "Caliber",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "selected": false, "text": "default", "value": "default" },
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false
+      }
+    ]
+  },
   "time": { "from": "now-24h", "to": "now" },
   "timepicker": {},
   "timezone": "utc",
-  "title": "AIDE — GDPR",
-  "uid": "aide-gdpr",
-  "version": 1,
+  "title": "Caliber — GDPR",
+  "uid": "caliber-gdpr",
+  "version": 2,
   "weekStart": ""
 }
