@@ -35,6 +35,7 @@ async function callerFor(
     user: { id: userId, email },
     perm,
     reqId: "test",
+    locale: "en",
     env,
     redis: defaultTestRedis,
     ipAddress: null,

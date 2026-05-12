@@ -60,6 +60,9 @@ importers:
       '@caliber/gateway-core':
         specifier: workspace:*
         version: link:../../packages/gateway-core
+      '@caliber/i18n-validation':
+        specifier: workspace:*
+        version: link:../../packages/i18n-validation
       '@fastify/cookie':
         specifier: ^11.0.0
         version: 11.0.2
