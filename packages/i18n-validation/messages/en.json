@@ -1,0 +1,9 @@
+{
+  "validation": {
+    "codes": {
+      "invalid_type": "Expected {expected}, received {received}",
+      "required": "Required"
+    },
+    "custom": {}
+  }
+}
