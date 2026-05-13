@@ -61,6 +61,23 @@
         }
       }
     },
-    "custom": {}
+    "custom": {
+      "shared": {
+        "nameRequired": "Name is required",
+        "invalidId": "Invalid id"
+      },
+      "evaluator": {
+        "versionRequired": "Version is required",
+        "definitionRequired": "Definition is required",
+        "rubricMustBeValidJson": "Must be valid JSON",
+        "facetExtractionRequiresLlm": "Facet extraction requires LLM evaluation to be enabled first",
+        "chooseFacetModel": "Choose a facet model"
+      },
+      "accounts": {
+        "credentialsRequired": "Credentials are required",
+        "teamRequired": "Pick a team",
+        "oauthJsonInvalid": "OAuth credentials must be valid JSON"
+      }
+    }
   }
 }

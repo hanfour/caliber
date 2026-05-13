@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslatedZodResolver } from "@/lib/i18n/useTranslatedZodResolver";
 import { z } from "zod";
 import { AlertTriangle, Copy } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +25,7 @@ const SELECT_CLASS =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 
 const schema = z.object({
-  name: z.string().min(1, "Name is required").max(255),
+  name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
   // Empty string means "— Any team —"; server treats undefined as null.
   teamId: z.string().uuid().optional().or(z.literal("")),
 });
@@ -71,7 +71,7 @@ export function AdminIssueDialog({
     reset,
     formState: { errors },
   } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: useTranslatedZodResolver(schema),
     defaultValues: { name: "", teamId: "" },
   });
 

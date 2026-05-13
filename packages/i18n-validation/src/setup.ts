@@ -24,6 +24,19 @@ function getMap(locale: Locale): ReturnType<typeof createErrorMap> | null {
 }
 
 /**
+ * Synchronous accessor for the eagerly-loaded messages cache. Returns the
+ * requested locale, falls back to DEFAULT_LOCALE, or returns null if
+ * `setGlobalLocaleErrorMap()` hasn't completed yet. Used by the tRPC
+ * errorFormatter (which runs synchronously at response time) to translate
+ * `validation.*` keys that bypass Zod's global errorMap.
+ */
+export function getValidationMessagesSync(
+  locale: Locale,
+): ValidationMessages | null {
+  return messages.get(locale) ?? messages.get(DEFAULT_LOCALE) ?? null;
+}
+
+/**
  * Eagerly load every locale catalogue and install a global Zod errorMap
  * that, at issue-time, dispatches to the locale stored in AsyncLocalStorage
  * (or DEFAULT_LOCALE if outside any scope).

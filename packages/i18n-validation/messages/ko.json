@@ -61,6 +61,23 @@
         }
       }
     },
-    "custom": {}
+    "custom": {
+      "shared": {
+        "nameRequired": "이름은 필수 항목입니다",
+        "invalidId": "ID 형식이 올바르지 않습니다"
+      },
+      "evaluator": {
+        "versionRequired": "버전은 필수 항목입니다",
+        "definitionRequired": "정의는 필수 항목입니다",
+        "rubricMustBeValidJson": "유효한 JSON 이어야 합니다",
+        "facetExtractionRequiresLlm": "패싯 추출에는 LLM 평가를 먼저 활성화해야 합니다",
+        "chooseFacetModel": "패싯 모델을 선택하세요"
+      },
+      "accounts": {
+        "credentialsRequired": "인증 정보는 필수 항목입니다",
+        "teamRequired": "팀을 선택하세요",
+        "oauthJsonInvalid": "OAuth 인증 정보는 유효한 JSON 이어야 합니다"
+      }
+    }
   }
 }

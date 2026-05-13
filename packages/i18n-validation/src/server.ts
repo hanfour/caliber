@@ -4,4 +4,9 @@
 // webpack rejects in client bundles.
 
 export { runWithLocale, currentLocale } from "./runtime.js";
-export { setGlobalLocaleErrorMap } from "./setup.js";
+export {
+  setGlobalLocaleErrorMap,
+  getValidationMessagesSync,
+} from "./setup.js";
+export { translateValidationKey } from "./translate.js";
+export { DEFAULT_LOCALE, isLocale, type Locale } from "./locales.js";

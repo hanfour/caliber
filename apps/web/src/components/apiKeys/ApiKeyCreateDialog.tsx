@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslatedZodResolver } from "@/lib/i18n/useTranslatedZodResolver";
 import { z } from "zod";
 import { AlertTriangle, Copy } from "lucide-react";
 import { toast } from "sonner";
@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 
 const schema = z.object({
-  name: z.string().min(1, "Name is required").max(255),
+  name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -51,7 +51,7 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
     reset,
     formState: { errors },
   } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: useTranslatedZodResolver(schema),
     defaultValues: { name: "" },
   });
 

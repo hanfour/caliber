@@ -5,7 +5,13 @@ import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Redis } from "ioredis";
 import { Queue } from "bullmq";
 import { parseServerEnv } from "@caliber/config/env";
-import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
+import {
+  setGlobalLocaleErrorMap,
+  getValidationMessagesSync,
+  translateValidationKey,
+  DEFAULT_LOCALE,
+  type Locale,
+} from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";
@@ -128,6 +134,72 @@ export async function buildServer() {
         trpcOptions: {
           router: appRouter,
           createContext: createContextFactory({ env, redis, evaluatorQueue }),
+          // Translate `validation.*`-prefixed key messages in Zod issues
+          // before they leave the server. Required because Zod's
+          // `makeIssue()` short-circuits the global errorMap whenever a
+          // schema supplies an explicit `message` (e.g.
+          // `.min(1, "validation.custom.shared.nameRequired")`), so the
+          // raw key would otherwise reach the wire. The wrapper is
+          // idempotent — pass-through for non-Zod errors or when the
+          // messages cache hasn't loaded yet.
+          errorFormatter: ({
+            shape,
+            ctx,
+          }: {
+            shape: {
+              message?: string;
+              data?: unknown;
+              [k: string]: unknown;
+            };
+            ctx?: { locale?: Locale } | undefined;
+          }) => {
+            const locale = ctx?.locale ?? DEFAULT_LOCALE;
+            const messages = getValidationMessagesSync(locale);
+            if (!messages) return shape;
+
+            const flattened = shape.data as
+              | {
+                  zodError?: {
+                    fieldErrors?: Record<string, string[] | undefined>;
+                    formErrors?: string[];
+                  };
+                  [k: string]: unknown;
+                }
+              | undefined;
+
+            let translatedData: unknown = shape.data;
+            if (flattened?.zodError) {
+              const fe = flattened.zodError.fieldErrors ?? {};
+              const newFieldErrors: Record<string, string[]> = {};
+              for (const [field, errs] of Object.entries(fe)) {
+                newFieldErrors[field] = (errs ?? []).map((m) =>
+                  translateValidationKey(messages, m),
+                );
+              }
+              const newFormErrors = (flattened.zodError.formErrors ?? []).map(
+                (m) => translateValidationKey(messages, m),
+              );
+              translatedData = {
+                ...flattened,
+                zodError: {
+                  ...flattened.zodError,
+                  fieldErrors: newFieldErrors,
+                  formErrors: newFormErrors,
+                },
+              };
+            }
+
+            const translatedMessage =
+              typeof shape.message === "string"
+                ? translateValidationKey(messages, shape.message)
+                : shape.message;
+
+            return {
+              ...shape,
+              message: translatedMessage,
+              data: translatedData,
+            };
+          },
           onError: ({
             error,
             path,

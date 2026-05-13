@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslatedZodResolver } from "@/lib/i18n/useTranslatedZodResolver";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -34,19 +34,22 @@ function isValidJson(s: string): boolean {
 
 const schema = z
   .object({
-    name: z.string().min(1, "Name is required").max(255),
+    name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
     platform: z.enum(["anthropic", "openai"]),
     type: z.enum(["api_key", "oauth"]),
     scopeType: z.enum(["org", "team"]),
     teamId: z.string().uuid().optional().or(z.literal("")),
-    credentials: z.string().min(1, "Credentials are required").max(100_000),
+    credentials: z
+      .string()
+      .min(1, "validation.custom.accounts.credentialsRequired")
+      .max(100_000),
   })
   .refine(
     (v) => v.scopeType === "org" || (v.teamId !== undefined && v.teamId !== ""),
-    { message: "Pick a team", path: ["teamId"] },
+    { message: "validation.custom.accounts.teamRequired", path: ["teamId"] },
   )
   .refine((v) => v.type !== "oauth" || isValidJson(v.credentials), {
-    message: "OAuth credentials must be valid JSON",
+    message: "validation.custom.accounts.oauthJsonInvalid",
     path: ["credentials"],
   });
 // Note: the OpenAI + oauth combo is unreachable through this form — the
@@ -98,7 +101,7 @@ export function AccountCreateForm({ orgId }: Props) {
     clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: useTranslatedZodResolver(schema),
     defaultValues: {
       platform: "anthropic",
       type: "api_key",

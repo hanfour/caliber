@@ -16,6 +16,8 @@ export {
 
 export { createErrorMap } from "./errorMap.js";
 
+export { translateValidationKey } from "./translate.js";
+
 // runWithLocale / currentLocale / setGlobalLocaleErrorMap are exported
 // from "@caliber/i18n-validation/server" — the Node-only subpath.
 // Client bundles MUST NOT import from /server.

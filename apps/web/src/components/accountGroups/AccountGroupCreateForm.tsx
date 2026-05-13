@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslatedZodResolver } from "@/lib/i18n/useTranslatedZodResolver";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -19,7 +19,7 @@ const TEXTAREA_CLASS =
   "flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 
 const schema = z.object({
-  name: z.string().min(1, "Name is required").max(255),
+  name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
   description: z.string().max(10_000).optional().or(z.literal("")),
   platform: z.enum(["anthropic", "openai"]),
   rateMultiplier: z.coerce.number().positive().max(10000),
@@ -64,7 +64,7 @@ export function AccountGroupCreateForm({ orgId }: Props) {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: useTranslatedZodResolver(schema),
     defaultValues: {
       platform: "openai",
       rateMultiplier: 1,

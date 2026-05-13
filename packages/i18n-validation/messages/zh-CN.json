@@ -61,6 +61,23 @@
         }
       }
     },
-    "custom": {}
+    "custom": {
+      "shared": {
+        "nameRequired": "名称为必填",
+        "invalidId": "标识符格式不正确"
+      },
+      "evaluator": {
+        "versionRequired": "版本为必填",
+        "definitionRequired": "定义为必填",
+        "rubricMustBeValidJson": "必须为有效的 JSON",
+        "facetExtractionRequiresLlm": "面向提取需先启用 LLM 评估",
+        "chooseFacetModel": "请选择面向模型"
+      },
+      "accounts": {
+        "credentialsRequired": "凭证为必填",
+        "teamRequired": "请选择团队",
+        "oauthJsonInvalid": "OAuth 凭证必须为有效的 JSON"
+      }
+    }
   }
 }

@@ -61,6 +61,23 @@
         }
       }
     },
-    "custom": {}
+    "custom": {
+      "shared": {
+        "nameRequired": "名稱為必填",
+        "invalidId": "識別碼格式不正確"
+      },
+      "evaluator": {
+        "versionRequired": "版本為必填",
+        "definitionRequired": "定義為必填",
+        "rubricMustBeValidJson": "必須為有效的 JSON",
+        "facetExtractionRequiresLlm": "面向擷取需先啟用 LLM 評估",
+        "chooseFacetModel": "請選擇面向模型"
+      },
+      "accounts": {
+        "credentialsRequired": "憑證為必填",
+        "teamRequired": "請選擇團隊",
+        "oauthJsonInvalid": "OAuth 憑證必須為有效的 JSON"
+      }
+    }
   }
 }

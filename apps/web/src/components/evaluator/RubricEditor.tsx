@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useTranslatedZodResolver } from "@/lib/i18n/useTranslatedZodResolver";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -34,12 +34,12 @@ const TEXTAREA_CLASS =
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 const formSchema = z.object({
-  name: z.string().min(1, "Name is required").max(200),
+  name: z.string().min(1, "validation.custom.shared.nameRequired").max(200),
   description: z.string().max(1000).optional(),
-  version: z.string().min(1, "Version is required").max(50),
+  version: z.string().min(1, "validation.custom.evaluator.versionRequired").max(50),
   definitionJson: z
     .string()
-    .min(1, "Definition is required")
+    .min(1, "validation.custom.evaluator.definitionRequired")
     .superRefine((val, ctx) => {
       let parsed: unknown;
       try {
@@ -47,7 +47,7 @@ const formSchema = z.object({
       } catch {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Must be valid JSON",
+          message: "validation.custom.evaluator.rubricMustBeValidJson",
         });
         return;
       }
@@ -103,7 +103,7 @@ export function RubricEditor({
     setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: useTranslatedZodResolver(formSchema),
     defaultValues: {
       name: "",
       description: "",
