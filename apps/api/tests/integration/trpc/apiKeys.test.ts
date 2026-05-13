@@ -38,6 +38,7 @@ async function callerFor(opts: {
     user: { id: opts.userId, email: opts.email ?? "x@x.test" },
     perm,
     reqId: "test",
+    locale: "en",
     env: opts.env ?? defaultTestEnv,
     redis: opts.redis,
     ipAddress: opts.ipAddress ?? null,

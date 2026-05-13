@@ -5,6 +5,7 @@ import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
 import { Providers } from './providers'
 import { ThemeProvider } from '@/components/theme-provider'
+import { ValidationErrorMapProvider } from '@/lib/i18n/ValidationErrorMapProvider'
 
 export const metadata = {
   title: 'Caliber',
@@ -18,10 +19,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang={locale} suppressHydrationWarning>
       <body className="min-h-screen bg-background text-foreground antialiased font-sans">
         <NextIntlClientProvider locale={locale} messages={messages}>
-          <ThemeProvider>
-            <Providers>{children}</Providers>
-            <Toaster />
-          </ThemeProvider>
+          <ValidationErrorMapProvider>
+            <ThemeProvider>
+              <Providers>{children}</Providers>
+              <Toaster />
+            </ThemeProvider>
+          </ValidationErrorMapProvider>
         </NextIntlClientProvider>
       </body>
     </html>

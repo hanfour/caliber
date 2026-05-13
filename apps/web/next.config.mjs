@@ -13,7 +13,7 @@ const nextConfig = {
   // tracing (the nearest lockfile is two levels up). Pin it explicitly so the
   // standalone bundle contains the full workspace node_modules it needs.
   outputFileTracingRoot: path.join(here, '..', '..'),
-  transpilePackages: ['@caliber/auth', '@caliber/config', '@caliber/db', '@caliber/api-types'],
+  transpilePackages: ['@caliber/auth', '@caliber/config', '@caliber/db', '@caliber/api-types', '@caliber/i18n-validation'],
   async rewrites() {
     // Next.js standalone bakes `rewrites()` results into routes-manifest.json
     // at `next build` time. `process.env.API_INTERNAL_URL` is unset during the

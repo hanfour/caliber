@@ -25,6 +25,7 @@ COPY packages/core/package.json packages/core/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/evaluator/package.json packages/evaluator/package.json
 COPY packages/gateway-core/package.json packages/gateway-core/package.json
+COPY packages/i18n-validation/package.json packages/i18n-validation/package.json
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
@@ -47,6 +48,7 @@ COPY packages/evaluator packages/evaluator
 # source needs to be present for the turbo build to succeed even though
 # nothing in the Next.js runtime bundle ends up using it.
 COPY packages/gateway-core packages/gateway-core
+COPY packages/i18n-validation packages/i18n-validation
 RUN pnpm turbo run build --filter=@caliber/web...
 
 ###############################################################################

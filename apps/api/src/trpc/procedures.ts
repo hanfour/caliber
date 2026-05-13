@@ -8,19 +8,30 @@ import type { z } from "zod";
 import type { Redis } from "ioredis";
 import { can, type Action } from "@caliber/auth";
 import type { ServerEnv } from "@caliber/config";
+import { runWithLocale } from "@caliber/i18n-validation/server";
+import type { Locale } from "@caliber/i18n-validation";
 import type { TrpcContext, TrpcLogger } from "./context.js";
 import type { EvaluatorQueue } from "./routers/reports.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
+// Wrap the entire procedure pipeline (including Zod input parsing) in the
+// AsyncLocalStorage scope so the global Zod errorMap reads the right locale
+// at issue-time. Applied to publicProcedure so every derived procedure
+// inherits it.
+const withLocale = t.middleware(({ ctx, next }) =>
+  runWithLocale(ctx.locale, () => next()),
+);
+
 export const router = t.router;
 export const createCallerFactory = t.createCallerFactory;
-export const publicProcedure = t.procedure;
+export const publicProcedure = t.procedure.use(withLocale);
 
 // Context shape after protectedProcedure narrows user/perm to non-null.
 interface ProtectedCtx {
   db: TrpcContext["db"];
   reqId: string;
+  locale: Locale;
   user: { id: string; email: string };
   perm: NonNullable<TrpcContext["perm"]>;
   env: ServerEnv;
@@ -43,6 +54,7 @@ export const protectedProcedure = publicProcedure.use(async ({ ctx, next }) => {
     ctx: {
       db: ctx.db,
       reqId: ctx.reqId,
+      locale: ctx.locale,
       user: ctx.user,
       perm: ctx.perm,
       env: ctx.env,

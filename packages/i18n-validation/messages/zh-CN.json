@@ -1,0 +1,66 @@
+{
+  "validation": {
+    "codes": {
+      "invalid_type": "应为 {expected}，但收到 {received}",
+      "required": "必填",
+      "invalid_literal": "应为 {expected}",
+      "invalid_union": "输入格式不正确",
+      "invalid_union_discriminator": "识别值不正确，应为 {options} 之一",
+      "invalid_enum_value": "应为 {options} 之一，但收到「{received}」",
+      "unrecognized_keys": "对象包含未知字段：{keys}",
+      "invalid_arguments": "函数参数不正确",
+      "invalid_return_type": "函数返回值不正确",
+      "invalid_date": "日期格式不正确",
+      "not_multiple_of": "必须为 {multipleOf} 的倍数",
+      "not_finite": "数值必须为有限数",
+      "invalid_intersection_types": "交集类型无法合并",
+      "custom": "输入格式不正确",
+      "invalid_string": {
+        "email": "请输入有效的电子邮件地址",
+        "url": "请输入有效的网址",
+        "uuid": "UUID 格式不正确",
+        "regex": "格式不正确",
+        "datetime": "日期时间格式不正确",
+        "cuid": "CUID 格式不正确",
+        "default": "字符串格式不正确"
+      },
+      "too_small": {
+        "string": {
+          "inclusive": "至少需 {minimum} 个字符",
+          "exclusive": "需多于 {minimum} 个字符"
+        },
+        "number": {
+          "inclusive": "需大于或等于 {minimum}",
+          "exclusive": "需大于 {minimum}"
+        },
+        "array": {
+          "inclusive": "至少需 {minimum} 个项目",
+          "exclusive": "需多于 {minimum} 个项目"
+        },
+        "date": {
+          "inclusive": "日期需在 {minimum} 之后（含当日）",
+          "exclusive": "日期需在 {minimum} 之后"
+        }
+      },
+      "too_big": {
+        "string": {
+          "inclusive": "至多 {maximum} 个字符",
+          "exclusive": "少于 {maximum} 个字符"
+        },
+        "number": {
+          "inclusive": "需小于或等于 {maximum}",
+          "exclusive": "需小于 {maximum}"
+        },
+        "array": {
+          "inclusive": "至多 {maximum} 个项目",
+          "exclusive": "少于 {maximum} 个项目"
+        },
+        "date": {
+          "inclusive": "日期需在 {maximum} 之前（含当日）",
+          "exclusive": "日期需在 {maximum} 之前"
+        }
+      }
+    },
+    "custom": {}
+  }
+}

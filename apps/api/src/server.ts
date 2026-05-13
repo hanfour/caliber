@@ -5,6 +5,7 @@ import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Redis } from "ioredis";
 import { Queue } from "bullmq";
 import { parseServerEnv } from "@caliber/config/env";
+import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";
@@ -36,6 +37,7 @@ function makeDisabledRedis(): Redis {
 
 export async function buildServer() {
   const env = parseServerEnv();
+  await setGlobalLocaleErrorMap();
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,

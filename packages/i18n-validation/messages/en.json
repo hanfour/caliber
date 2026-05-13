@@ -1,0 +1,66 @@
+{
+  "validation": {
+    "codes": {
+      "invalid_type": "Expected {expected}, received {received}",
+      "required": "Required",
+      "invalid_literal": "Expected {expected}",
+      "invalid_union": "Invalid input",
+      "invalid_union_discriminator": "Invalid discriminator value. Expected one of {options}",
+      "invalid_enum_value": "Expected one of {options}, received '{received}'",
+      "unrecognized_keys": "Unrecognised key(s) in object: {keys}",
+      "invalid_arguments": "Invalid function arguments",
+      "invalid_return_type": "Invalid function return type",
+      "invalid_date": "Invalid date",
+      "not_multiple_of": "Must be a multiple of {multipleOf}",
+      "not_finite": "Number must be finite",
+      "invalid_intersection_types": "Intersection results could not be merged",
+      "custom": "Invalid input",
+      "invalid_string": {
+        "email": "Invalid email address",
+        "url": "Invalid URL",
+        "uuid": "Invalid UUID",
+        "regex": "Invalid format",
+        "datetime": "Invalid date-time",
+        "cuid": "Invalid CUID",
+        "default": "Invalid string"
+      },
+      "too_small": {
+        "string": {
+          "inclusive": "Must contain at least {minimum} character(s)",
+          "exclusive": "Must contain more than {minimum} character(s)"
+        },
+        "number": {
+          "inclusive": "Must be greater than or equal to {minimum}",
+          "exclusive": "Must be greater than {minimum}"
+        },
+        "array": {
+          "inclusive": "Must contain at least {minimum} item(s)",
+          "exclusive": "Must contain more than {minimum} item(s)"
+        },
+        "date": {
+          "inclusive": "Date must be on or after {minimum}",
+          "exclusive": "Date must be after {minimum}"
+        }
+      },
+      "too_big": {
+        "string": {
+          "inclusive": "Must contain at most {maximum} character(s)",
+          "exclusive": "Must contain fewer than {maximum} character(s)"
+        },
+        "number": {
+          "inclusive": "Must be less than or equal to {maximum}",
+          "exclusive": "Must be less than {maximum}"
+        },
+        "array": {
+          "inclusive": "Must contain at most {maximum} item(s)",
+          "exclusive": "Must contain fewer than {maximum} item(s)"
+        },
+        "date": {
+          "inclusive": "Date must be on or before {maximum}",
+          "exclusive": "Date must be before {maximum}"
+        }
+      }
+    },
+    "custom": {}
+  }
+}
