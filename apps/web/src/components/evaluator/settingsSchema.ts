@@ -8,7 +8,7 @@ export const uuidOrEmpty = z
   .string()
   .nullable()
   .refine((v) => v === null || v === "" || /^[0-9a-f-]{36}$/i.test(v), {
-    message: "Invalid id",
+    message: "validation.custom.shared.invalidId",
   })
   .transform((v) => (v === "" ? null : v));
 

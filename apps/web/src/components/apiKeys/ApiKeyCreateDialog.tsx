@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 
 const schema = z.object({
-  name: z.string().min(1, "Name is required").max(255),
+  name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
 });
 
 type FormValues = z.infer<typeof schema>;

@@ -61,6 +61,20 @@
         }
       }
     },
-    "custom": {}
+    "custom": {
+      "shared": {
+        "nameRequired": "名前は必須項目です",
+        "invalidId": "ID の形式が正しくありません"
+      },
+      "evaluator": {
+        "versionRequired": "バージョンは必須項目です",
+        "definitionRequired": "定義は必須項目です"
+      },
+      "accounts": {
+        "credentialsRequired": "認証情報は必須項目です",
+        "teamRequired": "チームを選択してください",
+        "oauthJsonInvalid": "OAuth 認証情報は有効な JSON である必要があります"
+      }
+    }
   }
 }

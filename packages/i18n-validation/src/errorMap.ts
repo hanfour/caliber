@@ -35,6 +35,15 @@ function lookup(
 
 export function createErrorMap(messages: ValidationMessages): ZodErrorMap {
   return (issue, ctx) => {
+    // Allow any issue (including too_small, too_big, invalid_string) to
+    // override its translated message by providing a `validation.*`-prefixed
+    // key via Zod schema's `message` option (e.g. `.min(1, "validation.custom
+    // .shared.nameRequired")`). Without this short-circuit, the per-code
+    // branch below would substitute Zod's default code translation and
+    // silently ignore the key the caller explicitly set.
+    if (typeof issue.message === "string" && issue.message.startsWith("validation.")) {
+      return { message: lookup(messages, issue.message) };
+    }
     switch (issue.code) {
       case z.ZodIssueCode.invalid_type: {
         if (issue.received === "undefined") {

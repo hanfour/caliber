@@ -34,12 +34,12 @@ const TEXTAREA_CLASS =
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 const formSchema = z.object({
-  name: z.string().min(1, "Name is required").max(200),
+  name: z.string().min(1, "validation.custom.shared.nameRequired").max(200),
   description: z.string().max(1000).optional(),
-  version: z.string().min(1, "Version is required").max(50),
+  version: z.string().min(1, "validation.custom.evaluator.versionRequired").max(50),
   definitionJson: z
     .string()
-    .min(1, "Definition is required")
+    .min(1, "validation.custom.evaluator.definitionRequired")
     .superRefine((val, ctx) => {
       let parsed: unknown;
       try {

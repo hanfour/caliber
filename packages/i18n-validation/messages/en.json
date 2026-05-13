@@ -61,6 +61,20 @@
         }
       }
     },
-    "custom": {}
+    "custom": {
+      "shared": {
+        "nameRequired": "Name is required",
+        "invalidId": "Invalid id"
+      },
+      "evaluator": {
+        "versionRequired": "Version is required",
+        "definitionRequired": "Definition is required"
+      },
+      "accounts": {
+        "credentialsRequired": "Credentials are required",
+        "teamRequired": "Pick a team",
+        "oauthJsonInvalid": "OAuth credentials must be valid JSON"
+      }
+    }
   }
 }
