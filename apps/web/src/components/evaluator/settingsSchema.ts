@@ -56,14 +56,14 @@ export const settingsSchema = z
     if (val.llmFacetEnabled && !val.llmEvalEnabled) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Facet extraction requires LLM evaluation to be enabled first",
+        message: "validation.custom.evaluator.facetExtractionRequiresLlm",
         path: ["llmFacetEnabled"],
       });
     }
     if (val.llmFacetEnabled && !val.llmFacetModel) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Choose a facet model",
+        message: "validation.custom.evaluator.chooseFacetModel",
         path: ["llmFacetModel"],
       });
     }

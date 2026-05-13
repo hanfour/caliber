@@ -44,6 +44,12 @@ const PATTERNS = [
     re: /\.(refine|superRefine)\([\s\S]*?\{\s*message:\s*"([^"]+)"/g,
     msgGroup: 2,
   },
+  // ctx.addIssue({ ..., message: "literal" })  (inside superRefine / transform)
+  {
+    kind: "addIssue",
+    re: /addIssue\(\s*\{[\s\S]*?message:\s*"([^"]+)"/g,
+    msgGroup: 1,
+  },
 ];
 
 function slugify(s) {

@@ -68,7 +68,10 @@
       },
       "evaluator": {
         "versionRequired": "版本为必填",
-        "definitionRequired": "定义为必填"
+        "definitionRequired": "定义为必填",
+        "rubricMustBeValidJson": "必须为有效的 JSON",
+        "facetExtractionRequiresLlm": "面向提取需先启用 LLM 评估",
+        "chooseFacetModel": "请选择面向模型"
       },
       "accounts": {
         "credentialsRequired": "凭证为必填",

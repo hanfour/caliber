@@ -47,7 +47,7 @@ const formSchema = z.object({
       } catch {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Must be valid JSON",
+          message: "validation.custom.evaluator.rubricMustBeValidJson",
         });
         return;
       }

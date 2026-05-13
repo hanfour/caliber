@@ -68,7 +68,10 @@
       },
       "evaluator": {
         "versionRequired": "Version is required",
-        "definitionRequired": "Definition is required"
+        "definitionRequired": "Definition is required",
+        "rubricMustBeValidJson": "Must be valid JSON",
+        "facetExtractionRequiresLlm": "Facet extraction requires LLM evaluation to be enabled first",
+        "chooseFacetModel": "Choose a facet model"
       },
       "accounts": {
         "credentialsRequired": "Credentials are required",

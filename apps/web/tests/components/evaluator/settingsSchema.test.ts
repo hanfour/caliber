@@ -1,8 +1,42 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
+import { z } from "zod";
+import {
+  createErrorMap,
+  loadValidationMessages,
+  type ValidationMessages,
+} from "@caliber/i18n-validation";
 import {
   settingsSchema,
   type SettingsFormValues,
 } from "@/components/evaluator/settingsSchema";
+
+// Install the en validation errorMap globally. NOTE: Zod's makeIssue()
+// bypasses the global errorMap when the schema (or ctx.addIssue) supplies
+// an explicit `message` — see node_modules/zod/v3/helpers/parseUtil.js.
+// That means `validation.*` keys passed to .refine()/.superRefine()/
+// ctx.addIssue surface as the raw key in `issue.message`. UI display
+// layers (and SSR locale providers) resolve these keys at render time.
+// In tests we resolve them with the small `translate` helper below so
+// the regex assertions can match the English text from the catalogue.
+let enMessages: ValidationMessages;
+beforeAll(async () => {
+  enMessages = await loadValidationMessages("en");
+  z.setErrorMap(createErrorMap(enMessages));
+});
+
+function translate(raw: string | undefined): string {
+  if (!raw || !raw.startsWith("validation.")) return raw ?? "";
+  const parts = raw.split(".");
+  let cursor: unknown = enMessages;
+  for (const part of parts) {
+    if (cursor !== null && typeof cursor === "object" && part in cursor) {
+      cursor = (cursor as Record<string, unknown>)[part];
+    } else {
+      return raw;
+    }
+  }
+  return typeof cursor === "string" ? cursor : raw;
+}
 
 // A baseline that satisfies every required boolean/enum field. Individual
 // tests override specific fields to exercise Plan 4C cross-field rules.
@@ -38,7 +72,7 @@ describe("settingsSchema", () => {
       const issue = result.error.issues.find((i) =>
         i.path.includes("llmFacetEnabled"),
       );
-      expect(issue?.message).toMatch(/requires LLM evaluation/i);
+      expect(translate(issue?.message)).toMatch(/requires LLM evaluation/i);
     }
   });
 
@@ -54,7 +88,7 @@ describe("settingsSchema", () => {
       const issue = result.error.issues.find((i) =>
         i.path.includes("llmFacetModel"),
       );
-      expect(issue?.message).toMatch(/Choose a facet model/i);
+      expect(translate(issue?.message)).toMatch(/Choose a facet model/i);
     }
   });
 

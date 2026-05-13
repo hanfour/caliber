@@ -68,7 +68,10 @@
       },
       "evaluator": {
         "versionRequired": "バージョンは必須項目です",
-        "definitionRequired": "定義は必須項目です"
+        "definitionRequired": "定義は必須項目です",
+        "rubricMustBeValidJson": "有効な JSON である必要があります",
+        "facetExtractionRequiresLlm": "ファセット抽出には LLM 評価の有効化が先に必要です",
+        "chooseFacetModel": "ファセットモデルを選択してください"
       },
       "accounts": {
         "credentialsRequired": "認証情報は必須項目です",
