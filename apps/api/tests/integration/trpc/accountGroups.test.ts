@@ -516,10 +516,23 @@ describe("accountGroups.addMember", () => {
         groupId: group!.id,
         accountId: acct.id,
       }),
+    // createLocalCaller bypasses the http boundary, so the tRPC
+    // errorFormatter (set on initTRPC.create() in procedures.ts) does NOT
+    // run — the TRPCError surfaces with the raw wire-form message produced
+    // by formatValidationKey(). errorFormatter runs only on the wire path
+    // exercised by the fastify adapter, verified separately via live
+    // browser smoke. Assert on the wire form here so the test is stable
+    // regardless of cache-warming state and tRPC version churn.
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message:
-        'Account platform "anthropic" does not match group platform "openai"',
+        "validation.custom.accountGroups.accountPlatformMismatch#" +
+        encodeURIComponent(
+          JSON.stringify({
+            accountPlatform: "anthropic",
+            groupPlatform: "openai",
+          }),
+        ),
     });
   });
 
