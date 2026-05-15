@@ -5,6 +5,7 @@ import { organizations, rubrics, usageLogs } from "@caliber/db";
 import { can } from "@caliber/auth";
 import { rubricSchema, scoreWithRules } from "@caliber/evaluator";
 import type { UsageRow } from "@caliber/evaluator";
+import { formatValidationKey } from "@caliber/i18n-validation";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 
@@ -101,7 +102,10 @@ export const rubricsRouter = router({
       if (!parsed.success) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: `Invalid rubric definition: ${parsed.error.message}`,
+          message: formatValidationKey(
+            "validation.custom.evaluator.rubricInvalidDefinition",
+            { detail: parsed.error.message },
+          ),
         });
       }
 
@@ -171,7 +175,10 @@ export const rubricsRouter = router({
         if (!parsed.success) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Invalid rubric definition: ${parsed.error.message}`,
+            message: formatValidationKey(
+              "validation.custom.evaluator.rubricInvalidDefinition",
+              { detail: parsed.error.message },
+            ),
           });
         }
         updates.definition = parsed.data as Record<string, unknown>;
