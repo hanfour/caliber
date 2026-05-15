@@ -1,6 +1,25 @@
 import type { ValidationMessages } from "./messages.js";
 
 /**
+ * Build a wire-form validation message that carries runtime `{name}`
+ * substitution params alongside a `validation.*` key. The result is a
+ * single string of shape `<key>#<urlencoded-json>` that survives every
+ * boundary (react-hook-form `FieldError.message`, `ZodError.flatten()`,
+ * tRPC wire) intact. `translateValidationKey()` decodes it at the
+ * rendering boundary.
+ *
+ * No params (or `{}`) returns the bare key — keeps the wire form clean
+ * for the common static-key case.
+ */
+export function formatValidationKey(
+  key: string,
+  params?: Record<string, string | number>,
+): string {
+  if (!params || Object.keys(params).length === 0) return key;
+  return `${key}#${encodeURIComponent(JSON.stringify(params))}`;
+}
+
+/**
  * Resolve a `validation.*`-prefixed key against the loaded catalogue.
  * Returns the input verbatim if it isn't a key, the catalogue path doesn't
  * resolve, or the resolved value isn't a string. Quiet (no warn) — call

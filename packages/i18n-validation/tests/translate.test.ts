@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { translateValidationKey } from "../src/translate.js";
+import { translateValidationKey, formatValidationKey } from "../src/translate.js";
 import { loadValidationMessages } from "../src/messages.js";
 
 describe("translateValidationKey", () => {
@@ -38,5 +38,37 @@ describe("translateValidationKey", () => {
     expect(
       translateValidationKey(messages, "validation.codes.invalid_string"),
     ).toBe("validation.codes.invalid_string");
+  });
+});
+
+describe("formatValidationKey", () => {
+  it("returns the bare key when params are absent", () => {
+    expect(formatValidationKey("validation.custom.x.y")).toBe(
+      "validation.custom.x.y",
+    );
+  });
+
+  it("returns the bare key when params is an empty object", () => {
+    expect(formatValidationKey("validation.custom.x.y", {})).toBe(
+      "validation.custom.x.y",
+    );
+  });
+
+  it("encodes params as a URL-encoded JSON suffix after '#'", () => {
+    const out = formatValidationKey("validation.custom.x.y", { detail: "foo" });
+    expect(out.startsWith("validation.custom.x.y#")).toBe(true);
+    expect(decodeURIComponent(out.split("#")[1] ?? "")).toBe(
+      '{"detail":"foo"}',
+    );
+  });
+
+  it("preserves order and supports multiple params", () => {
+    const out = formatValidationKey("validation.custom.x.y", {
+      accountPlatform: "anthropic",
+      groupPlatform: "openai",
+    });
+    expect(decodeURIComponent(out.split("#")[1] ?? "")).toBe(
+      '{"accountPlatform":"anthropic","groupPlatform":"openai"}',
+    );
   });
 });
