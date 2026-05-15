@@ -32,6 +32,10 @@ export function formatValidationKey(
  * Client (react-hook-form resolver) and server (tRPC errorFormatter) both
  * use this helper to translate at the rendering boundary.
  *
+ * If `raw` has the shape `<key>#<urlencoded-json>` (produced by
+ * `formatValidationKey()`), the payload is decoded and `{name}`
+ * placeholders in the resolved template are substituted from it.
+ *
  * Loud-vs-quiet contract vs `lookup()`: `lookup()` (inside errorMap) WARNS
  * on miss because it runs during schema authoring time when a missing key
  * is almost certainly a developer bug worth surfacing. This helper runs at
@@ -44,7 +48,11 @@ export function translateValidationKey(
   raw: string,
 ): string {
   if (!raw.startsWith("validation.")) return raw;
-  const parts = raw.split(".");
+  const hashIdx = raw.indexOf("#");
+  const keyPart = hashIdx >= 0 ? raw.slice(0, hashIdx) : raw;
+  const paramsPart = hashIdx >= 0 ? raw.slice(hashIdx + 1) : null;
+
+  const parts = keyPart.split(".");
   let cursor: unknown = messages;
   for (const p of parts) {
     if (cursor !== null && typeof cursor === "object" && p in cursor) {
@@ -53,5 +61,20 @@ export function translateValidationKey(
       return raw;
     }
   }
-  return typeof cursor === "string" ? cursor : raw;
+  if (typeof cursor !== "string") return raw;
+  const template = cursor;
+
+  if (paramsPart === null) return template;
+
+  let params: Record<string, unknown>;
+  try {
+    params = JSON.parse(decodeURIComponent(paramsPart));
+  } catch {
+    return template;
+  }
+  let out = template;
+  for (const [k, v] of Object.entries(params)) {
+    out = out.replaceAll(`{${k}}`, String(v));
+  }
+  return out;
 }
