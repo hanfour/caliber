@@ -8,6 +8,7 @@ import {
   ACCOUNT_GROUP_STATUS_VALUES,
 } from "@caliber/db";
 import { can } from "@caliber/auth";
+import { formatValidationKey } from "@caliber/i18n-validation";
 import {
   protectedProcedure,
   permissionProcedure,
@@ -369,7 +370,13 @@ export const accountGroupsRouter = router({
       if (account.platform !== group.platform) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: `account platform "${account.platform}" does not match group platform "${group.platform}"`,
+          message: formatValidationKey(
+            "validation.custom.accountGroups.accountPlatformMismatch",
+            {
+              accountPlatform: account.platform,
+              groupPlatform: group.platform,
+            },
+          ),
         });
       }
 
