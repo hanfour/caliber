@@ -72,7 +72,7 @@
         "rubricMustBeValidJson": "유효한 JSON 이어야 합니다",
         "facetExtractionRequiresLlm": "패싯 추출에는 LLM 평가를 먼저 활성화해야 합니다",
         "chooseFacetModel": "패싯 모델을 선택하세요",
-        "rubricInvalidDefinition": "루브릭 정의가 잘못되었습니다: {detail}"
+        "rubricInvalidDefinition": "루브릭 정의가 올바르지 않습니다: {detail}"
       },
       "accounts": {
         "credentialsRequired": "인증 정보는 필수 항목입니다",
