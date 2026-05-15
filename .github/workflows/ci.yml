@@ -21,6 +21,21 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo run lint typecheck test build
+      - name: Audit — no inline literal Zod messages / no template-literal message regression
+        # Greps apps/{api,web}/src for `validation.*`-related anti-patterns.
+        # `kind=template` is the post-PR-#138 regression guard: every
+        # backtick `message: \`...\`` must use `formatValidationKey()` so it
+        # survives the boundary translation pipeline. If this step ever
+        # turns red, the offending file:line is in the failure log.
+        run: |
+          node scripts/audit-zod-i18n.mjs > /tmp/audit-zod-i18n.tsv
+          hits=$(awk -F'\t' '$3=="template"' /tmp/audit-zod-i18n.tsv)
+          if [ -n "$hits" ]; then
+            echo "::error::Found backtick-template Zod message literals (must use formatValidationKey()):"
+            echo "$hits"
+            exit 1
+          fi
+          echo "audit-zod-i18n: 0 kind=template hits"
 
   integration:
     runs-on: ubuntu-latest
