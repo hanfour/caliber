@@ -48,6 +48,25 @@ export interface RotateAllOptions {
   refresh: (accountId: string) => Promise<void>;
 }
 
+/**
+ * Resolve the Anthropic OAuth token endpoint + client ID from environment,
+ * falling back to defaults when the env var is absent OR empty.
+ *
+ * Why `||` (truthiness) rather than `??` (nullish-only): docker-compose's
+ * shell substitution exports unset vars as empty strings (`${VAR:-}`),
+ * not as undefined. `??` would treat `""` as set and the script would
+ * fetch an empty URL. Closes #137.
+ */
+export function resolveOauthEndpoints(
+  env: NodeJS.ProcessEnv,
+  defaults: { tokenUrl: string; clientId: string },
+): { tokenUrl: string; clientId: string } {
+  return {
+    tokenUrl: env.GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL || defaults.tokenUrl,
+    clientId: env.GATEWAY_ANTHROPIC_OAUTH_CLIENT_ID || defaults.clientId,
+  };
+}
+
 export async function rotateAll(opts: RotateAllOptions): Promise<RunSummary> {
   const { db, masterKeyHex, apply, refresh } = opts;
 
@@ -228,10 +247,10 @@ async function main(): Promise<void> {
     DEFAULT_CLIENT_ID,
   } = await import("../src/runtime/oauthRefresh.js");
 
-  const tokenUrl =
-    process.env.GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL ?? DEFAULT_TOKEN_URL;
-  const clientId =
-    process.env.GATEWAY_ANTHROPIC_OAUTH_CLIENT_ID ?? DEFAULT_CLIENT_ID;
+  const { tokenUrl, clientId } = resolveOauthEndpoints(process.env, {
+    tokenUrl: DEFAULT_TOKEN_URL,
+    clientId: DEFAULT_CLIENT_ID,
+  });
 
   const refresh = async (accountId: string): Promise<void> => {
     const current = await readCredential(db, accountId, masterKeyHex);

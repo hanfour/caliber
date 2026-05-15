@@ -37,7 +37,9 @@ vi.mock("drizzle-orm", async () => {
 });
 
 // Import the SUT after vi.mock so the mocked eq()/isNull() are in effect.
-const { rotateAll } = await import("../rotate-credentials-v2.js");
+const { rotateAll, resolveOauthEndpoints } = await import(
+  "../rotate-credentials-v2.js"
+);
 
 const MASTER = "a".repeat(64);
 
@@ -387,5 +389,58 @@ describe("rotateAll", () => {
     expect(refresh).toHaveBeenCalledTimes(2);
     expect(refresh).toHaveBeenNthCalledWith(1, a);
     expect(refresh).toHaveBeenNthCalledWith(2, b);
+  });
+});
+
+describe("resolveOauthEndpoints", () => {
+  const defaults = {
+    tokenUrl: "https://default.example/token",
+    clientId: "default-client",
+  };
+
+  it("returns defaults when env vars are absent", () => {
+    expect(resolveOauthEndpoints({}, defaults)).toEqual(defaults);
+  });
+
+  it("returns defaults when env vars are empty strings (regression: #137)", () => {
+    // docker-compose passes unset shell vars as empty strings via ${VAR:-}.
+    // The pre-#137 code used `??` which only short-circuits on null/undefined
+    // and would have kept the empty string, causing the script to fetch "".
+    expect(
+      resolveOauthEndpoints(
+        {
+          GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL: "",
+          GATEWAY_ANTHROPIC_OAUTH_CLIENT_ID: "",
+        },
+        defaults,
+      ),
+    ).toEqual(defaults);
+  });
+
+  it("uses env vars when set", () => {
+    expect(
+      resolveOauthEndpoints(
+        {
+          GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL: "https://custom.example/oauth",
+          GATEWAY_ANTHROPIC_OAUTH_CLIENT_ID: "custom-client",
+        },
+        defaults,
+      ),
+    ).toEqual({
+      tokenUrl: "https://custom.example/oauth",
+      clientId: "custom-client",
+    });
+  });
+
+  it("falls through per-var (one env set, one missing)", () => {
+    expect(
+      resolveOauthEndpoints(
+        { GATEWAY_ANTHROPIC_OAUTH_CLIENT_ID: "only-client" },
+        defaults,
+      ),
+    ).toEqual({
+      tokenUrl: defaults.tokenUrl,
+      clientId: "only-client",
+    });
   });
 });
