@@ -207,7 +207,7 @@ device_api_keys (
 
 -- Session-level static metadata (one row per claude/codex session and per subagent)
 client_sessions (
-  id                   text PRIMARY KEY,           -- session UUID from client
+  id                   text PRIMARY KEY,           -- session UUID from client (v4)
   parent_session_id    text REFERENCES client_sessions(id),  -- claude subagent → root
   device_id            uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   user_id              uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -224,18 +224,27 @@ client_sessions (
   started_at           timestamptz NOT NULL,
   last_event_at        timestamptz NOT NULL
 );
+-- Note on tenant safety: `id` is a single-column PK because session UUIDs are
+-- v4 (collision astronomically unlikely in practice) and a composite PK would
+-- force every FK chain to carry org_id. Instead, we enforce tenant isolation
+-- in the ingest middleware: when a row with the same `id` already exists,
+-- INSERT must match the resolved `org_id` from the cda_* key — mismatch is
+-- rejected as `409 SESSION_OWNED_BY_OTHER_ORG`. See "Ingest API" below.
 
 -- Every event (= one JSONL line) gets one row.
 -- The dedup contract is the UNIQUE constraint.
+-- PARTITION BY RANGE (ingested_at) MONTHLY from day 1 so retention / DROP PARTITION
+-- works without REPACK on the live table. See R8 for the storage projection.
 client_events (
-  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                  uuid NOT NULL DEFAULT gen_random_uuid(),
+  org_id              uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,  -- denormalized for index + RLS
   device_id           uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   session_id          text NOT NULL REFERENCES client_sessions(id) ON DELETE CASCADE,
   event_id            text NOT NULL,               -- claude: uuid, codex: file_offset or seq
   parent_event_id     text,                        -- claude: parentUuid; codex: null
   turn_id             text,                        -- codex only; null for claude
   role                text,                        -- 'user' | 'assistant' | 'system' | 'tool' | null
-  event_type          text NOT NULL,               -- 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'hook' | 'file_snapshot' | 'token_count' | 'task_started' | 'task_complete' | 'reasoning' | 'function_call' | 'function_call_output'
+  event_type          text NOT NULL,               -- 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'hook' | 'file_snapshot' | 'token_count' | 'task_started' | 'task_complete' | 'reasoning' | 'function_call' | 'function_call_output' | 'unknown'
   timestamp           timestamptz NOT NULL,
   content             jsonb,                       -- typed payload; mode-controlled
   input_tokens        int,
@@ -245,21 +254,33 @@ client_events (
   reasoning_tokens    int,                         -- codex GPT-5 only
   source              text NOT NULL DEFAULT 'transcript',  -- 'gateway' | 'transcript'
   ingested_at         timestamptz NOT NULL DEFAULT NOW(),
-  UNIQUE (session_id, event_id, source)
-);
+  PRIMARY KEY (id, ingested_at),                   -- ingested_at in PK is the postgres-partitioning requirement
+  UNIQUE (session_id, event_id, source, ingested_at)  -- dedup; ingested_at appended for partition
+) PARTITION BY RANGE (ingested_at);
 CREATE INDEX client_events_session_ts ON client_events(session_id, timestamp);
-CREATE INDEX client_events_org_ts ON client_events((SELECT org_id FROM client_sessions cs WHERE cs.id = session_id), timestamp);
+CREATE INDEX client_events_org_ts ON client_events(org_id, timestamp);
+-- Migration job creates initial partitions (current month + next 3 months);
+-- a daily cron rolls forward. See Phase 1 deliverables.
 ```
 
 ### Existing schema deltas
 
 ```sql
--- request_bodies stays for path A's gateway captures; add device + session linkage
+-- request_bodies stays for path A's gateway captures; add device + source.
+-- NOTE: client_session_id ALREADY EXISTS on request_bodies (added during
+-- earlier gateway body-capture work, see packages/db/src/schema/requestBodies.ts).
+-- O3 resolved that v1 does NOT populate it (no official CLI sends X-Session-Id)
+-- — column stays as a Phase 5+ stub for a future caliber-claude wrapper script.
 ALTER TABLE request_bodies
   ADD COLUMN device_id uuid REFERENCES devices(id),
-  ADD COLUMN client_session_id text REFERENCES client_sessions(id),
   ADD COLUMN source text NOT NULL DEFAULT 'gateway';
--- (api_keys already has user_id + org_id; gateway adds device_id when the ak_* token was issued to a device)
+
+-- usage_logs gets device_id too — evaluator_events view joins through it
+-- and gateway-issued ak_* tokens may be bound to a device for accounting.
+ALTER TABLE usage_logs
+  ADD COLUMN device_id uuid REFERENCES devices(id);
+-- (api_keys already has user_id + org_id; gateway populates device_id from
+-- the resolved ak_* token's binding when present, NULL for legacy keys.)
 ```
 
 ### Evaluator-facing merged view
@@ -341,11 +362,33 @@ caliber-agent set-mode <mode>     # metadata-only | redacted-body | full-body
 caliber-agent uninstall           # revoke device, remove launchd, clear keychain
 ```
 
+**Project allow-list (privacy default-on):** the enrollment wizard prompts for which
+project paths the daemon may watch. **Default is an empty allow-list — nothing is
+uploaded until the user explicitly adds a path.** Same principle as `metadata-only`
+mode: the default refuses to ship data. Paths are stored in
+`~/.caliber-agent/config.toml`:
+
+```toml
+# caliber-agent config
+include_paths = [
+  "/Users/hanfour/work/caliber",
+  "/Users/hanfour/work/some-other-project",
+]
+# Anything under these roots is watched. Children of an included root can be
+# excluded individually via `exclude_paths` (Phase 3 regex support).
+```
+
+`caliber-agent add-path <dir>` / `remove-path <dir>` mutate the allow-list at
+runtime. The daemon resolves each watched session file's `cwd` against this list
+on every loop iteration; sessions outside the allow-list are skipped silently
+(no watermark advance, no upload).
+
 **Main loop:**
 
 ```
 loop forever:
   for each transcript file under ~/.claude/projects/ + ~/.claude/projects/*/*/subagents/ + ~/.codex/sessions/:
+    if file.cwd not under any include_paths: skip
     offset = watermark[file] from ~/.caliber-agent/state.json
     new_bytes = tail file from offset
     if no new bytes: continue
@@ -379,7 +422,7 @@ Atomic writes (tmp + rename) so a crash mid-write doesn't corrupt state.
 | Mode | content payload |
 |---|---|
 | `metadata-only` (default) | strip all `.message.content[].text` and `.message.content[].input` strings; replace with `{"length": N, "preview": "first_3_words..."}`. Keep tool names, file path tails (last 2 segments), event types, token counts, timestamps. |
-| `redacted-body` | full content text, but apply secret-scrub regex set (`sk-[a-zA-Z0-9-_]{20,}`, `AKIA[0-9A-Z]{16}`, `ghp_[A-Za-z0-9]{36,}`, `xoxb-[A-Za-z0-9-]{40,}`, `Bearer\s+[a-zA-Z0-9_\-\.]{20,}`); `cwd` path-tail truncated to project name; git_remote_url stripped to domain only. |
+| `redacted-body` | full content text, but apply secret-scrub regex set: `sk-[a-zA-Z0-9-_]{20,}` (anthropic + openai legacy), `sk-proj-[A-Za-z0-9_-]{20,}` (openai project keys), `sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{20,}` (anthropic console), `AKIA[0-9A-Z]{16}` (AWS), `ghp_[A-Za-z0-9]{36,}` + `gho_[A-Za-z0-9]{36,}` + `github_pat_[A-Za-z0-9_]{82}` (github tokens), `xoxb-[A-Za-z0-9-]{40,}` (slack bot), `xoxp-[A-Za-z0-9-]{40,}` (slack user), `gsk_[A-Za-z0-9]{20,}` (groq), `Bearer\s+[A-Za-z0-9_\-\.]{20,}` (generic). `cwd` path-tail truncated to project name; git_remote_url stripped to domain only. |
 | `full-body` | original content, only secret-scrub applied (still on). Used for self-dogfood by trusted single operators. |
 
 Regex set is updatable per-org by admin (e.g. company-specific token prefixes) — daemon fetches active redaction set on enrollment + every 24h.
@@ -441,11 +484,28 @@ Content-Encoding: gzip
 }
 ```
 
-**Idempotency:** server uses `INSERT INTO client_events ... ON CONFLICT (session_id, event_id, source) DO NOTHING` so retried chunks land cleanly. Daemon retries the whole chunk on 5xx; server is safe.
+**Idempotency:**
+- `client_sessions` upsert (per chunk's `sessions[]`):
+  ```sql
+  INSERT INTO client_sessions (id, parent_session_id, device_id, user_id, org_id, ...)
+  VALUES (...)
+  ON CONFLICT (id) DO UPDATE SET
+    last_event_at = GREATEST(client_sessions.last_event_at, EXCLUDED.last_event_at),
+    base_instructions_text = COALESCE(client_sessions.base_instructions_text, EXCLUDED.base_instructions_text)
+  WHERE client_sessions.org_id = EXCLUDED.org_id;  -- tenant guard, see below
+  ```
+  If the `WHERE` predicate fails (existing row owned by another org), the UPDATE
+  becomes a no-op and the server returns `409 SESSION_OWNED_BY_OTHER_ORG`.
+- `client_events` upsert:
+  ```sql
+  INSERT INTO client_events (...) VALUES (...)
+  ON CONFLICT (session_id, event_id, source, ingested_at) DO NOTHING;
+  ```
+  Daemon retries the whole chunk on 5xx; server is safe.
 
 **Rate limits:** per-device 600 events/min default (configurable per-org). 429 = backoff. Daemon flush cadence is 60s so a heavy session ~1k events / min is on the threshold; design dial.
 
-**Auth middleware:** `cda_*` token → `device_api_keys` → `devices` row → `org_id` + `user_id`. Server NEVER trusts `device_id` from the payload; it's overridden from the resolved key. Any mismatch is a hard 403.
+**Auth middleware:** `cda_*` token → `device_api_keys` → `devices` row → `org_id` + `user_id`. Server NEVER trusts `device_id` from the payload; it's overridden from the resolved key. Any mismatch is a hard 403. Session-level tenant safety: see the upsert `WHERE` guard above — a daemon claiming a session UUID already owned by another org gets 409, not silent overwrite.
 
 ## Evaluator integration
 
@@ -477,25 +537,28 @@ Billing model is design-time open (per-device subscription, per-million-events i
 **Phase 0 (already done):** path A (gateway proxy + body capture + evaluator) in production on h4; v0.6.2 cut 2026-05-18.
 
 **Phase 1 — Schema + Ingest API (1–2 weeks)**
-- drizzle migrations: `devices`, `device_enrollment_tokens`, `device_api_keys`, `client_sessions`, `client_events`
-- alter `request_bodies` to add device + session + source
+- drizzle migrations: `devices`, `device_enrollment_tokens`, `device_api_keys`, `client_sessions`, `client_events` (RANGE-partitioned by `ingested_at` monthly from day 1; initial partitions = current month + next 3; daily cron rolls forward)
+- alter `request_bodies` to add `device_id` + `source` (NOTE: `client_session_id` already exists from earlier gateway work — not re-added)
+- alter `usage_logs` to add `device_id`
+- extend `gdpr_delete_requests` cascade to cover `client_sessions` + `client_events` keyed by `(org_id, user_id)` — done at Phase 1 not Phase 4, so first-day ingest is deletable
 - tRPC routers: `devices.list / create / revoke`, `devices.enrollmentToken.issue`, web UI `/dashboard/devices`
-- fastify route: `POST /v1/ingest` with auth middleware for `cda_*` tokens
+- fastify route: `POST /v1/ingest` with auth middleware for `cda_*` tokens, tenant-guard on session upsert
 - migration of evaluator pipeline to `evaluator_events` view
 - self-dogfood readiness check: existing gateway captures keep flowing
 
 **Phase 2 — Daemon MVP (2–3 weeks)**
 - Go scaffold + launchd plist + homebrew tap
 - enroll / status / pause / resume / set-mode / uninstall commands
-- claude-code transcript watcher (main + subagents)
-- codex sessions watcher
+- **interactive enrollment wizard with empty-by-default project allow-list** (`caliber-agent add-path` / `remove-path` to mutate); refuses to watch anything until user adds explicit paths
+- claude-code transcript watcher (main + subagents), allow-list filtered
+- codex sessions watcher, allow-list filtered
 - ingest client (chunked gzipped POST, watermark persistence, exponential backoff)
-- redact-secrets default pattern set
+- redact-secrets default pattern set (multi-provider regex set above)
 - daemon dogfood: h4 + mac-mini both running it, ingest going to local caliber
 
 **Phase 3 — Polish + privacy (1–2 weeks)**
 - per-org redaction set override fetch
-- `exclude-projects` regex support
+- per-path `exclude-projects` regex support (refinement on top of Phase 2's allow-list)
 - log file rotation
 - daemon ⇄ caliber TLS pinning
 - auto-update mechanism (homebrew handles it for brew users; install.sh users need `caliber-agent update`)
@@ -536,13 +599,21 @@ Billing model is design-time open (per-device subscription, per-million-events i
 **R7 — Single session 24 MB stress test.** Ingest of a fresh session catch-up after daemon pause could be 100 MB of JSONL.
 - *Mitigation*: chunked + gzipped ingest; rate-limit awareness; server-side streaming JSON parse (don't load whole batch in memory).
 
+**R8 — `client_events` row-count explosion.** 100 devices × 5 MB/day of new JSONL × 365d ≈ 180 GB/year in a single table. Even modest team adoption pushes the table past comfortable single-table operational limits; index rebuild + VACUUM become painful; retention sweeps become slow DELETE storms.
+- *Mitigation*: `client_events` is `PARTITION BY RANGE (ingested_at)` MONTHLY from day 1. Retention = `DROP PARTITION` (instant) instead of DELETE. Per-org retention policy (UI in Phase 4) selects which partitions to keep per `org_id` via partial drops or per-partition `DELETE WHERE org_id = X`. Initial partition window: current + next 3 months, rolled forward daily by cron. GDPR cascade implemented at Phase 1 (not Phase 4) so first-day data is purgeable.
+
+**R9 — Secret-scrub regex bypass via encoded variants.** A user pastes `base64(api_key)` or a token-in-camelCase variable name; static regex misses it; secret lands in `redacted-body` ingest.
+- *Mitigation*: regex set is best-effort, not safety net. The hard guarantee is `metadata-only` (default) — body content is not uploaded at all in that mode. `redacted-body` is a documented-best-effort tier; the org policy may forbid it for high-sensitivity environments. Future: layer an entropy / known-prefix heuristic on top of regex (Phase 3+).
+
 **Resolved O1 — turn reconstruction from claude code parent chain (spiked 2026-05-18)**: ran a linear-scan + reverse-map reconstruction in Python over a real 21 MB / 7,674-line / 6,258-uuid session (`3e80e6a0-...jsonl`). Result: **0.43s wall time, 11.8 MB peak RSS** — trivial on any modern hardware, Go implementation will be 5–10× faster. Found **24 out-of-order `parentUuid` references** in the file, but all 24 are `type="attachment"` events (SessionStart hook output, etc.) whose `parentUuid` forward-references a later event in the same file. The "real" user/assistant message chain is strictly in-order. **Implication**: (a) the algorithm doesn't need an out-of-order buffer for the message chain — single-pass linear scan with reverse-map works; (b) `client_events.parent_event_id` must remain a plain `text` column, NOT a foreign key, because attachment events legitimately reference UUIDs not yet inserted; (c) turn reconstruction at evaluator time should filter `event_type IN ('hook', 'file_snapshot')` before walking the parent chain so attachments don't pollute turn boundaries. Existing schema already covers this.
 
-**Resolved O2 — codex `event_msg.token_count` cadence (spiked 2026-05-18)**: walked the real codex session timeline. `token_count` does **NOT** correspond to a turn — it emits at streaming chunk boundaries during a single user→assistant turn. Each `token_count` is emitted **twice** in adjacent positions (~1.5s apart, identical values) — once mid-stream, once on final. Between any two `token_count` pairs there are typically 4–10 `response_item` events (function_call, function_call_output, reasoning). `last_token_usage` is "tokens used since the previous `token_count` event," not "tokens for the current turn." Critically: **codex `response_item` payloads have no `usage` / `tokens` field** (verified: payload keys are `arguments / call_id / content / encrypted_content / name / output / phase / role / summary / type`). The only source of token info on codex side is the `event_msg.token_count` stream. **Implication for schema**: (a) codex events land in `client_events` with `tokens = NULL` except for the `event_msg.token_count` rows themselves, which carry the snapshot in `input_tokens / output_tokens / reasoning_tokens` columns; (b) evaluator-side turn-token attribution is `cumulative_at_turn_end − cumulative_at_turn_start` (using `total_token_usage.total_tokens` snapshots), not summing per-event tokens; (c) the duplicate `token_count` pairs are de-duped at the evaluator level by `(session_id, total_tokens, output_tokens)` exact match — not at ingest, since the daemon ships events verbatim. Documented as an evaluator-layer concern, no schema change needed.
+**Resolved O2 — codex `event_msg.token_count` cadence (spiked 2026-05-18)**: walked the real codex session timeline. `token_count` does **NOT** correspond to a turn — it emits at streaming chunk boundaries during a single user→assistant turn. Each `token_count` is emitted **twice** in adjacent positions (~1.5s apart, identical values) — once mid-stream, once on final. Between any two `token_count` pairs there are typically 4–10 `response_item` events (function_call, function_call_output, reasoning). `last_token_usage` is "tokens used since the previous `token_count` event," not "tokens for the current turn." Critically: **codex `response_item` payloads have no `usage` / `tokens` field** (verified: payload keys are `arguments / call_id / content / encrypted_content / name / output / phase / role / summary / type`). The only source of token info on codex side is the `event_msg.token_count` stream. **Implication for schema**: (a) codex events land in `client_events` with `tokens = NULL` except for the `event_msg.token_count` rows themselves, which carry the snapshot in `input_tokens / output_tokens / reasoning_tokens` columns; (b) evaluator-side turn-token attribution is `cumulative_at_turn_end − cumulative_at_turn_start` (using `total_token_usage.total_tokens` snapshots), not summing per-event tokens; (c) the duplicate `token_count` pairs are de-duped at the evaluator level by `(session_id, total_tokens, output_tokens)` exact match — NOT at ingest, deliberately: the daemon ships events verbatim so future codex-format quirks can be hot-fixed server-side without re-deploying every daemon. Documented as an evaluator-layer concern, no schema change needed.
 
 **Resolved O3 — gateway path's `client_session_id` populating (spiked 2026-05-18)**: caliber gateway already has `request_bodies.client_session_id` column and `extractSessionId(req)` middleware reading `X-Session-Id` header (`apps/gateway/src/runtime/bodyCapture.ts:111-114`), but **291 historical request_bodies rows have 0 populated `client_session_id`**. User-Agent distribution: 241× `codex-tui/0.130.0`, 36× `claude-cli/2.1.x` — neither official CLI sends an `X-Session-Id` header. Server-side strong join (option a) is not achievable without upstream CLI cooperation. **Decision: v1 does not join.** Gateway capture and transcript ingest are two independent streams in `evaluator_events`; the merged view does not perform `(user, timestamp ± window)` fuzzy matching either (cheap to add later if proven necessary). Users running both A and B simultaneously (e.g. self-dogfood) will see the same conversation as two source rows — accepted, surfaced in the reviewer UI with a `source_breakdown` chip. Realistically, 99% of users will choose only one path (B for zero-touch teams, A for power-user solo operators wanting real-time cost), so double-counting is a corner case, not a default. Future option if friction matters: a `caliber-claude` / `caliber-codex` wrapper script that injects `X-Session-Id` from the active CLI session into the gateway request — but that's Phase 5+ scope.
 
 **Open O4 — billing model.** Subscription vs metered vs hybrid is a product question we defer past Phase 4. Schema does not force a choice.
+
+**Open O5 — `base_instructions_text` storage growth.** Stored inline on each `client_sessions` row, the ~10 KB codex system prompt is duplicated per session. At 100 devices × ~50 sessions/day × 365d × 10 KB ≈ 18 GB/year of mostly-duplicate text. Acceptable for v1 (small fraction of `client_events` volume per R8), but if it becomes load-bearing, factor out to a `base_instructions(hash text PK, text text)` dedup table and reference by hash. Defer until measured.
 
 ## Predecessors and references
 
