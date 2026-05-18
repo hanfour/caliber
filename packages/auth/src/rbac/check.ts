@@ -190,6 +190,15 @@ export function can(perm: UserPermissions, action: Action): boolean {
     case "api_key.issue_for_user":
     case "api_key.list_all":
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
+    case "device.list_own":
+    case "enrollment_token.issue_own":
+      return true;
+    case "device.revoke":
+      if (action.ownerUserId === perm.userId) return true; // self-revoke
+      return rolesAt(perm, "organization", action.orgId).has("org_admin");
+    case "device.list_all":
+    case "enrollment_token.issue_for_user":
+      return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "usage.read_own":
       return true;
     case "usage.read_user":

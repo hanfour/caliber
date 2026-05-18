@@ -7,6 +7,7 @@ export * from "./crypto/credentialCipher.js";
 export * from "./logging/redact.js";
 export * from "./crypto/bodyCipher.js";
 export * from "./crypto/apiKey.js";
+export * from "./crypto/deviceKey.js";
 export * from "./translate/types.js";
 export * from "./translate/openaiToAnthropic.js";
 export * from "./translate/anthropicToOpenai.js";
