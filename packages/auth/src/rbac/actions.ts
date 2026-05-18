@@ -83,4 +83,18 @@ export type Action =
   | { type: "rubric.update"; orgId: string; rubricId: string }
   | { type: "rubric.delete"; orgId: string; rubricId: string }
   | { type: "evaluator.read_status"; orgId: string }
-  | { type: "evaluator.view_cost"; orgId: string };
+  | { type: "evaluator.view_cost"; orgId: string }
+  | { type: "device.list_own" }
+  | { type: "device.list_all"; orgId: string }
+  | {
+      type: "device.revoke";
+      deviceId: string;
+      orgId: string;
+      ownerUserId: string;
+    }
+  | { type: "enrollment_token.issue_own" }
+  | {
+      type: "enrollment_token.issue_for_user";
+      orgId: string;
+      targetUserId: string;
+    };

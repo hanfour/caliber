@@ -15,6 +15,7 @@ import { contentCaptureRouter } from "./routers/contentCapture.js";
 import { rubricsRouter } from "./routers/rubrics.js";
 import { reportsRouter } from "./routers/reports.js";
 import { evaluatorRouter } from "./routers/evaluator.js";
+import { devicesRouter } from "./routers/devices.js";
 
 export const appRouter = router({
   me: meRouter,
@@ -33,6 +34,7 @@ export const appRouter = router({
   rubrics: rubricsRouter,
   reports: reportsRouter,
   evaluator: evaluatorRouter,
+  devices: devicesRouter,
 });
 
 export type AppRouter = typeof appRouter;
