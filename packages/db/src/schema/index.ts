@@ -16,3 +16,8 @@ export * from "./evaluationReports.js";
 export * from "./gdprDeleteRequests.js";
 export * from "./llmUsageEvents.js";
 export * from "./requestBodyFacets.js";
+export * from "./devices.js";
+export * from "./deviceEnrollmentTokens.js";
+export * from "./deviceApiKeys.js";
+export * from "./clientSessions.js";
+export * from "./clientEvents.js";

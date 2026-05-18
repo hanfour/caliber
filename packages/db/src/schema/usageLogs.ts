@@ -15,6 +15,7 @@ import { organizations, teams } from "./org.js";
 import { apiKeys } from "./apiKeys.js";
 import { upstreamAccounts } from "./accounts.js";
 import { accountGroups } from "./accountGroups.js";
+import { devices } from "./devices.js";
 
 export const usageLogs = pgTable(
   "usage_logs",
@@ -114,6 +115,11 @@ export const usageLogs = pgTable(
     failedAccountIds: uuid("failed_account_ids").array(),
     userAgent: text("user_agent"),
     ipAddress: inet("ip_address"),
+    // Phase 1 multi-source ingest: ak_* tokens bound to a device populate this;
+    // legacy tokens leave it NULL. Evaluator_events view joins through this.
+    deviceId: uuid("device_id").references(() => devices.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -1,6 +1,7 @@
 import { pgTable, text, uuid, jsonb, customType, boolean, timestamp, smallint, index } from 'drizzle-orm/pg-core'
 import { organizations } from './org.js'
 import { usageLogs } from './usageLogs.js'
+import { devices } from './devices.js'
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' })
 
@@ -22,6 +23,12 @@ export const requestBodies = pgTable('request_bodies', {
   bodyTruncated: boolean('body_truncated').notNull().default(false),
   capturedAt: timestamp('captured_at', { withTimezone: true }).notNull().defaultNow(),
   retentionUntil: timestamp('retention_until', { withTimezone: true }).notNull(),
+  // Phase 1 multi-source ingest: ak_* tokens bound to a device populate this;
+  // legacy tokens leave it NULL.
+  deviceId: uuid('device_id').references(() => devices.id, { onDelete: 'set null' }),
+  // 'gateway' default — body captured by gateway proxy. 'transcript' reserved;
+  // transcript ingest writes to client_events not request_bodies.
+  source: text('source').notNull().default('gateway'),
 }, (t) => ({
   retentionIdx: index('request_bodies_retention_idx').on(t.retentionUntil),
   orgTimeIdx: index('request_bodies_org_time_idx').on(t.orgId, t.capturedAt),
