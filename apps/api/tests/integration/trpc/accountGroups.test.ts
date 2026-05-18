@@ -490,9 +490,13 @@ describe("accountGroups.addMember", () => {
         groupId: group!.id,
         accountId: bAcct.id,
       }),
+    // No-params formatValidationKey returns the bare key (translate.ts:18);
+    // wire form is therefore the catalogue path itself. Mirrors the
+    // accountPlatformMismatch assertion just below — see that test's comment
+    // for why createLocalCaller bypasses errorFormatter.
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
-      message: expect.stringContaining("does not belong"),
+      message: "validation.custom.accountGroups.accountOrgMismatch",
     });
   });
 

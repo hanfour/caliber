@@ -362,7 +362,9 @@ export const accountGroupsRouter = router({
       if (account.orgId !== group.orgId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "account does not belong to this group's org",
+          message: formatValidationKey(
+            "validation.custom.accountGroups.accountOrgMismatch",
+          ),
         });
       }
       // Platform must match — the gateway scheduler dispatches based on
