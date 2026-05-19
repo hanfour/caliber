@@ -8,6 +8,7 @@ import { parseServerEnv } from "@caliber/config/env";
 import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
 import { devicesEnrollRoutes } from "./rest/devicesEnroll.js";
+import { ingestRoutes } from "./rest/ingest.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";
 import { appRouter } from "./trpc/router.js";
@@ -57,6 +58,7 @@ export async function buildServer() {
   await app.register(authPlugin, { env });
   await app.register(healthRoutes);
   await app.register(devicesEnrollRoutes(env));
+  await app.register(ingestRoutes(env));
 
   // Dynamically load /test-seed only when all gating conditions hold. This
   // lets production images strip dist/rest/testSeed.js entirely — defense in
