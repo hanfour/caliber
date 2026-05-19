@@ -26,6 +26,9 @@ export const evaluationReports = pgTable('evaluation_reports', {
   llmUpstreamAccountId: uuid('llm_upstream_account_id').references(() => upstreamAccounts.id, { onDelete: 'set null' }),
   triggeredBy: text('triggered_by').notNull(),
   triggeredByUser: uuid('triggered_by_user').references(() => users.id, { onDelete: 'set null' }),
+  // Phase 1 (0014) — `{ "gateway_events": N, "transcript_events": M, "overlap": K }`.
+  // Reviewers can see which path produced this report's data. NULL on legacy rows.
+  sourceBreakdown: jsonb('source_breakdown'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
