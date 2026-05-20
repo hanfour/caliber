@@ -9,6 +9,7 @@ import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
 import { devicesEnrollRoutes } from "./rest/devicesEnroll.js";
 import { ingestRoutes } from "./rest/ingest.js";
+import { startPartitionRollForwardCron } from "./services/clientEventsPartitions.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";
 import { appRouter } from "./trpc/router.js";
@@ -59,6 +60,23 @@ export async function buildServer() {
   await app.register(healthRoutes);
   await app.register(devicesEnrollRoutes(env));
   await app.register(ingestRoutes(env));
+
+  // Daily roll-forward for client_events monthly partitions. Runs immediately
+  // on boot so a fresh deploy is safe even if the daily timer hasn't ticked.
+  // Gated on ENABLE_GATEWAY: a deploy with the daemon path off has no ingest
+  // and so no need to maintain partitions beyond what 0013 already created.
+  if (env.ENABLE_GATEWAY) {
+    const partitionCron = startPartitionRollForwardCron({
+      db: app.db,
+      logger: {
+        info: (obj, msg) => app.log.info(obj, msg),
+        error: (obj, msg) => app.log.error(obj, msg),
+      },
+    });
+    app.addHook("onClose", async () => {
+      partitionCron.stop();
+    });
+  }
 
   // Dynamically load /test-seed only when all gating conditions hold. This
   // lets production images strip dist/rest/testSeed.js entirely — defense in

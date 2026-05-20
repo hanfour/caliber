@@ -1,20 +1,27 @@
 /**
- * GDPR delete worker (Plan 4B Part 10, Task 10.1).
+ * GDPR delete worker (Plan 4B Part 10, Task 10.1; Phase 1 multi-source ingest
+ * cascade extension 2026-05).
  *
  * Runs every 5 minutes. For each approved (but not yet executed) GDPR delete
  * request:
  *   1. Delete request_bodies rows for the user via a subquery join to usage_logs
  *      (request_bodies.request_id FK → usage_logs.request_id; user's bodies are
  *      all those tied to the user's usage rows within the org).
- *   2. If scope="bodies_and_reports", also delete evaluation_reports for the user.
- *   3. Mark the request as executed (executedAt = now()).
- *   4. Write an audit log entry proving the deletion happened.
+ *   2. Delete client_sessions rows for (org_id, user_id) — cascades to
+ *      client_events via FK ON DELETE CASCADE. Event count is captured before
+ *      delete for audit visibility.
+ *   3. If scope="bodies_and_reports", also delete evaluation_reports for the user.
+ *   4. Mark the request as executed (executedAt = now()).
+ *   5. Write an audit log entry proving the deletion happened.
  *
  * Design notes:
  *   - Gate: approvedAt IS NOT NULL AND executedAt IS NULL AND rejectedAt IS NULL
  *     prevents re-processing executed requests and skips rejected ones.
  *   - Raw SQL for the bodies delete (subquery join) because Drizzle's typed
  *     DELETE…WHERE…IN doesn't support subqueries that reference a second table.
+ *   - client_sessions cascade ALWAYS runs, regardless of scope: the spec moves
+ *     this cascade to Phase 1 (not Phase 4) so first-day transcript ingest is
+ *     deletable. The `bodies_and_reports` scope only widens to evaluation_reports.
  *   - Each request is processed independently; a failure on one request
  *     increments `failures` and continues — partial progress is observable via
  *     the audit log (only executed requests have an entry).
@@ -25,8 +32,8 @@ import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
 import type { Database } from "@caliber/db";
 import {
   gdprDeleteRequests,
-  requestBodies,
   evaluationReports,
+  clientSessions,
   auditLogs,
 } from "@caliber/db";
 
@@ -44,6 +51,8 @@ export interface ExecuteGdprDeletionsResult {
   requestsProcessed: number;
   bodiesDeleted: number;
   reportsDeleted: number;
+  clientSessionsDeleted: number;
+  clientEventsDeleted: number;
   failures: number;
 }
 
@@ -71,6 +80,8 @@ export async function executeGdprDeletions(
 
   let bodiesDeleted = 0;
   let reportsDeleted = 0;
+  let clientSessionsDeleted = 0;
+  let clientEventsDeleted = 0;
   let failures = 0;
 
   for (const request of approved) {
@@ -87,10 +98,37 @@ export async function executeGdprDeletions(
         )
         AND org_id = ${request.orgId}
       `);
-      bodiesDeleted +=
+      const bodiesDeletedHere =
         (bodiesResult as { rowCount: number | null }).rowCount ?? 0;
+      bodiesDeleted += bodiesDeletedHere;
+
+      // Cascade-count client_events first so the audit log records the volume
+      // before the rows are gone. The FK on client_events.session_id has
+      // ON DELETE CASCADE, so DELETE FROM client_sessions removes both.
+      const eventCountRow = await db.execute<{ count: number }>(sql`
+        SELECT COUNT(*)::int AS count
+        FROM client_events ce
+        JOIN client_sessions cs ON cs.id = ce.session_id
+        WHERE cs.user_id = ${request.userId}
+          AND cs.org_id = ${request.orgId}
+      `);
+      const eventsThisReq = eventCountRow.rows[0]?.count ?? 0;
+
+      const sessionsResult = await db
+        .delete(clientSessions)
+        .where(
+          and(
+            eq(clientSessions.userId, request.userId),
+            eq(clientSessions.orgId, request.orgId),
+          ),
+        );
+      const sessionsThisReq =
+        (sessionsResult as { rowCount: number | null }).rowCount ?? 0;
+      clientSessionsDeleted += sessionsThisReq;
+      clientEventsDeleted += eventsThisReq;
 
       // Optionally delete evaluation reports.
+      let reportsThisReq = 0;
       if (request.scope === "bodies_and_reports") {
         const reportsResult = await db
           .delete(evaluationReports)
@@ -100,8 +138,9 @@ export async function executeGdprDeletions(
               eq(evaluationReports.orgId, request.orgId),
             ),
           );
-        reportsDeleted +=
+        reportsThisReq =
           (reportsResult as { rowCount: number | null }).rowCount ?? 0;
+        reportsDeleted += reportsThisReq;
       }
 
       // Mark request executed.
@@ -111,6 +150,8 @@ export async function executeGdprDeletions(
         .where(eq(gdprDeleteRequests.id, request.id));
 
       // Write audit log entry — compliance proof that the deletion occurred.
+      // Per-request counts (not running totals) so each audit entry stands
+      // alone when reviewed independently.
       await db.insert(auditLogs).values({
         orgId: request.orgId,
         actorUserId: request.approvedByUserId,
@@ -120,8 +161,10 @@ export async function executeGdprDeletions(
         metadata: {
           requestId: request.id,
           scope: request.scope,
-          bodiesDeleted,
-          reportsDeleted,
+          bodiesDeleted: bodiesDeletedHere,
+          reportsDeleted: reportsThisReq,
+          clientSessionsDeleted: sessionsThisReq,
+          clientEventsDeleted: eventsThisReq,
         },
       });
     } catch {
@@ -133,6 +176,8 @@ export async function executeGdprDeletions(
     requestsProcessed: approved.length,
     bodiesDeleted,
     reportsDeleted,
+    clientSessionsDeleted,
+    clientEventsDeleted,
     failures,
   };
 }
@@ -143,6 +188,8 @@ export interface GdprDeleteCronMetrics {
   executedTotal?: { inc: (n: number) => void };
   bodiesDeletedTotal?: { inc: (n: number) => void };
   reportsDeletedTotal?: { inc: (n: number) => void };
+  clientSessionsDeletedTotal?: { inc: (n: number) => void };
+  clientEventsDeletedTotal?: { inc: (n: number) => void };
   failuresTotal?: { inc: (n: number) => void };
 }
 
@@ -177,6 +224,8 @@ export function startGdprDeleteCron(
       opts.metrics?.executedTotal?.inc(result.requestsProcessed);
       opts.metrics?.bodiesDeletedTotal?.inc(result.bodiesDeleted);
       opts.metrics?.reportsDeletedTotal?.inc(result.reportsDeleted);
+      opts.metrics?.clientSessionsDeletedTotal?.inc(result.clientSessionsDeleted);
+      opts.metrics?.clientEventsDeletedTotal?.inc(result.clientEventsDeleted);
       opts.metrics?.failuresTotal?.inc(result.failures);
       if (result.requestsProcessed > 0) {
         opts.logger.info(result, "gdpr delete cron processed requests");

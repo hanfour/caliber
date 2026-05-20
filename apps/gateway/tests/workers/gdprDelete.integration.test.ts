@@ -35,6 +35,9 @@ import {
   evaluationReports,
   gdprDeleteRequests,
   auditLogs,
+  devices,
+  clientSessions,
+  clientEvents,
   type Database,
 } from "@caliber/db";
 import { executeGdprDeletions } from "../../src/workers/gdprDelete.js";
@@ -129,6 +132,15 @@ beforeEach(async () => {
   );
   await db.execute(
     sql`TRUNCATE TABLE request_bodies RESTART IDENTITY CASCADE`,
+  );
+  await db.execute(
+    sql`TRUNCATE TABLE client_events RESTART IDENTITY CASCADE`,
+  );
+  await db.execute(
+    sql`TRUNCATE TABLE client_sessions RESTART IDENTITY CASCADE`,
+  );
+  await db.execute(
+    sql`TRUNCATE TABLE devices RESTART IDENTITY CASCADE`,
   );
   await db.execute(
     sql`TRUNCATE TABLE usage_logs RESTART IDENTITY CASCADE`,
@@ -237,6 +249,60 @@ async function countAuditLogs(action: string): Promise<number> {
     sql`SELECT COUNT(*)::int AS cnt FROM audit_logs WHERE action = ${action}`,
   );
   return (rows.rows[0] as { cnt: number }).cnt;
+}
+
+async function countSessions(): Promise<number> {
+  const rows = await db.execute(
+    sql`SELECT COUNT(*)::int AS cnt FROM client_sessions`,
+  );
+  return (rows.rows[0] as { cnt: number }).cnt;
+}
+
+async function countEvents(): Promise<number> {
+  const rows = await db.execute(
+    sql`SELECT COUNT(*)::int AS cnt FROM client_events`,
+  );
+  return (rows.rows[0] as { cnt: number }).cnt;
+}
+
+async function seedTranscriptForUser(opts: {
+  userId: string;
+  orgId: string;
+  sessionId: string;
+  eventCount: number;
+}): Promise<void> {
+  const [device] = await db
+    .insert(devices)
+    .values({
+      userId: opts.userId,
+      orgId: opts.orgId,
+      hostname: `host-${opts.sessionId}`,
+      os: "darwin",
+      agentVersion: "0.1.0",
+    })
+    .returning({ id: devices.id });
+  const deviceId = device!.id;
+
+  await db.insert(clientSessions).values({
+    id: opts.sessionId,
+    deviceId,
+    userId: opts.userId,
+    orgId: opts.orgId,
+    sourceClient: "claude-code",
+    startedAt: new Date("2026-05-18T10:00:00Z"),
+    lastEventAt: new Date("2026-05-18T10:01:00Z"),
+  });
+
+  const rows = Array.from({ length: opts.eventCount }, (_, i) => ({
+    orgId: opts.orgId,
+    deviceId,
+    sessionId: opts.sessionId,
+    eventId: `${opts.sessionId}-evt-${i}`,
+    eventType: "user_message",
+    timestamp: new Date("2026-05-18T10:00:00Z"),
+    source: "transcript",
+  }));
+  await db.insert(clientEvents).values(rows);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -366,5 +432,81 @@ describe("executeGdprDeletions", () => {
     expect(await countBodies()).toBe(1);
 
     expect(await countAuditLogs("gdpr.delete_executed")).toBe(0);
+  });
+
+  it("5. cascade: client_sessions for (org, user) are deleted; client_events follow via FK ON DELETE CASCADE", async () => {
+    await seedUsageAndBody();
+    await seedTranscriptForUser({
+      userId,
+      orgId,
+      sessionId: `gdpr-sess-${Date.now()}`,
+      eventCount: 4,
+    });
+
+    expect(await countSessions()).toBe(1);
+    expect(await countEvents()).toBe(4);
+
+    await db.insert(gdprDeleteRequests).values({
+      orgId,
+      userId,
+      scope: "bodies",
+      approvedAt: new Date(),
+      approvedByUserId: userId,
+    });
+
+    const result = await executeGdprDeletions({ db });
+
+    expect(result.clientSessionsDeleted).toBe(1);
+    expect(result.clientEventsDeleted).toBe(4);
+    expect(await countSessions()).toBe(0);
+    expect(await countEvents()).toBe(0);
+
+    // Audit log carries the per-request cascade counts.
+    const rows = await db.execute<{ metadata: Record<string, number> }>(sql`
+      SELECT metadata FROM audit_logs
+      WHERE action = 'gdpr.delete_executed'
+    `);
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]!.metadata.clientSessionsDeleted).toBe(1);
+    expect(rows.rows[0]!.metadata.clientEventsDeleted).toBe(4);
+  });
+
+  it("6. tenant isolation: other users' sessions in the same org are NOT affected", async () => {
+    const [otherUser] = await db
+      .insert(users)
+      .values({ email: `gdpr-other-${Date.now()}@example.com` })
+      .returning();
+    const otherUserId = otherUser!.id;
+
+    await seedTranscriptForUser({
+      userId,
+      orgId,
+      sessionId: `target-sess-${Date.now()}`,
+      eventCount: 3,
+    });
+    await seedTranscriptForUser({
+      userId: otherUserId,
+      orgId,
+      sessionId: `other-sess-${Date.now()}`,
+      eventCount: 2,
+    });
+
+    expect(await countSessions()).toBe(2);
+    expect(await countEvents()).toBe(5);
+
+    await db.insert(gdprDeleteRequests).values({
+      orgId,
+      userId,
+      scope: "bodies",
+      approvedAt: new Date(),
+      approvedByUserId: userId,
+    });
+
+    const result = await executeGdprDeletions({ db });
+
+    expect(result.clientSessionsDeleted).toBe(1);
+    expect(result.clientEventsDeleted).toBe(3);
+    expect(await countSessions()).toBe(1);
+    expect(await countEvents()).toBe(2);
   });
 });
