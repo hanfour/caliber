@@ -99,6 +99,26 @@ describe("invites router", () => {
     });
   });
 
+  it("create rejects organization scope with mismatched scopeId", async () => {
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const adminA = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgA.id,
+    });
+    const caller = await callerFor(t.db, adminA.id);
+    await expect(
+      caller.invites.create({
+        orgId: orgA.id,
+        email: "x@x.test",
+        role: "org_admin",
+        scopeType: "organization",
+        scopeId: orgB.id,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("list forbidden for member (requires user.invite)", async () => {
     const org = await makeOrg(t.db);
     const user = await makeUser(t.db, {
