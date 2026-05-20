@@ -5,6 +5,7 @@ import type { Database } from "@caliber/db";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
 import { metricsPlugin } from "./plugins/metrics.js";
+import { startMetricsServer } from "./plugins/metricsServer.js";
 import { schedulerPlugin } from "./plugins/scheduler.js";
 import { dbPlugin } from "./plugins/db.js";
 import { redisPlugin } from "./redis/client.js";
@@ -514,6 +515,20 @@ async function wireEvaluatorPipeline(
 async function main() {
   const env = parseServerEnv(process.env);
   const app = await buildServer({ env });
+
+  // Private metrics listener — bound to METRICS_HOST:METRICS_PORT
+  // (default 127.0.0.1:9464) so scrapers must share a network namespace.
+  // The public listener's /metrics now requires API-key auth and is not
+  // intended for prometheus scraping. See plugins/metricsServer.ts.
+  //
+  // Started + onClose registered BEFORE the public listen() — Fastify
+  // rejects addHook("onClose", ...) once the instance has transitioned
+  // to listening state, so this ordering is load-bearing.
+  const metricsApp = await startMetricsServer(env);
+  app.addHook("onClose", async () => {
+    await metricsApp.close();
+  });
+
   const port = env.GATEWAY_PORT;
   await app.listen({ port, host: "0.0.0.0" });
 }

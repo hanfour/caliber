@@ -245,24 +245,14 @@ describe("apiKeyAuth middleware", () => {
     await app.close();
   });
 
-  it("10. /metrics bypasses middleware", async () => {
-    const app = Fastify({ logger: false });
-    const crashingDb = {
-      select: vi.fn().mockImplementation(() => {
-        throw new Error("DB should not be called for /metrics");
-      }),
-    };
-    await app.register(fakeDbPlugin(crashingDb));
-
-    await app.register(apiKeyAuthPlugin, {
-      env: { API_KEY_HASH_PEPPER: PEPPER } as never,
-    });
-
-    app.get("/metrics", async () => ({ status: "ok" }));
-
+  it("10. /metrics on the public listener is gated by auth (returns 401 unauth)", async () => {
+    // Audit 2026-05-20 finding #5: /metrics moved to a private listener
+    // (plugins/metricsServer.ts) bound to METRICS_HOST:METRICS_PORT.
+    // The public listener's /metrics now requires an API key — scrapers
+    // without one see 401, which is the desired hardening.
+    const app = await buildTestApp([BASE_FIXTURE]);
     const res = await app.inject({ method: "GET", url: "/metrics" });
-    expect(res.statusCode).toBe(200);
-    expect(crashingDb.select).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(401);
     await app.close();
   });
 

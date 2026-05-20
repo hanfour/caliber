@@ -115,6 +115,23 @@ export const serverEnvSchema = z
     INGEST_MAX_DECOMPRESSED_BYTES: emptyAsUndefined(
       z.coerce.number().int().min(1024).default(200 * 1024 * 1024),
     ),
+    /**
+     * Bind address of the gateway's private /metrics listener. Default
+     * `127.0.0.1` keeps it loopback-only inside the container; a sidecar
+     * scraper joins the same network namespace. Set to `0.0.0.0` only if
+     * the scrape target is explicitly on the same trusted internal
+     * docker network and the listener port is NOT mapped to the host.
+     */
+    METRICS_HOST: emptyAsUndefined(z.string().default("127.0.0.1")),
+    /**
+     * Port for the gateway's private /metrics listener. Default 9464
+     * (the Prometheus exporter convention). Operators should NOT expose
+     * this port via docker-compose `ports:` — scrapers should reach it
+     * over the internal docker network or via a sidecar.
+     */
+    METRICS_PORT: emptyAsUndefined(
+      z.coerce.number().int().min(1).max(65535).default(9464),
+    ),
     GATEWAY_BUFFER_WINDOW_MS: emptyAsUndefined(
       z.coerce.number().int().min(0).default(500),
     ),

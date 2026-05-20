@@ -36,7 +36,12 @@ export interface ApiKeyAuthOptions {
   env: ServerEnv;
 }
 
-const PUBLIC_PATHS = new Set(["/health", "/metrics"]);
+// /metrics is intentionally NOT public on the gateway's public listener.
+// It moved to a private listener (apps/gateway/src/plugins/metricsServer.ts)
+// bound to METRICS_HOST:METRICS_PORT. Unauthenticated requests to
+// `/metrics` on the public port now hit apiKeyAuth and return 401, which
+// is the desired behavior per audit 2026-05-20 finding #5.
+const PUBLIC_PATHS = new Set(["/health"]);
 
 export const apiKeyAuthPlugin = fp<ApiKeyAuthOptions>(pluginBody, {
   name: "apiKeyAuthPlugin",

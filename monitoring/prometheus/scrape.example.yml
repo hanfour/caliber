@@ -11,12 +11,16 @@ scrape_configs:
     scrape_interval: 15s
     static_configs:
       - targets:
-          # Replace with your gateway's host:port. For docker-compose:
-          - "gateway:3002"
+          # Gateway exposes /metrics on the private port METRICS_PORT
+          # (default 9464). For docker-compose the prometheus service
+          # must share the same network so the loopback bind on
+          # METRICS_HOST=127.0.0.1 is reachable, OR override METRICS_HOST
+          # to the gateway container's internal IP / 0.0.0.0 with the
+          # port NOT mapped to the host. The public listener on 3002
+          # returns 401 for /metrics (audit 2026-05-20 finding #5).
+          - "gateway:9464"
           # For Render / Fly / Railway: use the service's internal
-          # network address (Render: caliber-gateway:3002 within the
-          # blueprint's network; Fly: caliber-gateway.flycast:3002;
-          # Railway: caliber-gateway.railway.internal:3002).
+          # network address with port 9464.
 
   - job_name: caliber-api
     metrics_path: /metrics

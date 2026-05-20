@@ -72,7 +72,10 @@ describe("gateway server", () => {
     await app.close();
   });
 
-  it("/metrics still bypasses auth in enabled mode", async () => {
+  it("/metrics on the public listener requires auth (moved to private listener)", async () => {
+    // Audit 2026-05-20 finding #5: /metrics relocated to a private
+    // listener bound to METRICS_HOST:METRICS_PORT (default 127.0.0.1:9464).
+    // Public listener now 401s unauthenticated metric scrape attempts.
     const app = await buildServer({
       env: makeEnv({
         ENABLE_GATEWAY: "true",
@@ -85,7 +88,7 @@ describe("gateway server", () => {
       redis: new RedisMock() as unknown as Redis,
     });
     const res = await app.inject({ method: "GET", url: "/metrics" });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(401);
     await app.close();
   });
 
