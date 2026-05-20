@@ -58,13 +58,17 @@ export async function createInvite(
     return row
   } catch (err) {
     // Postgres unique_violation → surface as CONFLICT so router maps to 409.
-    if (
-      err &&
-      typeof err === 'object' &&
-      'code' in err &&
-      (err as { code?: string }).code === '23505'
-    ) {
-      throw new ServiceError('CONFLICT', 'invite already exists')
+    // drizzle 0.45 nests the pg error under `.cause` while older drizzle
+    // exposed `.code` on the thrown error directly; check both shapes.
+    for (const c of [err, (err as { cause?: unknown })?.cause]) {
+      if (
+        c &&
+        typeof c === 'object' &&
+        'code' in c &&
+        (c as { code?: string }).code === '23505'
+      ) {
+        throw new ServiceError('CONFLICT', 'invite already exists')
+      }
     }
     throw err
   }

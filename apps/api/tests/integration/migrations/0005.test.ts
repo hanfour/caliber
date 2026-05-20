@@ -165,7 +165,7 @@ describe("migration 0005 request_body_facets", () => {
         extractedWithModel: "claude-haiku-4-5",
         promptVersion: 1,
       }),
-    ).rejects.toThrow(/unique|duplicate/i);
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
   });
 
   it("cascades delete from request_bodies", async () => {

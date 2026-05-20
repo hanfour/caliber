@@ -41,11 +41,17 @@ function ensureGatewayEnabled(env: { ENABLE_GATEWAY: boolean }) {
 const PG_UNIQUE_VIOLATION = "23505";
 
 function isUniqueViolation(err: unknown, constraint?: string): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: string; constraint?: string };
-  if (e.code !== PG_UNIQUE_VIOLATION) return false;
-  if (constraint === undefined) return true;
-  return e.constraint === constraint;
+  // drizzle 0.45 wraps node-postgres errors in DrizzleQueryError; the
+  // original pg error (with .code / .constraint) lands on `.cause`. Walk
+  // through to stay agnostic to drizzle's error wrapping.
+  for (const candidate of [err, (err as { cause?: unknown })?.cause]) {
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const e = candidate as { code?: string; constraint?: string };
+    if (e.code !== PG_UNIQUE_VIOLATION) continue;
+    if (constraint === undefined) return true;
+    if (e.constraint === constraint) return true;
+  }
+  return false;
 }
 
 const CONSTRAINT_GROUP_NAME = "account_groups_org_name_unique";
