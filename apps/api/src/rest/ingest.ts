@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import type { FastifyPluginAsync } from "fastify";
-import { gunzipSync } from "node:zlib";
+import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import { createGunzip } from "node:zlib";
 import {
   devices,
   deviceApiKeys,
@@ -141,30 +141,101 @@ interface IngestError {
   error: string;
 }
 
+// Streaming gunzip with a hard cap on the decompressed byte total. Aborts
+// as soon as the cap is exceeded so a gzip bomb (small wire, gigabytes
+// decoded) cannot consume memory beyond `limit`. Used to be `gunzipSync`,
+// which trusted the compressor and only honoured the wire-side bodyLimit.
+async function gunzipWithLimit(buf: Buffer, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const gunzip = createGunzip();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let aborted = false;
+    gunzip.on("data", (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > limit) {
+        aborted = true;
+        const e = new Error("decompressed_too_large") as Error & {
+          statusCode?: number;
+        };
+        e.statusCode = 413;
+        gunzip.destroy(e);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    gunzip.on("end", () => {
+      if (!aborted) resolve(Buffer.concat(chunks));
+    });
+    gunzip.on("error", reject);
+    gunzip.end(buf);
+  });
+}
+
+// Per-request decoration so the handler can read the device the
+// preHandler hook resolved. Declared via Fastify's decorateRequest so
+// the property exists with a stable shape.
+interface IngestRequest extends FastifyRequest {
+  resolvedDevice?: ResolvedDevice;
+}
+
 export function ingestRoutes(env: ServerEnv): FastifyPluginAsync {
   return async (fastify) => {
+    fastify.decorateRequest("resolvedDevice", null);
+
+    // Auth runs in onRequest — before the JSON content-type parser. A
+    // failed auth short-circuits with 401 and Fastify never invokes the
+    // parser, so the gzip body is not decompressed. Defends against an
+    // unauthenticated gzip-bomb DoS.
+    fastify.addHook("onRequest", async (req, reply) => {
+      if (req.method !== "POST" || req.url.split("?")[0] !== "/v1/ingest") {
+        return;
+      }
+      if (!env.ENABLE_GATEWAY) {
+        reply.code(404).send({ error: "not_found" });
+        return reply;
+      }
+      const pepper = env.API_KEY_HASH_PEPPER;
+      if (!pepper) {
+        reply.code(500).send({ error: "server_misconfigured" });
+        return reply;
+      }
+      const auth = await resolveDevice(
+        fastify.db,
+        pepper,
+        req.headers.authorization,
+      );
+      if (!auth.ok) {
+        reply.code(401).send({ error: auth.error });
+        return reply;
+      }
+      (req as IngestRequest).resolvedDevice = auth.device;
+    });
+
     // Scoped JSON parser: handles gzipped + raw JSON within this plugin only.
     // The default fastify parser is removed so we own the application/json path
-    // (including content-encoding: gzip decoding).
+    // (including content-encoding: gzip decoding with a decompressed-size cap).
     fastify.removeContentTypeParser("application/json");
     fastify.addContentTypeParser(
       "application/json",
       { parseAs: "buffer", bodyLimit: INGEST_BODY_LIMIT },
-      (req, body, done) => {
+      async (req: FastifyRequest, body: Buffer) => {
         try {
           const buf = body as Buffer;
           const enc = String(req.headers["content-encoding"] ?? "").toLowerCase();
           const utf8 = enc.includes("gzip")
-            ? gunzipSync(buf).toString("utf8")
+            ? (
+                await gunzipWithLimit(buf, env.INGEST_MAX_DECOMPRESSED_BYTES)
+              ).toString("utf8")
             : buf.toString("utf8");
-          done(null, JSON.parse(utf8));
+          return JSON.parse(utf8);
         } catch (err) {
           const e =
-            err instanceof Error
-              ? err
-              : new Error("invalid_json");
-          (e as Error & { statusCode?: number }).statusCode = 400;
-          done(e);
+            err instanceof Error ? err : new Error("invalid_json");
+          const statusCode =
+            (e as Error & { statusCode?: number }).statusCode ?? 400;
+          (e as Error & { statusCode?: number }).statusCode = statusCode;
+          throw e;
         }
       },
     );
@@ -173,26 +244,15 @@ export function ingestRoutes(env: ServerEnv): FastifyPluginAsync {
       "/v1/ingest",
       { bodyLimit: INGEST_BODY_LIMIT },
       async (req, reply) => {
-        if (!env.ENABLE_GATEWAY) {
-          reply.code(404);
-          return { error: "not_found" };
-        }
-        const pepper = env.API_KEY_HASH_PEPPER;
-        if (!pepper) {
+        // Auth already enforced in onRequest; resolvedDevice is guaranteed
+        // present here. The defensive nullish check pacifies the type system
+        // and surfaces a clear 500 if a future refactor decouples the hook.
+        const device = (req as IngestRequest).resolvedDevice;
+        if (!device) {
           reply.code(500);
-          return { error: "server_misconfigured" };
+          return { error: "auth_state_missing" };
         }
-
-        const auth = await resolveDevice(
-          fastify.db,
-          pepper,
-          req.headers.authorization,
-        );
-        if (!auth.ok) {
-          reply.code(401);
-          return { error: auth.error };
-        }
-        const { deviceId, userId, orgId } = auth.device;
+        const { deviceId, userId, orgId } = device;
 
         const parsed = ingestBodySchema.safeParse(req.body);
         if (!parsed.success) {

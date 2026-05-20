@@ -105,6 +105,16 @@ export const serverEnvSchema = z
     GATEWAY_MAX_BODY_BYTES: emptyAsUndefined(
       z.coerce.number().int().min(1024).default(10485760),
     ),
+    /**
+     * Hard cap on the decompressed body size of POST /v1/ingest, in bytes.
+     * The wire body limit is 50 MB compressed (see ingest.ts) — the decode
+     * cap below catches gzip bombs where a small compressed payload would
+     * expand into many gigabytes. Default 200 MB matches the realistic
+     * ceiling for a daemon shipping a few hundred sessions in one batch.
+     */
+    INGEST_MAX_DECOMPRESSED_BYTES: emptyAsUndefined(
+      z.coerce.number().int().min(1024).default(200 * 1024 * 1024),
+    ),
     GATEWAY_BUFFER_WINDOW_MS: emptyAsUndefined(
       z.coerce.number().int().min(0).default(500),
     ),

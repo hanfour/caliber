@@ -101,15 +101,21 @@ function makeSession(overrides: Record<string, unknown> = {}) {
   };
 }
 
+beforeAll(async () => {
+  testDb = await setupTestDb();
+});
+
+afterAll(async () => {
+  await testDb.stop();
+});
+
 describe("POST /v1/ingest", () => {
   beforeAll(async () => {
-    testDb = await setupTestDb();
     app = await buildApp();
   });
 
   afterAll(async () => {
     await app.close();
-    await testDb.stop();
   });
 
   beforeEach(async () => {
@@ -412,5 +418,82 @@ describe("POST /v1/ingest", () => {
     expect(row!.lastSeenAt.getTime()).toBeGreaterThan(
       new Date("2020-01-01T00:00:00Z").getTime(),
     );
+  });
+});
+
+// Audit 2026-05-20 finding #4 — auth runs before the gzip parser so an
+// unauthenticated bomb is rejected with 401 before any decompression
+// happens; authenticated payloads that decode beyond the cap return 413.
+describe("POST /v1/ingest gzip auth + decompressed-size cap", () => {
+  let cappedApp: FastifyInstance;
+  // Tiny cap so the test doesn't have to gzip 200MB worth of zeros.
+  const CAP_BYTES = 8 * 1024; // 8 KB
+  const cappedEnv = {
+    ...defaultTestEnv,
+    INGEST_MAX_DECOMPRESSED_BYTES: CAP_BYTES,
+  };
+
+  beforeAll(async () => {
+    cappedApp = Fastify({ logger: false });
+    cappedApp.decorate("db", testDb.db);
+    await cappedApp.register(ingestRoutes(cappedEnv));
+  });
+
+  afterAll(async () => {
+    await cappedApp.close();
+  });
+
+  it("unauthenticated request with a gzip bomb is rejected with 401, parser never runs", async () => {
+    // Compress a payload that, if decoded, would breach CAP_BYTES.
+    // Highly compressible 64 KB of zeros yields a small gzip wire size but
+    // decodes well past the 8 KB cap. With auth-before-parse, the request
+    // 401s before gunzip ever touches the buffer.
+    const bomb = gzipSync(Buffer.alloc(CAP_BYTES * 8, 0));
+    const res = await cappedApp.inject({
+      method: "POST",
+      url: "/v1/ingest",
+      headers: { "content-encoding": "gzip", "content-type": "application/json" },
+      payload: bomb,
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe("missing_token");
+  });
+
+  it("authenticated request whose decoded body exceeds the cap returns 413", async () => {
+    const fx = await seedDevice();
+    const bomb = gzipSync(Buffer.alloc(CAP_BYTES * 8, 0));
+    const res = await cappedApp.inject({
+      method: "POST",
+      url: "/v1/ingest",
+      headers: {
+        authorization: `Bearer ${fx.rawKey}`,
+        "content-encoding": "gzip",
+        "content-type": "application/json",
+      },
+      payload: bomb,
+    });
+    expect(res.statusCode).toBe(413);
+  });
+
+  it("authenticated request whose decoded body is under the cap still succeeds", async () => {
+    const fx = await seedDevice();
+    const body = JSON.stringify({
+      agent_version: "0.1.0",
+      redaction_mode: "metadata-only",
+      sessions: [makeSession()],
+    });
+    // Under the 8 KB cap for a 1-session payload.
+    const compressed = gzipSync(Buffer.from(body, "utf8"));
+    const res = await cappedApp.inject({
+      method: "POST",
+      url: "/v1/ingest",
+      headers: {
+        authorization: `Bearer ${fx.rawKey}`,
+        "content-encoding": "gzip",
+        "content-type": "application/json",
+      },
+      payload: compressed,
+    });
+    expect(res.statusCode).toBe(200);
   });
 });
