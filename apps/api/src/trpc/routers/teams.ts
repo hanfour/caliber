@@ -7,6 +7,11 @@ import {
   permissionProcedure,
   router
 } from '../procedures.js'
+import {
+  assertDepartmentBelongsToOrg,
+  assertUserMemberOfOrg
+} from '../../services/tenancy.js'
+import { mapServiceError } from '../errors.js'
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)
 const uuid = z.string().uuid()
@@ -49,6 +54,13 @@ export const teamsRouter = router({
       deptId: input.departmentId
     })
   ).mutation(async ({ ctx, input }) => {
+    if (input.departmentId) {
+      try {
+        await assertDepartmentBelongsToOrg(ctx.db, input.departmentId, input.orgId)
+      } catch (e) {
+        throw mapServiceError(e)
+      }
+    }
     const [row] = await ctx.db
       .insert(teams)
       .values({
@@ -71,7 +83,23 @@ export const teamsRouter = router({
   ).mutation(async ({ ctx, input }) => {
     const patch: Record<string, unknown> = {}
     if (input.name !== undefined) patch.name = input.name
-    if (input.departmentId !== undefined) patch.departmentId = input.departmentId
+    if (input.departmentId !== undefined) {
+      if (input.departmentId !== null) {
+        // Look up team's org so we can prove the new department lives in it.
+        const [existing] = await ctx.db
+          .select({ orgId: teams.orgId })
+          .from(teams)
+          .where(eq(teams.id, input.id))
+          .limit(1)
+        if (!existing) throw new TRPCError({ code: 'NOT_FOUND' })
+        try {
+          await assertDepartmentBelongsToOrg(ctx.db, input.departmentId, existing.orgId)
+        } catch (e) {
+          throw mapServiceError(e)
+        }
+      }
+      patch.departmentId = input.departmentId
+    }
     const [row] = await ctx.db.update(teams).set(patch).where(eq(teams.id, input.id)).returning()
     if (!row) throw new TRPCError({ code: 'NOT_FOUND' })
     return row
@@ -89,6 +117,18 @@ export const teamsRouter = router({
     z.object({ teamId: uuid, userId: uuid }),
     (_, input) => ({ type: 'team.add_member', teamId: input.teamId })
   ).mutation(async ({ ctx, input }) => {
+    // Resolve team's org so the membership check rejects strangers.
+    const [team] = await ctx.db
+      .select({ orgId: teams.orgId })
+      .from(teams)
+      .where(and(eq(teams.id, input.teamId), isNull(teams.deletedAt)))
+      .limit(1)
+    if (!team) throw new TRPCError({ code: 'NOT_FOUND' })
+    try {
+      await assertUserMemberOfOrg(ctx.db, input.userId, team.orgId)
+    } catch (e) {
+      throw mapServiceError(e)
+    }
     await ctx.db
       .insert(teamMembers)
       .values({ teamId: input.teamId, userId: input.userId })

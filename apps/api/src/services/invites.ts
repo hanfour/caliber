@@ -5,6 +5,7 @@ import { invites, organizationMembers, roleAssignments } from '@caliber/db'
 import type { Role, ScopeType } from '@caliber/auth'
 import { ServiceError } from '../trpc/errors.js'
 import { writeAudit } from './audit.js'
+import { assertScopeBelongsToOrg } from './tenancy.js'
 
 function newToken() {
   return randomBytes(32).toString('base64url')
@@ -21,6 +22,11 @@ export async function createInvite(
     scopeId: string | null
   }
 ) {
+  // Cross-tenant guard: invite.scopeId must resolve to input.orgId for
+  // dept/team scopes (and equal orgId for organization scope). Without this,
+  // a caller with user.invite on org-A could create an invite whose role lands
+  // on a department/team from org-B once accepted.
+  await assertScopeBelongsToOrg(db, input.scopeType, input.scopeId, input.orgId)
   try {
     const [row] = await db
       .insert(invites)
@@ -129,6 +135,11 @@ export async function acceptInvite(
     if (invite.email.toLowerCase() !== actor.email.toLowerCase()) {
       throw new ServiceError('FORBIDDEN', 'invite email does not match')
     }
+    // Defensive re-check: invite was validated at create time, but the
+    // referenced department/team could have been deleted or (in older rows
+    // predating this guard) was never validated. Reject before granting a
+    // role with a dangling/foreign scopeId.
+    await assertScopeBelongsToOrg(tx, invite.scopeType, invite.scopeId, invite.orgId)
     await tx
       .insert(organizationMembers)
       .values({ orgId: invite.orgId, userId: actor.id })

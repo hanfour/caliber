@@ -53,7 +53,11 @@ export const rolesRouter = router({
         code: "NOT_FOUND",
         message: "target user not found",
       });
-    return grantRole(ctx.db, ctx.user.id, input);
+    try {
+      return await grantRole(ctx.db, ctx.user.id, input);
+    } catch (e) {
+      throw mapServiceError(e);
+    }
   }),
 
   revoke: protectedProcedure

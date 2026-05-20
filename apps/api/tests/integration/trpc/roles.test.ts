@@ -25,7 +25,7 @@ describe("roles router", () => {
       scopeType: "organization",
       scopeId: org.id,
     });
-    const target = await makeUser(t.db);
+    const target = await makeUser(t.db, { orgId: org.id });
     const caller = await callerFor(t.db, admin.id);
     const res = await caller.roles.grant({
       userId: target.id,
@@ -64,7 +64,7 @@ describe("roles router", () => {
       scopeType: "organization",
       scopeId: org.id,
     });
-    const target = await makeUser(t.db);
+    const target = await makeUser(t.db, { orgId: org.id });
     const caller = await callerFor(t.db, admin.id);
     const granted = await caller.roles.grant({
       userId: target.id,
@@ -90,7 +90,7 @@ describe("roles router", () => {
       scopeType: "organization",
       scopeId: orgB.id,
     });
-    const victim = await makeUser(t.db);
+    const victim = await makeUser(t.db, { orgId: orgB.id });
 
     const callerB = await callerFor(t.db, adminB.id);
     const granted = await callerB.roles.grant({
@@ -119,6 +119,29 @@ describe("roles router", () => {
     const caller = await callerFor(t.db, admin.id);
     const list = await caller.roles.listForUser({ userId: member.id });
     expect(Array.isArray(list)).toBe(true);
+  });
+
+  it("org_admin of org A cannot grant role on an org-B-only user", async () => {
+    // Cross-tenant guard: even when the grantor has authority at the target
+    // scope, the grantee must actually live in the same org.
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const teamA = await makeTeam(t.db, orgA.id);
+    const adminA = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgA.id,
+    });
+    const orgBOnlyUser = await makeUser(t.db, { orgId: orgB.id });
+    const caller = await callerFor(t.db, adminA.id);
+    await expect(
+      caller.roles.grant({
+        userId: orgBOnlyUser.id,
+        role: "team_manager",
+        scopeType: "team",
+        scopeId: teamA.id,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("team_manager cannot listForUser for an org-peer outside their team", async () => {
