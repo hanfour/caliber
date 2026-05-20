@@ -101,26 +101,32 @@ describe("migration 0005 request_body_facets", () => {
   });
 
   it("creates request_body_facets with expected columns", async () => {
+    // arrayContaining (not strict equality) so future migrations that extend
+    // request_body_facets — e.g. 0014's transcript-only facet columns — don't
+    // regress this 0005-scoped check. The contract here is "0005 introduced
+    // exactly these columns"; later migrations adding more is orthogonal.
     const result = await testDb.db.execute<{ column_name: string }>(sql`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'request_body_facets'
       ORDER BY ordinal_position
     `);
-    expect(result.rows.map((r) => r.column_name)).toEqual([
-      "id",
-      "request_id",
-      "org_id",
-      "session_type",
-      "outcome",
-      "claude_helpfulness",
-      "friction_count",
-      "bugs_caught_count",
-      "codex_errors_count",
-      "extracted_at",
-      "extracted_with_model",
-      "prompt_version",
-      "extraction_error",
-    ]);
+    expect(result.rows.map((r) => r.column_name)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "request_id",
+        "org_id",
+        "session_type",
+        "outcome",
+        "claude_helpfulness",
+        "friction_count",
+        "bugs_caught_count",
+        "codex_errors_count",
+        "extracted_at",
+        "extracted_with_model",
+        "prompt_version",
+        "extraction_error",
+      ]),
+    );
   });
 
   it("has expected indexes and unique constraint on request_id", async () => {

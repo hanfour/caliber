@@ -4,6 +4,7 @@ import {
   text,
   smallint,
   integer,
+  decimal,
   timestamp,
   index,
 } from "drizzle-orm/pg-core";
@@ -38,6 +39,16 @@ export const requestBodyFacets = pgTable(
     frictionCount: integer("friction_count"),
     bugsCaughtCount: integer("bugs_caught_count"),
     codexErrorsCount: integer("codex_errors_count"),
+    // Phase 1 (0014) transcript-only signals. Populated by the future
+    // evaluator-on-evaluator_events cron; NULL on gateway-source-only rows.
+    subagentCallCount: integer("subagent_call_count"),
+    reasoningTokenRatio: decimal("reasoning_token_ratio", {
+      precision: 5,
+      scale: 4,
+    }),
+    toolUseDiversity: integer("tool_use_diversity"),
+    // session_topology ∈ linear | branching | deep_tree
+    sessionTopology: text("session_topology"),
     extractedAt: timestamp("extracted_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
