@@ -9,7 +9,8 @@ import {
   Users,
   UserPlus,
   FileText,
-  UserCircle
+  UserCircle,
+  Laptop
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/client'
@@ -26,7 +27,7 @@ interface SessionLike {
 }
 
 type NavItemKey =
-  | 'dashboard' | 'organizations' | 'teams' | 'invites' | 'auditLog' | 'profile'
+  | 'dashboard' | 'organizations' | 'teams' | 'invites' | 'auditLog' | 'profile' | 'devices'
 
 interface NavItem {
   href: string | ((p: Perm, session: SessionLike | undefined) => string | null)
@@ -74,7 +75,8 @@ const SECTIONS: NavSection[] = [
   {
     titleKey: 'account',
     items: [
-      { href: '/dashboard/profile', labelKey: 'profile', icon: UserCircle, visible: () => true }
+      { href: '/dashboard/profile', labelKey: 'profile', icon: UserCircle, visible: () => true },
+      { href: '/dashboard/devices', labelKey: 'devices', icon: Laptop, visible: (p) => p.hasOrg }
     ]
   }
 ]

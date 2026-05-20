@@ -48,7 +48,8 @@
       "teams": "チーム",
       "invites": "招待",
       "auditLog": "監査ログ",
-      "profile": "プロフィール"
+      "profile": "プロフィール",
+      "devices": "デバイス"
     },
     "topbar": {
       "switchTheme": "テーマを切り替え",
@@ -930,5 +931,40 @@
     "revealBtn": "キーを公開",
     "copiedToast": "コピーしました",
     "copyFailToast": "クリップボードが利用できません"
+  },
+  "devices": {
+    "pageTitle": "デバイス",
+    "pageSubtitle": "caliber-agent を実行しているマシンを管理します。",
+    "title": "あなたのデバイス",
+    "description": "登録済みデバイスはローカル CLI ログ（claude-code、codex）を caliber に送信します。",
+    "newEnrollment": "デバイスを登録",
+    "noDevicesHint": "まだデバイスが登録されていません。最初のマシンを登録するためにトークンを発行してください。",
+    "hostname": "ホスト名",
+    "os": "OS",
+    "agentVersion": "Agent バージョン",
+    "status": "ステータス",
+    "enrolled": "登録日",
+    "lastSeen": "最終アクセス",
+    "statusActive": "有効",
+    "confirmRevoke": "デバイス「{name}」を取り消しますか？すぐにデータ送信が停止されます。",
+    "revokedToast": "デバイスを取り消しました",
+    "revokeAriaLabel": "{name} を取り消す",
+    "enrollmentDialog": {
+      "title": "新しいデバイスを登録",
+      "description": "ワンタイムトークンを発行します。caliber-agent に貼り付けるか、表示される curl コマンドを実行してください。",
+      "issue": "トークン発行",
+      "issuing": "発行中…",
+      "issuedTitle": "トークンを発行しました",
+      "issuedDescription": "このトークンを 1 時間以内にデバイスで使用してください。",
+      "warning": "このトークンは {expiresAt} に期限切れとなり、一度しか使用できません。パスワードと同じように扱ってください。",
+      "tokenLabel": "トークン",
+      "curlLabel": "curl ワンライナー",
+      "curlHint": "デバイスで CALIBER_API_BASE 環境変数を設定してから実行してください。",
+      "copyTokenAriaLabel": "トークンをクリップボードにコピー",
+      "copyCurlAriaLabel": "curl コマンドをクリップボードにコピー",
+      "done": "完了",
+      "copied": "コピーしました",
+      "copyFail": "クリップボードを利用できません"
+    }
   }
 }

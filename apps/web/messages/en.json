@@ -48,7 +48,8 @@
       "teams": "Teams",
       "invites": "Invites",
       "auditLog": "Audit Log",
-      "profile": "Profile"
+      "profile": "Profile",
+      "devices": "Devices"
     },
     "topbar": {
       "switchTheme": "Toggle theme",
@@ -930,5 +931,40 @@
     "revealBtn": "Reveal key",
     "copiedToast": "Copied",
     "copyFailToast": "Clipboard unavailable"
+  },
+  "devices": {
+    "pageTitle": "Devices",
+    "pageSubtitle": "Manage the machines running caliber-agent.",
+    "title": "Your devices",
+    "description": "Enrolled devices ship local CLI transcripts (claude-code, codex) to caliber.",
+    "newEnrollment": "Enroll device",
+    "noDevicesHint": "No devices enrolled yet. Issue a token to register your first machine.",
+    "hostname": "Hostname",
+    "os": "OS",
+    "agentVersion": "Agent",
+    "status": "Status",
+    "enrolled": "Enrolled",
+    "lastSeen": "Last seen",
+    "statusActive": "Active",
+    "confirmRevoke": "Revoke device \"{name}\"? It will stop ingesting data immediately.",
+    "revokedToast": "Device revoked",
+    "revokeAriaLabel": "Revoke {name}",
+    "enrollmentDialog": {
+      "title": "Enroll a new device",
+      "description": "Issue a one-time token. Paste it into caliber-agent or run the curl one-liner shown next.",
+      "issue": "Issue token",
+      "issuing": "Issuing…",
+      "issuedTitle": "Token issued",
+      "issuedDescription": "Use this token within one hour to enroll the device.",
+      "warning": "This token expires at {expiresAt} and is single-use. Treat it like a password.",
+      "tokenLabel": "Token",
+      "curlLabel": "Curl one-liner",
+      "curlHint": "On the device, set CALIBER_API_BASE to your caliber URL before running.",
+      "copyTokenAriaLabel": "Copy token to clipboard",
+      "copyCurlAriaLabel": "Copy curl command to clipboard",
+      "done": "Done",
+      "copied": "Copied",
+      "copyFail": "Clipboard unavailable"
+    }
   }
 }

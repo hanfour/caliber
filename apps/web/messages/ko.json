@@ -48,7 +48,8 @@
       "teams": "팀",
       "invites": "초대",
       "auditLog": "감사 로그",
-      "profile": "프로필"
+      "profile": "프로필",
+      "devices": "디바이스"
     },
     "topbar": {
       "switchTheme": "테마 전환",
@@ -930,5 +931,40 @@
     "revealBtn": "키 공개",
     "copiedToast": "복사됨",
     "copyFailToast": "클립보드를 사용할 수 없습니다"
+  },
+  "devices": {
+    "pageTitle": "디바이스",
+    "pageSubtitle": "caliber-agent를 실행하는 머신을 관리합니다.",
+    "title": "내 디바이스",
+    "description": "등록된 디바이스는 로컬 CLI 기록(claude-code, codex)을 caliber로 전송합니다.",
+    "newEnrollment": "디바이스 등록",
+    "noDevicesHint": "아직 등록된 디바이스가 없습니다. 첫 번째 머신을 등록하려면 토큰을 발행하세요.",
+    "hostname": "호스트명",
+    "os": "OS",
+    "agentVersion": "Agent 버전",
+    "status": "상태",
+    "enrolled": "등록일",
+    "lastSeen": "최근 접속",
+    "statusActive": "활성",
+    "confirmRevoke": "디바이스 \"{name}\"을(를) 취소하시겠어요? 즉시 데이터 전송이 중지됩니다.",
+    "revokedToast": "디바이스가 취소되었습니다",
+    "revokeAriaLabel": "{name} 취소",
+    "enrollmentDialog": {
+      "title": "새 디바이스 등록",
+      "description": "일회용 토큰을 발행합니다. 토큰을 caliber-agent에 붙여넣거나, 표시된 curl 한 줄 명령을 실행하세요.",
+      "issue": "토큰 발행",
+      "issuing": "발행 중…",
+      "issuedTitle": "토큰이 발행되었습니다",
+      "issuedDescription": "이 토큰을 1시간 이내에 디바이스에서 사용하세요.",
+      "warning": "이 토큰은 {expiresAt}에 만료되며 한 번만 사용할 수 있습니다. 비밀번호처럼 다루세요.",
+      "tokenLabel": "토큰",
+      "curlLabel": "curl 한 줄 명령",
+      "curlHint": "디바이스에서 CALIBER_API_BASE 환경 변수를 설정한 후 실행하세요.",
+      "copyTokenAriaLabel": "토큰을 클립보드에 복사",
+      "copyCurlAriaLabel": "curl 명령을 클립보드에 복사",
+      "done": "완료",
+      "copied": "복사됨",
+      "copyFail": "클립보드를 사용할 수 없음"
+    }
   }
 }

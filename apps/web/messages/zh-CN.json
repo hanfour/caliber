@@ -48,7 +48,8 @@
       "teams": "团队",
       "invites": "邀请",
       "auditLog": "审计日志",
-      "profile": "个人资料"
+      "profile": "个人资料",
+      "devices": "设备"
     },
     "topbar": {
       "switchTheme": "切换主题",
@@ -930,5 +931,40 @@
     "revealBtn": "揭示密钥",
     "copiedToast": "已复制",
     "copyFailToast": "剪贴板不可用"
+  },
+  "devices": {
+    "pageTitle": "设备",
+    "pageSubtitle": "管理运行 caliber-agent 的个人设备。",
+    "title": "你的设备",
+    "description": "已认领的设备会把本机 CLI 记录（claude-code、codex）上传到 caliber。",
+    "newEnrollment": "新增设备",
+    "noDevicesHint": "尚未认领任何设备。签发 token 以注册第一台机器。",
+    "hostname": "主机名",
+    "os": "操作系统",
+    "agentVersion": "Agent 版本",
+    "status": "状态",
+    "enrolled": "注册时间",
+    "lastSeen": "最后上线",
+    "statusActive": "启用中",
+    "confirmRevoke": "撤销设备「{name}」？该设备会立即停止上传数据。",
+    "revokedToast": "设备已撤销",
+    "revokeAriaLabel": "撤销 {name}",
+    "enrollmentDialog": {
+      "title": "新增设备认领",
+      "description": "签发一次性 token。把 token 粘贴到 caliber-agent，或运行下方的 curl 一行命令。",
+      "issue": "签发 Token",
+      "issuing": "签发中…",
+      "issuedTitle": "Token 已签发",
+      "issuedDescription": "请在 1 小时内使用此 token 认领设备。",
+      "warning": "Token 在 {expiresAt} 过期，只能使用一次。请妥善保管。",
+      "tokenLabel": "Token",
+      "curlLabel": "Curl 一行命令",
+      "curlHint": "在设备端先设置 CALIBER_API_BASE 环境变量，再运行命令。",
+      "copyTokenAriaLabel": "复制 token 到剪贴板",
+      "copyCurlAriaLabel": "复制 curl 命令到剪贴板",
+      "done": "完成",
+      "copied": "已复制",
+      "copyFail": "剪贴板不可用"
+    }
   }
 }
