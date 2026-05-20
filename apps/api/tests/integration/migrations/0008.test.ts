@@ -187,7 +187,9 @@ describe("migration 0008 account_groups + group_id + subscription_tier", () => {
         name: `bad-${Date.now()}`,
         platform: "bedrock",
       }),
-    ).rejects.toThrow(/account_groups_platform_values/);
+    ).rejects.toMatchObject({
+      cause: { code: "23514", constraint: "account_groups_platform_values" },
+    });
   });
 
   it("backfill creates one legacy-anthropic group per org and adds existing anthropic accounts as members", async () => {
@@ -286,7 +288,9 @@ describe("migration 0008 account_groups + group_id + subscription_tier", () => {
         name: "dup-test",
         platform: "openai",
       }),
-    ).rejects.toThrow(/account_groups_org_name_unique|unique|duplicate/i);
+    ).rejects.toMatchObject({
+      cause: { code: "23505", constraint: "account_groups_org_name_unique" },
+    });
   });
 
   it("ON DELETE CASCADE removes account_group_members when their account_groups parent is deleted", async () => {

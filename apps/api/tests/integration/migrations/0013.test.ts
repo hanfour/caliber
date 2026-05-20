@@ -187,7 +187,7 @@ describe("migration 0013 multi-source ingest phase 1", () => {
           '2026-05-18 10:00:00+00'
         )
       `),
-    ).rejects.toThrow(/client_events_dedup_key|duplicate key/i);
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
   });
 
   it("DROP PARTITION removes a month's data cleanly (retention path)", async () => {
