@@ -83,6 +83,13 @@ func TestEnrollHappyPath_WritesConfigAndKeychain(t *testing.T) {
 	if !strings.Contains(string(logBytes), "add-generic-password") {
 		t.Errorf("fake security not invoked: %s", logBytes)
 	}
+
+	if !strings.Contains(buf.String(), "Enrolled as device d-7") {
+		t.Errorf("success message missing device id: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "Configured 0 paths") {
+		t.Errorf("success message missing path count: %q", buf.String())
+	}
 }
 
 func TestEnrollAlreadyEnrolled_ReturnsExit1(t *testing.T) {

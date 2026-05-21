@@ -77,7 +77,14 @@ func runEnroll(cmd *cobra.Command, token string, force bool) error {
 	if err := wizard.RunEnrollWizard(cmd.Context(), deps, token); err != nil {
 		return ExitFromErr(translateEnrollErr(err))
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "✓ Enrolled. Watcher arrives in next release.")
+	if cfg, lerr := config.Load(); lerr == nil {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"✓ Enrolled as device %s. Configured %d paths. Watcher arrives in next release.\n",
+			cfg.DeviceID, len(cfg.IncludePaths))
+	} else {
+		// Should be unreachable — RunEnrollWizard just wrote it.
+		fmt.Fprintln(cmd.OutOrStdout(), "✓ Enrolled. Watcher arrives in next release.")
+	}
 	return nil
 }
 
