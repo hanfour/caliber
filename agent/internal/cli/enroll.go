@@ -57,7 +57,10 @@ func runEnroll(cmd *cobra.Command, token string, force bool) error {
 		prompter = testPrompterHook
 	}
 
-	hostname, _ := os.Hostname()
+	hostname, hostnameErr := os.Hostname()
+	if hostnameErr != nil && flags.Verbose {
+		fmt.Fprintf(os.Stderr, "warning: os.Hostname() failed (%v); enrolling with empty hostname\n", hostnameErr)
+	}
 	osName := fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
 
 	deps := wizard.Deps{
