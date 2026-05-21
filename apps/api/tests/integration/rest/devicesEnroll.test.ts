@@ -278,17 +278,21 @@ describe("POST /v1/devices/enroll", () => {
     expect(gone).toBe(concurrency - 1);
     expect(ok + gone).toBe(concurrency);
 
-    // Exactly one device + one device_api_key row for this token.
+    // Exactly one device + one device_api_key row for the deviceId in the 201.
+    const successful = responses.find((r) => r.statusCode === 201);
+    expect(successful).toBeDefined();
+    const { deviceId } = JSON.parse(successful!.body) as { deviceId: string };
+
     const deviceRows = await testDb.db
       .select({ id: devices.id })
       .from(devices)
-      .where(eq(devices.orgId, org.id));
+      .where(eq(devices.id, deviceId));
     expect(deviceRows).toHaveLength(1);
 
     const keyRows = await testDb.db
       .select({ deviceId: deviceApiKeys.deviceId })
       .from(deviceApiKeys)
-      .where(eq(deviceApiKeys.deviceId, deviceRows[0]!.id));
+      .where(eq(deviceApiKeys.deviceId, deviceId));
     expect(keyRows).toHaveLength(1);
   });
 });
