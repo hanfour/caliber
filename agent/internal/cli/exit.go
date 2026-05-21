@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/charmbracelet/huh"
 )
 
 // ExitError carries a non-zero process exit code through Cobra's error chain.
@@ -27,6 +29,12 @@ func ExitFromErr(err error) *ExitError {
 	var ee *ExitError
 	if errors.As(err, &ee) {
 		return ee
+	}
+	// huh intercepts Ctrl+C and surfaces ErrUserAborted instead of letting
+	// the cancellation reach our signal.NotifyContext'd ctx. Map both shapes
+	// to exit 130 so the spec §5 Failure-D / §8 contract holds.
+	if errors.Is(err, huh.ErrUserAborted) {
+		return &ExitError{Code: 130, Err: err}
 	}
 	if errors.Is(err, context.Canceled) {
 		return &ExitError{Code: 130, Err: err}

@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"testing"
+
+	"github.com/charmbracelet/huh"
 )
 
 func TestExitErrorImplementsErrorAndUnwrap(t *testing.T) {
@@ -39,5 +42,19 @@ func TestExitFromErrDefaultsTo1(t *testing.T) {
 	out := ExitFromErr(errors.New("any random error"))
 	if out.Code != 1 {
 		t.Fatalf("Code = %d, want 1", out.Code)
+	}
+}
+
+func TestExitFromErrHandlesHuhUserAborted(t *testing.T) {
+	out := ExitFromErr(huh.ErrUserAborted)
+	if out.Code != 130 {
+		t.Fatalf("Code = %d, want 130", out.Code)
+	}
+}
+
+func TestExitFromErrHandlesContextCanceled(t *testing.T) {
+	out := ExitFromErr(context.Canceled)
+	if out.Code != 130 {
+		t.Fatalf("Code = %d, want 130", out.Code)
 	}
 }
