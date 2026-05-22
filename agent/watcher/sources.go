@@ -22,6 +22,6 @@ type FileRef struct {
 // content beyond what the source layout requires for cwd extraction
 // (codex reads the first line; claude does not open files in List).
 type Source interface {
-	Name() string                              // for logs
+	Name() string // for logs
 	List(ctx context.Context) ([]FileRef, error)
 }
