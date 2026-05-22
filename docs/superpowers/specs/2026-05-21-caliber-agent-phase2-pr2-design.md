@@ -363,7 +363,12 @@ The loop logs `[warn] oversize line dropped (ref=%s, count=%d)` when `OversizeDr
 | `Events` cumulative bytes (one Tail call) | ≤ `maxTickBytes + maxLineBytes - 1` (because the budget is checked AFTER classifying each completed line, so one accepted line can push the sum just over `maxTickBytes`) | post-line `consumed >= maxTickBytes` check |
 | `OversizeDropped` count | unbounded (cheap counter) | n/a |
 
-The 20 MiB cap is the *real* memory + I/O guarantee. Earlier wording suggesting "Events sum ≤ maxTickBytes" was too optimistic — the post-line budget check is checked AFTER one accepted line lands, so the actual Events bound has slack of one maxLineBytes-sized line.
+**Two distinct caps**, often confused:
+
+- **I/O cap = 20 MiB** = `maxTickBytes + maxLineBytes` — total bytes read from the file in one Tail call. Enforced by `io.LimitReader`.
+- **Peak in-flight memory ≈ 24 MiB** = `lineBuf` (≤ maxLineBytes = 4 MiB) + `Events` cumulative (≤ maxTickBytes + maxLineBytes - 1 ≈ 20 MiB), plus the 64 KiB bufio buffer and small per-event slice overhead.
+
+Earlier wording suggesting "Events sum ≤ maxTickBytes" or "20 MiB is the memory cap" was too optimistic — the post-line budget check fires AFTER one accepted line lands, so the actual Events bound has slack of one maxLineBytes-sized line, and lineBuf is held concurrently.
 
 **Invariant**: `ToOffset >= FromOffset` always; `ToOffset` only equals `FromOffset` when no completed lines were observed AND no oversize-at-EOF advance fired.
 
@@ -659,7 +664,8 @@ run --once          Loop                  Sources                Tailer       Ch
    │                  ├──────────────────────────────────────────►│                                                              │
    │                  │                      │                     │  Stat → size                                                │
    │                  │                      │                     │  if size < wm.Offset: ErrFileShrank                         │
-   │                  │                      │                     │  open + seek + ReadString('\n') until EOF                   │
+   │                  │                      │                     │  open + seek + io.LimitReader(maxTick+maxLine) + ReadSlice loop                                                            │
+   │                  │                      │                     │  oversize lines dropped (advance ToOffset); whitespace advances; incomplete trailing dropped (no advance)                  │
    │                  │                      │                     │  drop trailing incomplete line                              │
    │                  │◄──────────────────────────────────────────┤  TailResult                                                  │
    │                  │   if tr.ToOffset == wm.Offset: skip       │             │              │              │                │
@@ -685,7 +691,7 @@ run --once          Loop                  Sources                Tailer       Ch
 | C | `Sink.SendChunk` returns error | Log `[error] sink`; do NOT advance; break remaining chunks for this ref | Tick OK; next tick retries the same byte range |
 | D | `ResolveCWD` returns `("", nil)` | Log `[debug] cwd unresolved` (only at -v); skip; State unchanged | Tick OK; next tick retries |
 | D' | `ResolveCWD` returns `("", err)` (I/O failure) | Log `[error] resolve cwd: %v`; skip; State unchanged | Tick OK; next tick retries |
-| E | `SaveState` fails after sink ack | Log `[error] save state`; keep in-memory update | Tick OK; next ack will retry SaveState |
+| E | `SaveState` fails after any watermark advance (sink ACK, no-event consumed segment, or shrink reset) | Log `[error] save state`; keep in-memory update | Tick OK; next watermark advance retries SaveState |
 | F | SIGTERM mid-tick | Let in-flight `SendChunk` complete; break ref loop; SaveState; return ctx.Err() | exit 130 |
 | G | `keychain.Get` fails at startup | `*ExitError{Code:1, "device key missing..."}` | exit 1, loop never starts |
 | H | `agent.log` cannot be opened | `*ExitError{Code:1, "open agent.log..."}` | exit 1 |
@@ -695,7 +701,7 @@ run --once          Loop                  Sources                Tailer       Ch
 
 All events delivered at-least-once. Duplicate delivery sources:
 - Failure B (file shrank → re-read from 0)
-- Failure E (crash between sink ack and successful SaveState)
+- Failure E (crash between watermark advance and successful SaveState — any of the three advance paths)
 - Failure C followed by tick-loop re-tail of the same range
 
 The PR3 server uses `(session_id, event_uuid)` dedup. PR2 does NOT attempt at-most-once.
