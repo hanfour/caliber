@@ -1,10 +1,13 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOpenAgentLog_CreatesAt0600(t *testing.T) {
@@ -55,5 +58,44 @@ func TestOpenAgentLog_AppendsAcrossReopens(t *testing.T) {
 	got := string(bs)
 	if !strings.Contains(got, "line-1") || !strings.Contains(got, "line-2") {
 		t.Errorf("expected both lines, got %q", got)
+	}
+}
+
+func TestRFCLogger_PrependsTimestamp(t *testing.T) {
+	var buf bytes.Buffer
+	l := NewRFCLogger(&buf)
+	l.Now = func() time.Time {
+		return time.Date(2026, 5, 22, 11, 14, 2, 0, time.UTC)
+	}
+	l.Printf("[chunk] file=%s events=%d", "/tmp/x", 3)
+	got := buf.String()
+	if got != "2026-05-22T11:14:02Z [chunk] file=/tmp/x events=3\n" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestRFCLogger_RFC3339UTC_RegexMatch(t *testing.T) {
+	var buf bytes.Buffer
+	l := NewRFCLogger(&buf)
+	// default Now -> real time.Now; just check format shape.
+	l.Printf("hello")
+	got := buf.String()
+	re := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z hello\n$`)
+	if !re.MatchString(got) {
+		t.Errorf("output doesn't match RFC3339 UTC pattern: %q", got)
+	}
+}
+
+func TestRFCLogger_ArgsInterpolatedOnce(t *testing.T) {
+	// Guard: if the implementation formatted twice (e.g. by accident
+	// using Sprintf then Fprintf with format-rendered string), %d-like
+	// directives in user data could double-expand.
+	var buf bytes.Buffer
+	l := NewRFCLogger(&buf)
+	l.Now = func() time.Time { return time.Unix(0, 0).UTC() }
+	l.Printf("payload=%s", "100%% complete")
+	got := buf.String()
+	if !regexp.MustCompile(`payload=100%% complete\n$`).MatchString(got) {
+		t.Errorf("args double-formatted: %q", got)
 	}
 }
