@@ -138,17 +138,23 @@ func NewLogSink(w io.Writer) *LogSink
 
 func (s *LogSink) SendChunk(ctx context.Context, c Chunk) error {
     // ONLY metadata to disk — never raw content (privacy contract).
-    fmt.Fprintf(s.Writer,
+    if _, err := fmt.Fprintf(s.Writer,
         "%s [chunk] source=%s file=%s session=%s parent=%s cwd=%s events=%d bytes=%d-%d\n",
         s.Now().UTC().Format(time.RFC3339),
         c.Source, c.File, c.SessionID, c.ParentSessionID, c.CWD,
         len(c.Events), c.FromOffset, c.ToOffset,
-    )
+    ); err != nil {
+        // Disk-full, broken pipe, closed file. Returning non-nil keeps the
+        // watermark put so the next tick reprocesses the same byte range
+        // (at-least-once). Swallowing this would silently lose PR2 output
+        // while still advancing state.
+        return fmt.Errorf("logsink: write: %w", err)
+    }
     return nil
 }
 ```
 
-`LogSink` never inspects `c.Events`. The test suite has an explicit regression guard verifying that no event content reaches the log.
+`LogSink` never inspects `c.Events`. The test suite has an explicit regression guard verifying that no event content reaches the log, plus a guard that a failing writer surfaces the error to the loop.
 
 ### 4.3 `watcher/sources.go`
 
@@ -160,6 +166,11 @@ type FileRef struct {
     Source          string // "claude" | "claude-subagent" | "codex"
     SessionID       string
     ParentSessionID string // empty unless Source == "claude-subagent"
+    CWD             string // populated by sources that can determine cwd
+                           // cheaply from their own layout (codex via session_meta).
+                           // Claude refs leave this "" — the loop calls CWDResolver
+                           // because Claude needs a per-DIR algorithm that wins from
+                           // being shared across all sessions under the same dir.
 }
 
 type Source interface {
@@ -167,6 +178,8 @@ type Source interface {
     List(ctx context.Context) ([]FileRef, error)
 }
 ```
+
+**Why two ways of getting cwd, not one:** Claude's first JSONL line is heterogeneous (often a `queue-operation` event with no `cwd`); the cwd has to be found via a bounded scan of multiple lines or a dirname-decode fallback. That work is per-DIR (every session in `<encoded-cwd>/` shares the same cwd) and is wasteful per-FILE. Codex's first JSONL line is *guaranteed* to be a `session_meta` with `payload.cwd`, so each Codex `FileRef` can carry its own cwd cheaply. The split puts the cheap work in the source and the expensive work behind a shared, cached resolver.
 
 ### 4.4 `watcher/claude.go`
 
@@ -205,6 +218,13 @@ type CodexSource struct {
 // SessionID extraction: the filename pattern is rollout-YYYY-MM-DDTHH-MM-SS-<UUID>.jsonl.
 // SessionID = the UUID segment.
 //
+// CWD extraction: for each matched file, read the first line via the
+// injectable opener (default os.Open), io.LimitReader-bounded to 64 KiB so
+// even a malformed file can't OOM us. Parse as JSON, look for
+// payload.cwd (string). If parse fails or field absent, leave CWD="" and
+// the loop will skip the ref (Codex without session_meta is malformed and
+// cannot be allow-list-filtered safely).
+//
 // Source="codex", ParentSessionID="" always.
 ```
 
@@ -237,9 +257,11 @@ Behaviour:
 3. If `size == fromOffset`: return `TailResult{FromOffset: fromOffset, ToOffset: fromOffset, Events: nil}` (no work).
 4. Otherwise: open + `Seek(fromOffset, io.SeekStart)` + `bufio.NewReaderSize(64 KiB)` + `ReadString('\n')` loop until `io.EOF`.
 5. Each line:
-   - Empty or whitespace-only → increment `Skipped`, do NOT include in `Events`, do NOT advance `ToOffset` (the byte cost of that line still counts — we're at-least-once and reading these bytes again next tick is fine).
-   - Last line without trailing `\n` (file is being appended): DROP. `ToOffset` ends at the position right after the last completed `\n`.
-   - Otherwise: append the line (without `\n`) to `Events`, advance `ToOffset` to `fromOffset + accumulated bytes`.
+   - **Empty or whitespace-only** → increment `Skipped`, do NOT include in `Events`, **DO advance `ToOffset` over the line's bytes**. The line is still "completed" (we saw its trailing `\n`); not advancing would leave the watermark stuck behind a blank line, causing the loop to read the same blank line every tick forever (`tr.ToOffset == wm.Offset` short-circuits on no-new-bytes).
+   - **Last line without trailing `\n`** (file is being appended): DROP entirely. `ToOffset` ends at the position right after the last completed `\n`. The incomplete bytes are NOT counted; next tick re-reads from there once the writer flushes the `\n`.
+   - **Otherwise**: append the line (without `\n`) to `Events`, advance `ToOffset` over the line's bytes.
+
+**Invariant**: `ToOffset >= FromOffset` always, and `ToOffset` only equals `FromOffset` when zero completed lines were observed (file empty post-offset, or only an incomplete trailing fragment exists).
 
 **Memory bound:** `bufio.NewReaderSize(64 KiB)` plus the cumulative `Events` slice. Worst case: one transcript file produces a `TailResult` with all of its post-offset bytes in memory. The 60-second poll cadence means this is bounded by the rate of writes to one file in one minute — single-digit MB realistically. Chunker may split if/when the spec needs (PR3, gzip-sized chunks).
 
@@ -305,7 +327,25 @@ type Loop struct {
     Log        Logger                   // interface; either log.Logger or a fake
     Now        func() time.Time         // injectable; default time.Now
     Interval   time.Duration            // default 60s; overridable via --interval flag for tests
+
+    cwdCache   map[string]string        // unexported; key = ref.Path (codex) or claudeProjDir (claude)
+                                        // populated on first resolve; survives across ticks
+                                        // never invalidated within PR2's daemon lifetime
+                                        //   (cwds are immutable for the file's lifetime)
 }
+
+// resolveCWDForRef implements the unified resolution contract:
+//   1. if ref.CWD != "" (Codex populates this in Source.List): cache by ref.Path + return (cwd, nil)
+//   2. else (Claude): claudeProjDir = filepath.Dir(ref.Path) — for subagents,
+//      walk up two parents to reach the encoded-cwd dir
+//      if cached: return cached value
+//      else: call Resolver.ResolveClaude(claudeProjDir); cache result and return
+//
+// Three-state contract — same as CWDResolver.ResolveClaude:
+//   (cwd, nil)  resolved
+//   ("",  nil)  no I/O error, but no usable cwd; caller skips
+//   ("",  err)  I/O failure; caller logs
+func (l *Loop) resolveCWDForRef(ref FileRef) (string, error)
 
 type Logger interface {
     Printf(format string, args ...any)
@@ -329,7 +369,7 @@ sourceList: for each Source:
   if err: Log "[warn] source %s unavailable: %v"; continue sourceList
   ALLOW: for ref in refs:
     if ctx.Err(): break SOURCELOOP
-    cwd, err := resolveCWD(ref)   // cached per Tick by ref.Path; (cwd, nil) | ("", nil) | ("", err)
+    cwd, err := resolveCWDForRef(ref)   // see contract below
     if err != nil: Log "[error] resolve cwd %s: %v"; continue ALLOW
     if cwd == "":  Log "[debug] cwd unresolved: %s"; continue ALLOW
     if !allowed(cwd, cfg.IncludePaths): continue ALLOW
@@ -499,7 +539,9 @@ The PR3 server uses `(session_id, event_uuid)` dedup. PR2 does NOT attempt at-mo
   - `Files[path].Offset` = next byte to read
   - `Files[path].LastSync` = last successful `SendChunk` ACK timestamp (UTC)
 - `Sink` interface + `Chunk` type are the seam for PR3
-- Environment overrides (test-only): `CALIBER_CLAUDE_PROJECTS`, `CALIBER_CODEX_SESSIONS`
+- Environment overrides (test-only):
+  - `CALIBER_CLAUDE_PROJECTS` — inherited from PR1 (already documented in PR1 §8)
+  - `CALIBER_CODEX_SESSIONS` — new in PR2 (see §8)
 
 ---
 
