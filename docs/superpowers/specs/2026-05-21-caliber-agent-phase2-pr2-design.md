@@ -328,16 +328,25 @@ After classifying any completed line:
 
 ```
 if consumed >= maxTickBytes:
-    set TickBudgetHit = true
     BREAK (stop reading this file this tick; remainder gets next tick)
+    // TickBudgetHit is set unconditionally at function exit (see below)
 ```
 
 **EOF precedence** (the previously-ambiguous case):
 
-When `err == io.EOF` is observed:
-- if `lineBufLen == 0` → clean end-of-data; `TickBudgetHit = (consumed >= maxTickBytes)`; done.
+When `err == io.EOF` is observed (which includes the synthetic EOF produced by `io.LimitReader` when the hard cap is hit mid-line):
+- if `lineBufLen == 0` → clean end-of-data; done.
 - elif `lineBufLen > 0` AND `lineBufLen <= maxLineBytes` → **incomplete trailing line**: DROP, do NOT advance ToOffset over its bytes. Next tick will re-read from `ToOffset` once the writer flushes the trailing `\n`.
 - elif `lineBufLen > maxLineBytes` (oversize-and-incomplete) → **DROP content AND advance ToOffset by `lineBufLen`**. Rationale: the line was already destined to be discarded (too big); refusing to advance would re-read the same 5+ MiB forever if the writer never emits a `\n` (e.g. file rotated mid-write, non-JSONL log). Forward progress wins over a hypothetical recovery. Increment `OversizeDropped`. This precedence is explicit because the two prior rules contradict for this case.
+
+**At function exit (unconditional)** — regardless of which branch ended the loop (BREAK on budget, EOF clean, EOF incomplete-trailing, EOF oversize-and-incomplete):
+
+```
+TickBudgetHit = (consumed >= maxTickBytes)
+return TailResult{...}
+```
+
+This guarantees the flag is set whenever the consumed-byte count reached the soft budget, including the synthetic-EOF case where a 50 MiB oversize-no-newline file gets cut off at the 20 MiB hard cap and the loop never made it back to the post-line budget check.
 
 `TailResult` adds two fields:
 
@@ -372,7 +381,7 @@ Earlier wording suggesting "Events sum ≤ maxTickBytes" or "20 MiB is the memor
 
 **Invariant**: `ToOffset >= FromOffset` always; `ToOffset` only equals `FromOffset` when no completed lines were observed AND no oversize-at-EOF advance fired.
 
-**Memory bound:** `bufio.NewReaderSize(64 KiB)` plus the cumulative `Events` slice. Worst case: one transcript file produces a `TailResult` with all of its post-offset bytes in memory. The 60-second poll cadence means this is bounded by the rate of writes to one file in one minute — single-digit MB realistically. Chunker may split if/when the spec needs (PR3, gzip-sized chunks).
+**Memory bound:** see the explicit caps table in the read-loop section above. The 20 MiB I/O cap + 24 MiB peak in-flight memory are enforced by `io.LimitReader` + the explicit `lineBuf` append cap; no rate-based or "single-digit MB realistically" assumption is load-bearing. Chunker may split if/when the spec needs (PR3, gzip-sized chunks).
 
 ### 4.7 `watcher/chunker.go`
 
@@ -771,6 +780,7 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
   - Happy: `bytes.Buffer` writer + sample Chunk → assert log line shape + all metadata fields present.
   - **Privacy regression guard**: `Events: []string{"my-fake-cda_test_should_never_appear"}` → assert that string is NOT in the buffer output. Defends against future edits that print content.
   - Now-injection: assert timestamp matches injected time.
+  - **Failing-writer guard** (round-7 explicit): construct a `failingWriter` whose `Write` returns `errors.New("disk full")`. Call `LogSink.SendChunk(ctx, ...)` → assert the returned error is non-nil AND wraps the writer error. Defends the §4.2 contract that loop-side watermark advance only happens on a real ACK; silent advance would lose PR2 stub output.
 
 ### `watcher/sources`
 
@@ -778,6 +788,10 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
   - `t.TempDir()` fixture: 2 main sessions, 1 with `subagents/agent-X.jsonl`, 1 dir without leading `-`, 1 non-`.jsonl` stray file → assert exact ref list + correct SessionID + correct ParentSessionID for subagent + Source values.
 - `codex_test.go`:
   - `t.TempDir()` fixture: `2026/05/21/rollout-...-uuidA.jsonl` and `2026/04/01/rollout-...-uuidB.jsonl` and `2026/05/21/not-a-rollout.txt` (skipped) and `not-a-date-dir/x.jsonl` (skipped) → assert 2 refs returned + correct UUIDs extracted.
+  - **CWD extraction happy**: file with first line `{"type":"session_meta","payload":{"id":"<uuid>","cwd":"/Users/me/proj"}}\n{"type":"event",...}\n` → `FileRef.CWD == "/Users/me/proj"`.
+  - **CWD extraction — missing payload.cwd**: file with first line `{"type":"session_meta","payload":{"id":"x"}}\n` → `FileRef.CWD == ""` (loop skips this ref per §4.5 contract).
+  - **CWD extraction — malformed first line**: file starts with `{"this isn't valid` → `FileRef.CWD == ""`, no panic.
+  - **CWD extraction — 64 KiB bound**: file with a first line that is 200 KiB of garbage with no `\n` → opener counts bytes read; assert ≤ 64 KiB (the LimitReader bound on per-file session_meta read), `FileRef.CWD == ""`.
 
 ### `watcher/tail`
 
@@ -788,6 +802,7 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
 - Shrank: pre-seed offset=10000, file size=100 → returns `ErrFileShrank`.
 - Oversize line dropped: seed a 5 MiB single line (>4 MiB cap) terminated with `\n`, followed by `{"a":1}\n` → `Events=[{"a":1}]`, `OversizeDropped=1`, `ToOffset` covers ALL bytes (including the dropped 5 MiB).
 - **Oversize-incomplete-at-EOF (new precedence rule)**: seed a 5 MiB single line WITHOUT a trailing `\n` (file ends mid-oversize-line) → `Events=[]`, `OversizeDropped=1`, `ToOffset` advances past the dropped bytes. Verifies forward progress over the previously-ambiguous precedence between "oversize → advance" and "incomplete trailing → don't advance".
+- **50 MiB oversize-no-newline (round-7: TickBudgetHit + synthetic-EOF interaction)**: seed a 50 MiB single line WITHOUT a `\n`. `io.LimitReader` produces synthetic EOF at the 20 MiB hard cap. Assert: `Events=[]`, `OversizeDropped=1`, `ToOffset` advanced by 20 MiB worth of bytes, **`TickBudgetHit == true`** (because `consumed >= maxTickBytes` at function exit, regardless of which EOF branch fired). Verifies the unconditional TickBudgetHit-at-exit contract.
 - **Regular incomplete trailing (unchanged contract)**: seed `{"a":1}\n{"b":2` (last line <4 MiB and no `\n`) → `Events=[{"a":1}]`, `ToOffset` = position right after first `\n`. Next tick re-reads `{"b":2`.
 - **Whitespace consumed-bytes budget**: seed 50 MiB of `\n\n\n...` (no events, no oversize) → `TickBudgetHit=true` because consumed bytes exceed `maxTickBytes`, `Events=[]`, `Skipped > 0`, total reader bytes-consumed ≤ `maxTickBytes + maxLineBytes`. Verifies whitespace budgets through the consumed-bytes counter, not event-bytes.
 - **Per-tick budget hit with real events**: seed `maxTickBytes + 5 MiB` worth of small (~1 KiB) JSONL events → `TickBudgetHit=true`, consumed bytes ≤ `maxTickBytes + maxLineBytes`, `ToOffset` reflects exactly the consumed range, next tick continues from there with the remaining 5 MiB.
