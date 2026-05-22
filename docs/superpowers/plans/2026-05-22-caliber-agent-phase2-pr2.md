@@ -10,30 +10,47 @@
 
 **Authoritative spec:** `docs/superpowers/specs/2026-05-21-caliber-agent-phase2-pr2-design.md`. Spec wins over plan if they disagree — flag the discrepancy.
 
-**Depends on:** PR #160 (`feat(agent): Phase 2 PR1 — scaffold + enroll end-to-end`) must merge into main first. PR2 is stacked on main, NOT on the PR1 branch.
+**Depends on:** PR #160 (`feat(agent): Phase 2 PR1 — scaffold + enroll end-to-end`). PR2 is **stacked on the PR1 branch** (`feat/caliber-agent-phase2-pr1`) so work can start before PR1 merges. After #159 + #160 merge to main, GitHub will auto-retarget PR2 to main; until then PR2's PR base is `feat/caliber-agent-phase2-pr1`.
 
 ---
 
 ## Phase 0 — Worktree setup
 
-### Task 0.1: Create stacked-on-main worktree
+### Task 0.1: Create stacked-on-PR1 worktree
 
-PR #160 has merged into main. Build the PR2 branch from current main.
+PR #160 is **not yet merged**. PR2 stacks on the PR1 branch so work can proceed in parallel.
 
-- [ ] **Step 1: Update local main**
+- [ ] **Step 1: Update local PR1 branch tip**
 
 ```bash
 cd /Users/hanfourhuang/ai-dev-eval
-git fetch origin
-git checkout main
-git pull origin main
+git fetch origin feat/caliber-agent-phase2-pr1
+git branch -f feat/caliber-agent-phase2-pr1 origin/feat/caliber-agent-phase2-pr1
 ```
 
-Expected: HEAD on origin/main; `git log -1 --oneline` shows the merge commit of PR #160 (or whatever caliber team merged after it).
+(`git branch -f` is safe here because the local branch tracks origin and we just want to fast-forward it to match.) Expected: local `feat/caliber-agent-phase2-pr1` now at the same commit as origin (currently `266d73c` per the PR1 work; whatever's there).
 
-- [ ] **Step 2: Create the worktree from current HEAD**
+- [ ] **Step 2: Create the worktree branched from PR1 tip**
 
-Use the EnterWorktree tool with name `feat-caliber-agent-phase2-pr2`. (If not available, `git worktree add .claude/worktrees/feat-caliber-agent-phase2-pr2 -b feat/caliber-agent-phase2-pr2` works.) The branch is renamed to `feat/caliber-agent-phase2-pr2` to match the plan-friendly naming.
+The cleanest way: `git worktree add` directly with the explicit base ref:
+
+```bash
+cd /Users/hanfourhuang/ai-dev-eval
+git worktree add .claude/worktrees/feat-caliber-agent-phase2-pr2 \
+    -b feat/caliber-agent-phase2-pr2 feat/caliber-agent-phase2-pr1
+cd .claude/worktrees/feat-caliber-agent-phase2-pr2
+```
+
+If using EnterWorktree (which branches from local HEAD by default), first `git checkout feat/caliber-agent-phase2-pr1` in the main worktree, THEN `EnterWorktree name=feat-caliber-agent-phase2-pr2` — but the explicit `git worktree add` is simpler.
+
+Verify:
+
+```bash
+git branch --show-current
+# expected: feat/caliber-agent-phase2-pr2
+git log --oneline -3
+# expected: tip matches PR1's HEAD (currently 266d73c or later)
+```
 
 - [ ] **Step 3: Verify baseline tests pass**
 
@@ -3413,7 +3430,7 @@ git push -u origin feat/caliber-agent-phase2-pr2
 - [ ] **Step 2: Open the PR**
 
 ```bash
-gh pr create --base main --head feat/caliber-agent-phase2-pr2 \
+gh pr create --base feat/caliber-agent-phase2-pr1 --head feat/caliber-agent-phase2-pr2 \
   --title "feat(agent): Phase 2 PR2 — watcher + stub-sink + run command" \
   --body "$(cat <<'EOF'
 ## Summary
@@ -3459,7 +3476,7 @@ caliber-agent Phase 2 PR2 — the daemon's main loop. `caliber-agent run` polls 
 
 ## Stacked
 
-This PR is stacked **on main** (PR1 has already merged). No special review ordering needed.
+This PR is stacked **on `feat/caliber-agent-phase2-pr1` (#160)**, which is itself stacked on `fix/api-enrollment-race` (#159). Merge order: #159 → #160 → this. GitHub will auto-retarget bases as parents land.
 EOF
 )"
 ```
