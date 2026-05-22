@@ -292,26 +292,39 @@ const (
 
 The hard cap on what we can read from the file in one tick is `maxTickBytes + maxLineBytes = 20 MiB`, enforced by `io.LimitReader`. The budget tracks **consumed bytes** (read off the wire), not just bytes that ended up in `Events`. This means 50 MiB of whitespace or one 50 MiB oversize line both correctly stop early instead of being read whole.
 
-The read loop uses `bufio.Reader.ReadSlice('\n')` (which respects the bufio buffer size and returns `ErrBufferFull` rather than allocating unbounded). Two state variables persist across iterations: `consumed int64` (total bytes pulled from the LimitReader) and an in-memory `lineBuf []byte` (the accumulating current line, capped).
+The read loop uses `bufio.Reader.ReadSlice('\n')` (which respects the bufio buffer size and returns `ErrBufferFull` rather than allocating unbounded). Three state variables persist across iterations:
+
+- `consumed int64` — total bytes pulled from the LimitReader (cumulative across all lines so far)
+- `lineBuf []byte` — the accumulating in-memory buffer for the current line; **hard-capped at maxLineBytes**. Bytes beyond the cap are observed (so `lineBufLen` increases) but NOT appended to lineBuf — they don't allocate.
+- `lineBufLen int64` — true total length of the current line in bytes (whether buffered or discarded). May exceed maxLineBytes; this is the value used to detect oversize.
+
+The two-variable split is load-bearing: capping the buffer is the memory bound, but classification requires knowing the *real* line length to distinguish "oversize line that fits the cap exactly" from "oversize line that overran the cap and would have been truncated". With only the capped buffer, a 5 MiB line would degrade into a silent 4 MiB "event" instead of being dropped as oversize.
 
 For each iteration:
 
 ```
 slice, err = reader.ReadSlice('\n')
     consumed += len(slice)
-    if err == io.EOF: handle end (see EOF precedence below)
-    if err == bufio.ErrBufferFull: APPEND slice into lineBuf (up to maxLineBytes; further bytes discarded — count via oversize)
-        continue (still mid-line, no newline yet)
-    if err == nil: APPEND slice into lineBuf; line is complete (slice ends in '\n'); proceed to classify
+    lineBufLen += len(slice)
+    if len(lineBuf) < maxLineBytes:
+        // append only up to the cap; discard remainder of this slice if it would overflow
+        room = maxLineBytes - len(lineBuf)
+        lineBuf = append(lineBuf, slice[:min(len(slice), room)]...)
+        // any bytes in slice beyond `room` are dropped from memory but already counted in lineBufLen
+    if err == io.EOF: handle end (see EOF precedence below); break out of loop
+    if err == bufio.ErrBufferFull: continue (still mid-line, no newline yet, lineBufLen tracks the real size)
+    if err == nil: line is complete (slice ends in '\n'); proceed to classify; then reset lineBuf/lineBufLen for next line
 ```
 
-**Classification of a completed line** (slice ended in '\n'):
+**Classification of a completed line** (the `err == nil` branch):
 
-- if `len(lineBuf-without-\n) > maxLineBytes` (overran the in-memory cap during accumulation) → **oversize-completed**: drop content (do not add to Events), increment `OversizeDropped`, **DO advance `ToOffset` over the consumed bytes for this line**.
-- elif content is empty or whitespace-only → increment `Skipped`, do not include in `Events`, **DO advance `ToOffset`**.
-- else → append line content (without `\n`) to `Events`, **DO advance `ToOffset`**.
+- if `lineBufLen - 1 > maxLineBytes` (i.e. line content excluding the trailing `\n` exceeded the cap) → **oversize-completed**: drop content (do not add to Events), increment `OversizeDropped`, **DO advance `ToOffset` by `lineBufLen` bytes**.
+- elif `lineBuf` content (after stripping trailing `\n`) is empty or whitespace-only → increment `Skipped`, do not include in `Events`, **DO advance `ToOffset` by `lineBufLen` bytes**.
+- else → append `lineBuf` content (without `\n`) to `Events`, **DO advance `ToOffset` by `lineBufLen` bytes**.
 
-After advancing for any completed line:
+Then reset: `lineBuf = lineBuf[:0]`, `lineBufLen = 0`, continue to next iteration.
+
+After classifying any completed line:
 
 ```
 if consumed >= maxTickBytes:
@@ -322,9 +335,9 @@ if consumed >= maxTickBytes:
 **EOF precedence** (the previously-ambiguous case):
 
 When `err == io.EOF` is observed:
-- if `lineBuf` is empty → clean end-of-data; `TickBudgetHit = (consumed >= maxTickBytes)`; done.
-- elif `lineBuf` is non-empty AND has not exceeded maxLineBytes → **incomplete trailing line**: DROP, do NOT advance ToOffset over its bytes. Next tick will re-read from `ToOffset` once the writer flushes the trailing `\n`.
-- elif `lineBuf` has exceeded maxLineBytes (oversize-and-incomplete) → **DROP content AND advance ToOffset over the consumed bytes**. Rationale: the line was already destined to be discarded (too big); refusing to advance would re-read the same 5+ MiB forever if the writer never emits a `\n` (e.g. file rotated mid-write, non-JSONL log). Forward progress wins over a hypothetical recovery. Increment `OversizeDropped`. This precedence is explicit because the two prior rules contradict for this case.
+- if `lineBufLen == 0` → clean end-of-data; `TickBudgetHit = (consumed >= maxTickBytes)`; done.
+- elif `lineBufLen > 0` AND `lineBufLen <= maxLineBytes` → **incomplete trailing line**: DROP, do NOT advance ToOffset over its bytes. Next tick will re-read from `ToOffset` once the writer flushes the trailing `\n`.
+- elif `lineBufLen > maxLineBytes` (oversize-and-incomplete) → **DROP content AND advance ToOffset by `lineBufLen`**. Rationale: the line was already destined to be discarded (too big); refusing to advance would re-read the same 5+ MiB forever if the writer never emits a `\n` (e.g. file rotated mid-write, non-JSONL log). Forward progress wins over a hypothetical recovery. Increment `OversizeDropped`. This precedence is explicit because the two prior rules contradict for this case.
 
 `TailResult` adds two fields:
 
@@ -341,7 +354,16 @@ type TailResult struct {
 
 The loop logs `[warn] oversize line dropped (ref=%s, count=%d)` when `OversizeDropped > 0` and `[warn] per-tick byte budget hit, resuming next tick (ref=%s, consumed=%d)` when `TickBudgetHit` is true.
 
-**Hard memory bound**: in-flight memory at any moment is bounded by `lineBuf` (≤ maxLineBytes) + `Events` cumulative (whose sum ≤ maxTickBytes per the consumed-byte check). Worst case ~20 MiB per file per tick. The `io.LimitReader` makes this enforceable even under adversarial input.
+**Hard memory + read bounds** (the honest version):
+
+| Quantity | Bound | Where enforced |
+|---|---|---|
+| Bytes read from file (one Tail call) | ≤ `maxTickBytes + maxLineBytes` (20 MiB) | `io.LimitReader` wrap |
+| `lineBuf` size at any instant | ≤ `maxLineBytes` (4 MiB) | explicit cap in append step |
+| `Events` cumulative bytes (one Tail call) | ≤ `maxTickBytes + maxLineBytes - 1` (because the budget is checked AFTER classifying each completed line, so one accepted line can push the sum just over `maxTickBytes`) | post-line `consumed >= maxTickBytes` check |
+| `OversizeDropped` count | unbounded (cheap counter) | n/a |
+
+The 20 MiB cap is the *real* memory + I/O guarantee. Earlier wording suggesting "Events sum ≤ maxTickBytes" was too optimistic — the post-line budget check is checked AFTER one accepted line lands, so the actual Events bound has slack of one maxLineBytes-sized line.
 
 **Invariant**: `ToOffset >= FromOffset` always; `ToOffset` only equals `FromOffset` when no completed lines were observed AND no oversize-at-EOF advance fired.
 
@@ -487,16 +509,22 @@ sourceList: for each Source:
       tr, terr = Tailer.Read(ref.Path, 0)
       if terr != nil: Log "[error] tail after reset: %v"; continue ALLOW
     if terr != nil: Log "[error] tail: %v"; continue ALLOW
+    // Per-tail health logs (wired here, not inside Tailer, so structure stays separable).
+    if tr.OversizeDropped > 0:
+      Log "[warn] oversize line(s) dropped (ref=%s count=%d)", ref.Path, tr.OversizeDropped
+    if tr.TickBudgetHit:
+      Log "[warn] per-tick byte budget hit, resuming next tick (ref=%s consumed≈%d)", ref.Path, tr.ToOffset - wm.Offset
+
     if tr.ToOffset == wm.Offset: continue ALLOW  // no completed lines at all
     chunks := Chunker.Split(ref, tr, cwd)
     if len(chunks) == 0 && tr.ToOffset > wm.Offset:
-      // Whitespace-only segment: we read past blank lines but produced
-      // no events. Advance watermark anyway — otherwise the next tick
-      // would re-read the same blanks forever. No sink call needed
-      // because there's nothing to deliver.
+      // No-event consumed segment: Tail consumed bytes (whitespace,
+      // oversize-dropped, or any combination) but produced 0 chunks.
+      // Advance watermark anyway — otherwise the next tick would re-read
+      // the same dead range forever. No sink call needed (nothing to deliver).
       State.Files[ref.Path] = {Offset: tr.ToOffset, LastSync: Now()}
       if err := config.SaveState(State); err != nil:
-        Log "[error] save state (whitespace-only): %v"
+        Log "[error] save state (no-event segment): %v"
       continue ALLOW
     for c in chunks:
       if ctx.Err(): break SOURCELOOP
@@ -679,7 +707,11 @@ The PR3 server uses `(session_id, event_uuid)` dedup. PR2 does NOT attempt at-mo
 - `~/.caliber-agent/agent.log` append-only, 0600, UTC-RFC3339 timestamps, line-oriented
 - `~/.caliber-agent/state.json`:
   - `Files[path].Offset` = next byte to read
-  - `Files[path].LastSync` = UTC timestamp of the most recent successful **watermark advance** for that file (covers all three cases: sink ACK with chunk delivery, whitespace-only segment advance, and shrink reset to 0). Was previously specified as "sink ACK only" — redefined here because the watermark can legitimately advance without a sink call.
+  - `Files[path].LastSync` = UTC timestamp of the most recent successful **watermark advance** for that file. Covers all advance events:
+    1. sink ACK after `SendChunk` succeeded (events delivered)
+    2. **no-event consumed segment** advance — Tail consumed bytes but produced 0 chunks because the segment was entirely whitespace, oversize-dropped, or any combination
+    3. shrink reset to offset 0
+    Was previously specified as "sink ACK only" — redefined here because the watermark can legitimately advance without a sink call.
 - `Sink` interface + `Chunk` type are the seam for PR3
 - Environment overrides (test-only):
   - `CALIBER_CLAUDE_PROJECTS` — inherited from PR1 (already documented in PR1 §8)
@@ -692,8 +724,8 @@ The PR3 server uses `(session_id, event_uuid)` dedup. PR2 does NOT attempt at-mo
 1. **Tick never fails fast.** All per-ref / per-chunk errors are caught + logged + skipped. The only thing that aborts a Tick early is `ctx.Done()`. The daemon prefers degraded operation to crash-restart cycles.
 2. **Sink failure halts the current ref's remaining chunks but not the tick.** This avoids out-of-order delivery (chunk N+1 cannot be sent before chunk N is ACKed).
 3. **Watermark advances on three events**, each immediately persisted via SaveState (atomic tmp+rename):
-   (a) successful `Sink.SendChunk` ACK — advance to `chunk.ToOffset`
-   (b) whitespace-only segment (Tail produced 0 chunks but consumed bytes) — advance to `tr.ToOffset`
+   (a) successful `Sink.SendChunk` ACK — advance to `chunk.ToOffset` (events delivered)
+   (b) **no-event consumed segment** — Tail consumed bytes (whitespace, oversize-dropped, or any combination) but produced 0 chunks; advance to `tr.ToOffset`
    (c) shrink reset — advance to 0
    SaveState failure does NOT roll back the in-memory advance; it just logs and lets the next advance event retry the write. Crash-loss between advance and SaveState produces at-least-once duplication, which the server dedupes by `(session_id, event_uuid)`. The frozen `LastSync` semantics in §5/§8 cover all three cases.
 4. **State entries are never deleted by the watcher.** Transient missing files (Dropbox sync, worktree moves, etc.) keep their watermark so reappearance doesn't re-deliver. A future `vacuum` or `uninstall` command (Phase 3+) handles cleanup.
@@ -788,8 +820,12 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
 - Failure D (cwd unresolvable):
   - Inject a CWDResolver that returns "" → assert ref skipped, State unchanged.
   - **Cache assertion**: tick twice with the same unresolved ref → assert ResolveClaude is called twice (no negative caching).
-- Whitespace-only segment advances watermark:
+- No-event consumed segment advances watermark (whitespace case):
   - Seed file with `\n\n  \n` after the watermark, no real events → assert FakeSink received 0 chunks, State.Files[path].Offset advanced to file size, log has no `[chunk]` line but DOES have `[tick-end] chunks=0 errors=0` and the SaveState path was hit (verify by tick-twice: second tick reads zero new bytes and short-circuits).
+- No-event consumed segment advances watermark (oversize-only case — new for round-5):
+  - Seed file with one 5 MiB oversize line terminated by `\n` (no events at all) → assert FakeSink received 0 chunks, State.Files[path].Offset advanced past the oversize bytes, log contains `[warn] oversize line(s) dropped` exactly once.
+- Tail warning wiring:
+  - Inject a Tailer that returns `TailResult{OversizeDropped: 3, TickBudgetHit: true, ToOffset: <progressed>}` → assert log has both `[warn] oversize line(s) dropped (ref=... count=3)` AND `[warn] per-tick byte budget hit (ref=...)`. Verifies §4.9 logs are wired before chunking/saving.
 - cwdCache regression:
   - First tick resolves ref's cwd via ResolveClaude (counting Resolver calls); second tick with same ref → 0 additional Resolver calls (cache hit).
 - Failure F (SIGTERM mid-tick):
@@ -868,7 +904,7 @@ These surfaces lock once PR2 merges. Future PRs evolve, not break.
 - **`agent.log` path** `~/.caliber-agent/agent.log`, append-only, 0600
 - **`state.json`** semantics:
   - `Files[path].Offset` is the byte position from which the NEXT tail should read
-  - `Files[path].LastSync` is the UTC timestamp of the most recent successful watermark advance for that file (sink ACK, whitespace-only advance, or shrink reset)
+  - `Files[path].LastSync` is the UTC timestamp of the most recent successful watermark advance for that file (sink ACK, no-event consumed segment, or shrink reset)
 - **Sink interface + Chunk type** locked at PR2 boundaries (see §4.1 / §4.2). PR3 only evolves `Chunk.Events` from `[]string` to `[]Event`.
 
 ---
