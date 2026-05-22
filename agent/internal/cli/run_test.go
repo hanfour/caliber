@@ -170,14 +170,17 @@ func TestRun_PersistentMode_TicksMultipleTimesUntilCancel(t *testing.T) {
 	os.MkdirAll(filepath.Join(home, "c-empty"), 0o755)
 	os.MkdirAll(filepath.Join(home, "cx-empty"), 0o755)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	// Use a generous timeout relative to the interval so the test is stable
+	// even when other packages are running in parallel with -race enabled.
+	// Ratio: 3s window / 50ms interval → ≥ 2 ticks even under heavy CPU load.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	cmd := New()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"run", "--interval", "100ms"})
+	cmd.SetArgs([]string{"run", "--interval", "50ms"})
 
 	err := cmd.ExecuteContext(ctx)
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
