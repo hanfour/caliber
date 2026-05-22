@@ -440,7 +440,7 @@ type Loop struct {
     Chunker    *Chunker
     Sink       sink.Sink
     Config     *config.Config
-    State      *config.State            // mutated in-place, persisted after each successful SendChunk
+    State      *config.State            // mutated in-place, persisted after each watermark advance (sink ACK / no-event consumed segment / shrink reset)
     Resolver   *CWDResolver
     Log        Logger                   // interface; production uses config.RFCLogger (UTC-RFC3339 lines), tests use a fake
     Now        func() time.Time         // injectable; default time.Now
