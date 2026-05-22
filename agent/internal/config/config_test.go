@@ -85,3 +85,32 @@ func TestSaveCreatesParentDir(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLoadMalformedTOML(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", tmp)
+	// Write invalid TOML
+	if err := os.WriteFile(filepath.Join(tmp, "config.toml"), []byte("not = [valid toml"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for malformed TOML, got nil")
+	}
+}
+
+func TestSaveNilIncludePaths(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", tmp)
+	// Save with nil IncludePaths — should be coerced to empty slice
+	if err := Save(&Config{DeviceID: "y", IncludePaths: nil}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.IncludePaths == nil {
+		t.Error("IncludePaths should be non-nil after Save+Load of nil")
+	}
+}
