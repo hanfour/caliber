@@ -32,6 +32,7 @@ func New() *cobra.Command {
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newEnrollCmd())
+	cmd.AddCommand(newRunCmd())
 	cmd.AddCommand(newStatusCmd())
 	cmd.AddCommand(newAddPathCmd())
 	cmd.AddCommand(newRemovePathCmd())
