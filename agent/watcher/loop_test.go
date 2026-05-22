@@ -433,4 +433,45 @@ func TestLoop_SIGTERMMidTick_DrainsAndReturnsCtxErr(t *testing.T) {
 	}
 }
 
+func TestLoop_Run_TicksUntilContextCancel(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", tmp)
+
+	proj := filepath.Join(tmp, "claude-projects", "-Users-h-p")
+	os.MkdirAll(proj, 0o755)
+	sess := filepath.Join(proj, "s.jsonl")
+	os.WriteFile(sess, []byte(`{"a":1}`+"\n"), 0o644)
+
+	state := &config.State{Files: map[string]config.FileWatermark{}}
+	cap := &captureSink{}
+	loop := NewLoop(LoopOpts{
+		Sources: []Source{&fakeSource{name: "claude", refs: []FileRef{
+			{Path: sess, Source: "claude", SessionID: "s"},
+		}}},
+		Tailer:   &Tailer{},
+		Chunker:  &Chunker{},
+		Sink:     cap,
+		Config:   &config.Config{IncludePaths: []string{"/Users/h/p"}},
+		State:    state,
+		Resolver: &fakeResolver{byDir: map[string]string{proj: "/Users/h/p"}},
+		Log:      &fakeLogger{},
+		Interval: 50 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(200 * time.Millisecond) // long enough for ≥ 2 ticks
+		cancel()
+	}()
+
+	err := loop.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	// First tick should deliver the chunk; subsequent ticks see no new bytes.
+	if len(cap.Chunks()) != 1 {
+		t.Errorf("expected exactly 1 chunk delivered, got %d", len(cap.Chunks()))
+	}
+}
+
 var _ io.ReadCloser // suppress unused import
