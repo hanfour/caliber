@@ -227,6 +227,12 @@ func (l *Loop) resolveCWDForRef(ref FileRef) (string, error) {
 	return cwd, nil
 }
 
+// Compile-time interface assertions.
+var (
+	_ ResolverIface = (*CWDResolver)(nil)
+	_ Logger        = (*config.RFCLogger)(nil)
+)
+
 // allowed reports whether cwd is within any of the include paths.
 func allowed(cwd string, includes []string) bool {
 	for _, inc := range includes {
