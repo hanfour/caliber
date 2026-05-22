@@ -107,9 +107,12 @@ type Chunk struct {
     SessionID       string
     ParentSessionID string   // claude-subagent only; "" otherwise
     CWD             string   // resolved cwd at scan time (must be in cfg.IncludePaths)
-    Events          []string // raw JSONL lines in file order, '\n' stripped
-    FromOffset      int64    // byte offset BEFORE the first event in this chunk
-    ToOffset        int64    // byte offset AFTER the last event; loop advances watermark to this
+    Events          []string // raw JSONL event lines in file order, '\n' stripped (whitespace + oversize lines NOT included)
+    FromOffset      int64    // consumed-byte range start; equals the watermark before this chunk's tail run
+    ToOffset        int64    // consumed-byte range end; loop advances watermark to this. NOT "after last event" —
+                             // it covers ALL bytes consumed by Tail (events + whitespace + oversize-dropped). PR3 must
+                             // treat (FromOffset, ToOffset) as the *file-byte-range we've now consumed* for this file,
+                             // not as event-indexing. Server-side dedupe uses (session_id, event uuid), not byte offsets.
 }
 ```
 
@@ -274,7 +277,7 @@ Behaviour:
 1. `Stat(path)` to get size. If `os.IsNotExist`: return `ErrFileGone`.
 2. If `size < fromOffset`: return `ErrFileShrank` (loop handles reset).
 3. If `size == fromOffset`: return `TailResult{FromOffset: fromOffset, ToOffset: fromOffset, Events: nil}` (no work).
-4. Otherwise: open + `Seek(fromOffset, io.SeekStart)` + `bufio.NewReaderSize(64 KiB)` + read loop with bounded line+tick allocations (see below).
+4. Otherwise: open + `Seek(fromOffset, io.SeekStart)` + **wrap in `io.LimitReader(f, maxTickBytes + maxLineBytes)`** + `bufio.NewReaderSize(64 KiB)` + read loop.
 
 **Bounded reads — memory safety contract:**
 
@@ -282,39 +285,48 @@ Two explicit caps (both in `tail.go` as `const`):
 
 ```go
 const (
-    maxLineBytes = 4  * 1024 * 1024  // 4 MiB; per-line cap
-    maxTickBytes = 16 * 1024 * 1024  // 16 MiB; per-file per-tick cap on Events total
+    maxLineBytes = 4  * 1024 * 1024  // 4 MiB; per-line in-memory cap
+    maxTickBytes = 16 * 1024 * 1024  // 16 MiB; soft per-file per-tick budget on consumed bytes
 )
 ```
 
-The read loop uses `bufio.Reader.ReadSlice('\n')` (which respects the bufio buffer size and returns `ErrBufferFull` rather than allocating unbounded). For each `ReadSlice` call:
+The hard cap on what we can read from the file in one tick is `maxTickBytes + maxLineBytes = 20 MiB`, enforced by `io.LimitReader`. The budget tracks **consumed bytes** (read off the wire), not just bytes that ended up in `Events`. This means 50 MiB of whitespace or one 50 MiB oversize line both correctly stop early instead of being read whole.
+
+The read loop uses `bufio.Reader.ReadSlice('\n')` (which respects the bufio buffer size and returns `ErrBufferFull` rather than allocating unbounded). Two state variables persist across iterations: `consumed int64` (total bytes pulled from the LimitReader) and an in-memory `lineBuf []byte` (the accumulating current line, capped).
+
+For each iteration:
 
 ```
 slice, err = reader.ReadSlice('\n')
-    if err == io.EOF and len(slice) > 0: last line is INCOMPLETE — DROP, do NOT advance ToOffset over it
-    if err == io.EOF and len(slice) == 0: clean end
-    if err == bufio.ErrBufferFull: keep calling ReadSlice and APPENDING to an accumulating buffer until '\n' or len > maxLineBytes
-        if accumulated > maxLineBytes BEFORE finding '\n':
-            DROP the line content (do not add to Events), but CONTINUE consuming via ReadSlice until '\n' is found (so byte accounting reaches the next line boundary)
-            advance ToOffset over all bytes consumed for this oversize line
-            increment OversizeDropped counter
-        if accumulated > maxLineBytes after we already found '\n': same — drop content, advance ToOffset, OversizeDropped++
-    if err == nil: full line, len(slice) ≤ buffer; trim '\n'; classify (whitespace / event)
-
-After each completed line:
-    cumulativeEventBytes += len(line)
-    if cumulativeEventBytes >= maxTickBytes:
-        BREAK the loop (stop reading this file this tick; remainder gets next tick)
-        ToOffset already reflects everything we read
+    consumed += len(slice)
+    if err == io.EOF: handle end (see EOF precedence below)
+    if err == bufio.ErrBufferFull: APPEND slice into lineBuf (up to maxLineBytes; further bytes discarded — count via oversize)
+        continue (still mid-line, no newline yet)
+    if err == nil: APPEND slice into lineBuf; line is complete (slice ends in '\n'); proceed to classify
 ```
 
-Each completed line classifies as:
-- **Empty or whitespace-only** → increment `Skipped`, do NOT include in `Events`, **DO advance `ToOffset` over the line's bytes**.
-- **Oversize (> maxLineBytes)** → increment `OversizeDropped`, do NOT include in `Events`, **DO advance `ToOffset`** (we consumed those bytes; next tick must not re-read them).
-- **Last line without trailing `\n`** (file is being appended): DROP entirely. `ToOffset` ends at the position right after the last completed `\n`. The incomplete bytes are NOT counted; next tick re-reads from there once the writer flushes the `\n`.
-- **Otherwise**: append the line (without `\n`) to `Events`, advance `ToOffset` over the line's bytes.
+**Classification of a completed line** (slice ended in '\n'):
 
-`TailResult` gains a counter:
+- if `len(lineBuf-without-\n) > maxLineBytes` (overran the in-memory cap during accumulation) → **oversize-completed**: drop content (do not add to Events), increment `OversizeDropped`, **DO advance `ToOffset` over the consumed bytes for this line**.
+- elif content is empty or whitespace-only → increment `Skipped`, do not include in `Events`, **DO advance `ToOffset`**.
+- else → append line content (without `\n`) to `Events`, **DO advance `ToOffset`**.
+
+After advancing for any completed line:
+
+```
+if consumed >= maxTickBytes:
+    set TickBudgetHit = true
+    BREAK (stop reading this file this tick; remainder gets next tick)
+```
+
+**EOF precedence** (the previously-ambiguous case):
+
+When `err == io.EOF` is observed:
+- if `lineBuf` is empty → clean end-of-data; `TickBudgetHit = (consumed >= maxTickBytes)`; done.
+- elif `lineBuf` is non-empty AND has not exceeded maxLineBytes → **incomplete trailing line**: DROP, do NOT advance ToOffset over its bytes. Next tick will re-read from `ToOffset` once the writer flushes the trailing `\n`.
+- elif `lineBuf` has exceeded maxLineBytes (oversize-and-incomplete) → **DROP content AND advance ToOffset over the consumed bytes**. Rationale: the line was already destined to be discarded (too big); refusing to advance would re-read the same 5+ MiB forever if the writer never emits a `\n` (e.g. file rotated mid-write, non-JSONL log). Forward progress wins over a hypothetical recovery. Increment `OversizeDropped`. This precedence is explicit because the two prior rules contradict for this case.
+
+`TailResult` adds two fields:
 
 ```go
 type TailResult struct {
@@ -322,14 +334,16 @@ type TailResult struct {
     FromOffset       int64
     ToOffset         int64
     Skipped          int
-    OversizeDropped  int  // new: lines that exceeded maxLineBytes
-    TickBudgetHit    bool // new: true if cumulativeEventBytes >= maxTickBytes caused early stop
+    OversizeDropped  int   // new: lines that exceeded maxLineBytes (completed OR oversize-at-EOF)
+    TickBudgetHit    bool  // new: consumed >= maxTickBytes; loop logs and continues next tick
 }
 ```
 
-The loop logs `[warn] oversize line dropped` per `OversizeDropped > 0` ref and `[warn] per-tick byte budget hit, resuming next tick` when `TickBudgetHit` is true.
+The loop logs `[warn] oversize line dropped (ref=%s, count=%d)` when `OversizeDropped > 0` and `[warn] per-tick byte budget hit, resuming next tick (ref=%s, consumed=%d)` when `TickBudgetHit` is true.
 
-**Invariant**: `ToOffset >= FromOffset` always; total bytes held in `Events` is bounded by `maxTickBytes` (not file size, not line count).
+**Hard memory bound**: in-flight memory at any moment is bounded by `lineBuf` (≤ maxLineBytes) + `Events` cumulative (whose sum ≤ maxTickBytes per the consumed-byte check). Worst case ~20 MiB per file per tick. The `io.LimitReader` makes this enforceable even under adversarial input.
+
+**Invariant**: `ToOffset >= FromOffset` always; `ToOffset` only equals `FromOffset` when no completed lines were observed AND no oversize-at-EOF advance fired.
 
 **Memory bound:** `bufio.NewReaderSize(64 KiB)` plus the cumulative `Events` slice. Worst case: one transcript file produces a `TailResult` with all of its post-offset bytes in memory. The 60-second poll cadence means this is bounded by the rate of writes to one file in one minute — single-digit MB realistically. Chunker may split if/when the spec needs (PR3, gzip-sized chunks).
 
@@ -677,7 +691,11 @@ The PR3 server uses `(session_id, event_uuid)` dedup. PR2 does NOT attempt at-mo
 
 1. **Tick never fails fast.** All per-ref / per-chunk errors are caught + logged + skipped. The only thing that aborts a Tick early is `ctx.Done()`. The daemon prefers degraded operation to crash-restart cycles.
 2. **Sink failure halts the current ref's remaining chunks but not the tick.** This avoids out-of-order delivery (chunk N+1 cannot be sent before chunk N is ACKed).
-3. **Watermark advances ONLY on successful sink ACK + immediately afterwards.** SaveState failure does NOT roll back the in-memory advance; it just logs and lets the next ACK retry the write. Crash-loss between ACK and SaveState produces at-least-once duplication, which the server dedupes.
+3. **Watermark advances on three events**, each immediately persisted via SaveState (atomic tmp+rename):
+   (a) successful `Sink.SendChunk` ACK — advance to `chunk.ToOffset`
+   (b) whitespace-only segment (Tail produced 0 chunks but consumed bytes) — advance to `tr.ToOffset`
+   (c) shrink reset — advance to 0
+   SaveState failure does NOT roll back the in-memory advance; it just logs and lets the next advance event retry the write. Crash-loss between advance and SaveState produces at-least-once duplication, which the server dedupes by `(session_id, event_uuid)`. The frozen `LastSync` semantics in §5/§8 cover all three cases.
 4. **State entries are never deleted by the watcher.** Transient missing files (Dropbox sync, worktree moves, etc.) keep their watermark so reappearance doesn't re-deliver. A future `vacuum` or `uninstall` command (Phase 3+) handles cleanup.
 5. **agent.log is the canonical observability surface.** All warns/errors go to agent.log. In foreground mode (`--once` or interactive `run`), stderr mirrors it so the operator can see live output. No info-level events go to stdout — daemon stdout stays empty for clean launchd handling.
 6. **No silent error swallowing.** Every caught-and-continued error is logged with severity prefix. The `_ = err` pattern only appears in `defer file.Close()` and similar idempotent teardown.
@@ -730,9 +748,12 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
 - Incomplete trailing: seed `{"a":1}\n{"b":2` (no trailing `\n`) → only first line returned; `ToOffset=8` (after first `\n`); second-line bytes NOT consumed.
 - Empty lines: seed `{"a":1}\n\n  \n{"b":2}\n` → 2 events, `Skipped=2`, `ToOffset` covers all bytes.
 - Shrank: pre-seed offset=10000, file size=100 → returns `ErrFileShrank`.
-- Oversize line dropped: seed a single line of 5 MiB (>4 MiB cap) followed by `\n{"a":1}\n` → `Events=[{"a":1}]`, `OversizeDropped=1`, `ToOffset` covers ALL bytes including the dropped line.
-- Per-tick byte budget hit: seed 20 MiB of small JSONL events → `TickBudgetHit=true`, `cumulativeEventBytes <= maxTickBytes + one line slack`, `ToOffset` reflects exactly what was consumed.
-- Memory bound assertion: open through a counting wrapper, run Read on a 50 MiB file → assert reader bytes-consumed never exceeds `maxTickBytes + 1 MiB` (the bufio buffer + one in-flight line).
+- Oversize line dropped: seed a 5 MiB single line (>4 MiB cap) terminated with `\n`, followed by `{"a":1}\n` → `Events=[{"a":1}]`, `OversizeDropped=1`, `ToOffset` covers ALL bytes (including the dropped 5 MiB).
+- **Oversize-incomplete-at-EOF (new precedence rule)**: seed a 5 MiB single line WITHOUT a trailing `\n` (file ends mid-oversize-line) → `Events=[]`, `OversizeDropped=1`, `ToOffset` advances past the dropped bytes. Verifies forward progress over the previously-ambiguous precedence between "oversize → advance" and "incomplete trailing → don't advance".
+- **Regular incomplete trailing (unchanged contract)**: seed `{"a":1}\n{"b":2` (last line <4 MiB and no `\n`) → `Events=[{"a":1}]`, `ToOffset` = position right after first `\n`. Next tick re-reads `{"b":2`.
+- **Whitespace consumed-bytes budget**: seed 50 MiB of `\n\n\n...` (no events, no oversize) → `TickBudgetHit=true` because consumed bytes exceed `maxTickBytes`, `Events=[]`, `Skipped > 0`, total reader bytes-consumed ≤ `maxTickBytes + maxLineBytes`. Verifies whitespace budgets through the consumed-bytes counter, not event-bytes.
+- **Per-tick budget hit with real events**: seed `maxTickBytes + 5 MiB` worth of small (~1 KiB) JSONL events → `TickBudgetHit=true`, consumed bytes ≤ `maxTickBytes + maxLineBytes`, `ToOffset` reflects exactly the consumed range, next tick continues from there with the remaining 5 MiB.
+- **Hard memory-bound regression** (the round-4 anti-OOM guarantee): open through a counting wrapper, run Read on a 50 MiB file → assert reader bytes-consumed ≤ `maxTickBytes + maxLineBytes` (20 MiB hard cap from the `io.LimitReader`). Holds for whitespace-only, oversize-only, and event-mix files.
 - Gone: missing file → returns `ErrFileGone`.
 - Injected Open: byte-counting reader wrapper; assert Tail reads at most `size − fromOffset` bytes (no overscan).
 
