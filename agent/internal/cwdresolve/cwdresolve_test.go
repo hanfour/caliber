@@ -9,13 +9,6 @@ import (
 	"testing"
 )
 
-// stringOpener returns a ReadCloser over the given string content.
-func stringOpener(content string) Opener {
-	return func(_ string) (io.ReadCloser, error) {
-		return io.NopCloser(strings.NewReader(content)), nil
-	}
-}
-
 // errorOpener returns an error on every open.
 func errorOpener(_ string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("injected open error")
@@ -155,11 +148,7 @@ func TestScanJSONLForCWD_MultipleFiles(t *testing.T) {
 	file2Content := fmt.Sprintf(`{"cwd":%q}%s`, realDir, "\n")
 
 	// list: file1 first, file2 second
-	files := []string{"file1.jsonl", "file2.jsonl"}
-	var paths []string
-	for _, name := range files {
-		paths = append(paths, name)
-	}
+	paths := []string{"file1.jsonl", "file2.jsonl"}
 
 	callNum := 0
 	opener := func(_ string) (io.ReadCloser, error) {

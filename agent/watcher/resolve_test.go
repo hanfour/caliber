@@ -9,11 +9,6 @@ import (
 	"testing"
 )
 
-// osPathToDashes replaces all "/" with "-" — matches Claude's encoding.
-func osPathToDashes(s string) string {
-	return strings.ReplaceAll(s, "/", "-")
-}
-
 func TestCWDResolver_PassesThroughToPackage(t *testing.T) {
 	tmp := t.TempDir()
 	realDir := filepath.Join(tmp, "test", "proj")
