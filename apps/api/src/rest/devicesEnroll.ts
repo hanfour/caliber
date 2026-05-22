@@ -57,7 +57,8 @@ export function devicesEnrollRoutes(env: ServerEnv): FastifyPluginAsync {
             })
             .from(deviceEnrollmentTokens)
             .where(eq(deviceEnrollmentTokens.tokenHash, tokenHash))
-            .limit(1);
+            .limit(1)
+            .for('update');
 
           if (!tokenRow) {
             throw { code: "INVALID_TOKEN" as const };
@@ -91,7 +92,7 @@ export function devicesEnrollRoutes(env: ServerEnv): FastifyPluginAsync {
             keyPrefix: prefix,
           });
 
-          await tx
+          const updateResult = await tx
             .update(deviceEnrollmentTokens)
             .set({
               usedAt: sql`NOW()`,
@@ -103,6 +104,14 @@ export function devicesEnrollRoutes(env: ServerEnv): FastifyPluginAsync {
                 isNull(deviceEnrollmentTokens.usedAt),
               ),
             );
+          if ((updateResult.rowCount ?? 0) !== 1) {
+            // Defence-in-depth: the FOR UPDATE lock serialises concurrent
+            // redemptions, so this guard should be rare in normal operation.
+            // It can still fire if usedAt was set outside this transaction
+            // (admin write, bulk expiry, token-cancellation path, etc.).
+            // Return TOKEN_USED so the caller gets a clean 410 rather than a 500.
+            throw { code: "TOKEN_USED" as const };
+          }
 
           await writeAudit(tx, {
             actorUserId: tokenRow.userId,
