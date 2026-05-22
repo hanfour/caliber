@@ -1,0 +1,57 @@
+name: agent-release
+
+on:
+  push:
+    tags:
+      - 'agent/v*'
+
+jobs:
+  build:
+    runs-on: macos-14
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      - name: Build
+        working-directory: agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          COMMIT="${GITHUB_SHA::7}"
+          BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p ../dist
+          go build -trimpath \
+            -ldflags "-s -w \
+              -X github.com/hanfour/ai-dev-eval/agent/internal/version.Version=${TAG} \
+              -X github.com/hanfour/ai-dev-eval/agent/internal/version.Commit=${COMMIT} \
+              -X github.com/hanfour/ai-dev-eval/agent/internal/version.BuiltAt=${BUILT_AT}" \
+            -o ../dist/caliber-agent \
+            ./cmd/caliber-agent
+
+      - name: Tar + sha256
+        working-directory: dist
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          SAFE_TAG="${TAG//\//_}"
+          NAME="caliber-agent-${SAFE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          tar -czf "${NAME}.tar.gz" caliber-agent
+          shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          ls -la
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/caliber-agent-*.tar.gz
+            dist/caliber-agent-*.tar.gz.sha256

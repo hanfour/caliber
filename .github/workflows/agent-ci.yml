@@ -1,0 +1,35 @@
+name: agent-ci
+
+on:
+  push:
+    paths:
+      - 'agent/**'
+      - '.github/workflows/agent-*.yml'
+  pull_request:
+    paths:
+      - 'agent/**'
+      - '.github/workflows/agent-*.yml'
+
+defaults:
+  run:
+    working-directory: agent
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      - run: go vet ./...
+      - run: staticcheck ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: Tests with race detector
+        run: go test ./internal/... -race
+      - name: Coverage gate (≥ 80%, excludes interactive TTY code)
+        run: ./scripts/coverage.sh

@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# agent/dist/Formula is source-controlled (Homebrew tap stub)
+!agent/dist/
+!agent/dist/Formula/
 *.tsbuildinfo
 .env
 .env.*

@@ -1,0 +1,11 @@
+# Local build artefacts
+/caliber-agent
+/dist/build/
+
+# Test coverage
+cover.out
+*.coverprofile
+
+# Editor scratch
+.idea/
+.vscode/
