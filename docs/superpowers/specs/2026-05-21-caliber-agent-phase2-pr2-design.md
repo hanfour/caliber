@@ -203,6 +203,20 @@ func NewClaudeSource(root string) *ClaudeSource
 //   - dirs not beginning with "-" (Claude's encoded-cwd convention)
 //   - non-*.jsonl files
 //   - missing `subagents/` subdir (most sessions don't have one)
+//
+// Canonical-id contract for Claude:
+//   Claude's storage layout encodes the canonical session/agent ids in
+//   the filename and parent dirname. Empirically (verified 2026-05-21
+//   against ~/.claude/projects/), for every subagent file:
+//     filename "agent-<id>.jsonl"  →  JSONL's per-event `agentId` == <id>
+//     parent dir name              →  JSONL's per-event `sessionId` == that dir name
+//   So PR2's filename-derived IDs are the canonical IDs by construction.
+//   PR2 does NOT open these files to verify (would explode List I/O —
+//   subagents are rare but main-session files would too if we generalised).
+//   PR3's redaction step has every event in hand and SHOULD assert that
+//   the filename-derived (Source, SessionID, ParentSessionID) matches
+//   the first observed event's (sessionId, agentId) — divergence is a
+//   Claude-internal bug worth surfacing as a [warn] but not blocking.
 ```
 
 ### 4.5 `watcher/codex.go`
@@ -232,8 +246,13 @@ type CodexSource struct {
 
 ```go
 type Tailer struct {
-    Open func(path string) (io.ReadCloser, error) // injectable; default os.Open
-    Stat func(path string) (int64, error)         // injectable; default os.Stat-based size
+    // Open returns a handle that supports Read + Seek + Close. The Seek
+    // requirement is intentional — the tail algorithm seeks to the
+    // watermark offset before reading. `os.Open` satisfies this contract
+    // because `*os.File` implements all three interfaces. Tests inject
+    // wrappers that also count bytes read.
+    Open func(path string) (io.ReadSeekCloser, error) // injectable; default os.Open
+    Stat func(path string) (int64, error)             // injectable; default os.Stat-based size
 }
 
 type TailResult struct {
@@ -329,17 +348,30 @@ type Loop struct {
     Interval   time.Duration            // default 60s; overridable via --interval flag for tests
 
     cwdCache   map[string]string        // unexported; key = ref.Path (codex) or claudeProjDir (claude)
-                                        // populated on first resolve; survives across ticks
+                                        // populated on first SUCCESSFUL resolve; survives across ticks
                                         // never invalidated within PR2's daemon lifetime
-                                        //   (cwds are immutable for the file's lifetime)
+                                        //   (resolved cwds are immutable for the file's lifetime)
+                                        // empty-string cwd ("unresolved") and I/O errors are NOT cached —
+                                        // each tick retries those refs from scratch
 }
 
+// NewLoop constructs a Loop with all unexported fields (notably cwdCache)
+// initialised. Callers in package `cli` use this constructor; direct
+// struct-literal construction in tests is also fine if the test also
+// initialises cwdCache via lazy init (see resolveCWDForRef).
+func NewLoop(...) *Loop
+
 // resolveCWDForRef implements the unified resolution contract:
-//   1. if ref.CWD != "" (Codex populates this in Source.List): cache by ref.Path + return (cwd, nil)
-//   2. else (Claude): claudeProjDir = filepath.Dir(ref.Path) — for subagents,
-//      walk up two parents to reach the encoded-cwd dir
-//      if cached: return cached value
-//      else: call Resolver.ResolveClaude(claudeProjDir); cache result and return
+//   1. Lazy init: if l.cwdCache == nil { l.cwdCache = make(map[string]string) }
+//      Defensive against struct-literal construction in tests.
+//   2. If ref.CWD != "" (Codex populates this in Source.List): cache by ref.Path + return (cwd, nil)
+//   3. Else (Claude):
+//      a. claudeProjDir = parent of ref.Path; for subagents, walk up two parents to reach the encoded-cwd dir
+//      b. If l.cwdCache[claudeProjDir] != "" (i.e. previously resolved successfully): return cached value
+//      c. Else: call Resolver.ResolveClaude(claudeProjDir)
+//         - on (cwd, nil) with cwd != "": cache and return
+//         - on ("", nil) [unresolved]: return unchanged, do NOT cache (next tick retries)
+//         - on ("", err): return unchanged, do NOT cache (next tick retries)
 //
 // Three-state contract — same as CWDResolver.ResolveClaude:
 //   (cwd, nil)  resolved
@@ -382,8 +414,17 @@ sourceList: for each Source:
       tr, terr = Tailer.Read(ref.Path, 0)
       if terr != nil: Log "[error] tail after reset: %v"; continue ALLOW
     if terr != nil: Log "[error] tail: %v"; continue ALLOW
-    if tr.ToOffset == wm.Offset: continue ALLOW  // no new bytes
+    if tr.ToOffset == wm.Offset: continue ALLOW  // no completed lines at all
     chunks := Chunker.Split(ref, tr, cwd)
+    if len(chunks) == 0 && tr.ToOffset > wm.Offset:
+      // Whitespace-only segment: we read past blank lines but produced
+      // no events. Advance watermark anyway — otherwise the next tick
+      // would re-read the same blanks forever. No sink call needed
+      // because there's nothing to deliver.
+      State.Files[ref.Path] = {Offset: tr.ToOffset, LastSync: Now()}
+      if err := config.SaveState(State); err != nil:
+        Log "[error] save state (whitespace-only): %v"
+      continue ALLOW
     for c in chunks:
       if ctx.Err(): break SOURCELOOP
       if err := Sink.SendChunk(ctx, c); err != nil:
@@ -442,10 +483,10 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
     defer logFile.Close()
     logger := log.New(io.MultiWriter(logFile, cmd.ErrOrStderr()), "", log.LstdFlags|log.LUTC)
 
-    loop := &watcher.Loop{
-        Sources:  []watcher.Source{
+    loop := watcher.NewLoop(watcher.LoopOpts{
+        Sources: []watcher.Source{
             watcher.NewClaudeSource(claudeProjectsRoot()),
-            watcher.NewCodexSource(codexSessionsRoot()),
+            watcher.NewCodexSource(codexSessionsRoot(), nil), // opener nil → default os.Open
         },
         Tailer:   &watcher.Tailer{},
         Chunker:  &watcher.Chunker{},
@@ -456,7 +497,9 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
         Log:      logger,
         Now:      time.Now,
         Interval: interval,
-    }
+    })
+    // NewLoop initialises the cwdCache; lazy init in resolveCWDForRef
+    // remains as a defensive fallback for struct-literal use in tests.
 
     if once {
         return loop.Tick(cmd.Context())
@@ -631,6 +674,11 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
   - `FakeSink.Err = errors.New("disk full")` → assert State.Files untouched, log has `[error] sink`, Tick still returns nil.
 - Failure D (cwd unresolvable):
   - Inject a CWDResolver that returns "" → assert ref skipped, State unchanged.
+  - **Cache assertion**: tick twice with the same unresolved ref → assert ResolveClaude is called twice (no negative caching).
+- Whitespace-only segment advances watermark:
+  - Seed file with `\n\n  \n` after the watermark, no real events → assert FakeSink received 0 chunks, State.Files[path].Offset advanced to file size, log has no `[chunk]` line but DOES have `[tick-end] chunks=0 errors=0` and the SaveState path was hit (verify by tick-twice: second tick reads zero new bytes and short-circuits).
+- cwdCache regression:
+  - First tick resolves ref's cwd via ResolveClaude (counting Resolver calls); second tick with same ref → 0 additional Resolver calls (cache hit).
 - Failure F (SIGTERM mid-tick):
   - Use `context.WithCancel`. Inject a FakeSink whose SendChunk callback cancels ctx on the 2nd call → assert 2nd call completes (in-flight), 3rd ref is NOT processed, SaveState called, Tick returns `ctx.Err()`.
 - `[tick-end]` summary:
