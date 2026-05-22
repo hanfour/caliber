@@ -170,11 +170,12 @@ func TestRun_PersistentMode_TicksMultipleTimesUntilCancel(t *testing.T) {
 	os.MkdirAll(filepath.Join(home, "c-empty"), 0o755)
 	os.MkdirAll(filepath.Join(home, "cx-empty"), 0o755)
 
-	// Use a generous timeout relative to the interval so the test is stable
-	// even when other packages are running in parallel with -race enabled.
-	// Ratio: 3s window / 50ms interval → ≥ 2 ticks even under heavy CPU load.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// Wait long enough for ≥ 2 ticks at 50ms interval, then simulate SIGTERM.
+		time.Sleep(3 * time.Second)
+		cancel()
+	}()
 
 	cmd := New()
 	var buf bytes.Buffer
@@ -183,8 +184,8 @@ func TestRun_PersistentMode_TicksMultipleTimesUntilCancel(t *testing.T) {
 	cmd.SetArgs([]string{"run", "--interval", "50ms"})
 
 	err := cmd.ExecuteContext(ctx)
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("expected ctx-cancel-style error, got %v", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled (will map to exit 130 via root.Execute), got %v", err)
 	}
 
 	bs, _ := os.ReadFile(filepath.Join(home, "agent.log"))

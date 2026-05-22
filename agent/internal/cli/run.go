@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -70,11 +68,7 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
 	if once {
 		return loop.Tick(cmd.Context())
 	}
-	err = loop.Run(cmd.Context())
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return nil
-	}
-	return err
+	return loop.Run(cmd.Context())
 }
 
 func codexSessionsRoot() string {
