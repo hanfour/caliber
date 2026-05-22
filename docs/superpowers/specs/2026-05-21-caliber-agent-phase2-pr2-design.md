@@ -274,13 +274,62 @@ Behaviour:
 1. `Stat(path)` to get size. If `os.IsNotExist`: return `ErrFileGone`.
 2. If `size < fromOffset`: return `ErrFileShrank` (loop handles reset).
 3. If `size == fromOffset`: return `TailResult{FromOffset: fromOffset, ToOffset: fromOffset, Events: nil}` (no work).
-4. Otherwise: open + `Seek(fromOffset, io.SeekStart)` + `bufio.NewReaderSize(64 KiB)` + `ReadString('\n')` loop until `io.EOF`.
-5. Each line:
-   - **Empty or whitespace-only** → increment `Skipped`, do NOT include in `Events`, **DO advance `ToOffset` over the line's bytes**. The line is still "completed" (we saw its trailing `\n`); not advancing would leave the watermark stuck behind a blank line, causing the loop to read the same blank line every tick forever (`tr.ToOffset == wm.Offset` short-circuits on no-new-bytes).
-   - **Last line without trailing `\n`** (file is being appended): DROP entirely. `ToOffset` ends at the position right after the last completed `\n`. The incomplete bytes are NOT counted; next tick re-reads from there once the writer flushes the `\n`.
-   - **Otherwise**: append the line (without `\n`) to `Events`, advance `ToOffset` over the line's bytes.
+4. Otherwise: open + `Seek(fromOffset, io.SeekStart)` + `bufio.NewReaderSize(64 KiB)` + read loop with bounded line+tick allocations (see below).
 
-**Invariant**: `ToOffset >= FromOffset` always, and `ToOffset` only equals `FromOffset` when zero completed lines were observed (file empty post-offset, or only an incomplete trailing fragment exists).
+**Bounded reads — memory safety contract:**
+
+Two explicit caps (both in `tail.go` as `const`):
+
+```go
+const (
+    maxLineBytes = 4  * 1024 * 1024  // 4 MiB; per-line cap
+    maxTickBytes = 16 * 1024 * 1024  // 16 MiB; per-file per-tick cap on Events total
+)
+```
+
+The read loop uses `bufio.Reader.ReadSlice('\n')` (which respects the bufio buffer size and returns `ErrBufferFull` rather than allocating unbounded). For each `ReadSlice` call:
+
+```
+slice, err = reader.ReadSlice('\n')
+    if err == io.EOF and len(slice) > 0: last line is INCOMPLETE — DROP, do NOT advance ToOffset over it
+    if err == io.EOF and len(slice) == 0: clean end
+    if err == bufio.ErrBufferFull: keep calling ReadSlice and APPENDING to an accumulating buffer until '\n' or len > maxLineBytes
+        if accumulated > maxLineBytes BEFORE finding '\n':
+            DROP the line content (do not add to Events), but CONTINUE consuming via ReadSlice until '\n' is found (so byte accounting reaches the next line boundary)
+            advance ToOffset over all bytes consumed for this oversize line
+            increment OversizeDropped counter
+        if accumulated > maxLineBytes after we already found '\n': same — drop content, advance ToOffset, OversizeDropped++
+    if err == nil: full line, len(slice) ≤ buffer; trim '\n'; classify (whitespace / event)
+
+After each completed line:
+    cumulativeEventBytes += len(line)
+    if cumulativeEventBytes >= maxTickBytes:
+        BREAK the loop (stop reading this file this tick; remainder gets next tick)
+        ToOffset already reflects everything we read
+```
+
+Each completed line classifies as:
+- **Empty or whitespace-only** → increment `Skipped`, do NOT include in `Events`, **DO advance `ToOffset` over the line's bytes**.
+- **Oversize (> maxLineBytes)** → increment `OversizeDropped`, do NOT include in `Events`, **DO advance `ToOffset`** (we consumed those bytes; next tick must not re-read them).
+- **Last line without trailing `\n`** (file is being appended): DROP entirely. `ToOffset` ends at the position right after the last completed `\n`. The incomplete bytes are NOT counted; next tick re-reads from there once the writer flushes the `\n`.
+- **Otherwise**: append the line (without `\n`) to `Events`, advance `ToOffset` over the line's bytes.
+
+`TailResult` gains a counter:
+
+```go
+type TailResult struct {
+    Events           []string
+    FromOffset       int64
+    ToOffset         int64
+    Skipped          int
+    OversizeDropped  int  // new: lines that exceeded maxLineBytes
+    TickBudgetHit    bool // new: true if cumulativeEventBytes >= maxTickBytes caused early stop
+}
+```
+
+The loop logs `[warn] oversize line dropped` per `OversizeDropped > 0` ref and `[warn] per-tick byte budget hit, resuming next tick` when `TickBudgetHit` is true.
+
+**Invariant**: `ToOffset >= FromOffset` always; total bytes held in `Events` is bounded by `maxTickBytes` (not file size, not line count).
 
 **Memory bound:** `bufio.NewReaderSize(64 KiB)` plus the cumulative `Events` slice. Worst case: one transcript file produces a `TailResult` with all of its post-offset bytes in memory. The 60-second poll cadence means this is bounded by the rate of writes to one file in one minute — single-digit MB realistically. Chunker may split if/when the spec needs (PR3, gzip-sized chunks).
 
@@ -343,7 +392,7 @@ type Loop struct {
     Config     *config.Config
     State      *config.State            // mutated in-place, persisted after each successful SendChunk
     Resolver   *CWDResolver
-    Log        Logger                   // interface; either log.Logger or a fake
+    Log        Logger                   // interface; production uses config.RFCLogger (UTC-RFC3339 lines), tests use a fake
     Now        func() time.Time         // injectable; default time.Now
     Interval   time.Duration            // default 60s; overridable via --interval flag for tests
 
@@ -410,7 +459,17 @@ sourceList: for each Source:
     if errors.Is(terr, ErrFileGone):
       Log "[warn] file gone: %s"; continue ALLOW
     if errors.Is(terr, ErrFileShrank):
-      Log "[warn] file shrank: %s, resetting"; wm.Offset = 0
+      // MUST persist the reset offset immediately, BEFORE re-tailing.
+      // Otherwise a shrink-to-empty (or shrink-to-incomplete-line) leaves
+      // the old too-large offset in state.json; next tick stat-compares
+      // and re-triggers ErrFileShrank forever.
+      Log "[warn] file shrank from %d, resetting offset to 0: %s", wm.Offset, ref.Path
+      wm.Offset = 0
+      State.Files[ref.Path] = {Offset: 0, LastSync: Now()}  // shrink reset IS a watermark advance per LastSync redefinition (§5)
+      if err := config.SaveState(State); err != nil:
+        Log "[error] save state (shrink reset): %v"
+        // Even if SaveState failed, continue with the re-tail — at-least-once
+        // contract tolerates this; worst case we re-shrink-reset next tick.
       tr, terr = Tailer.Read(ref.Path, 0)
       if terr != nil: Log "[error] tail after reset: %v"; continue ALLOW
     if terr != nil: Log "[error] tail: %v"; continue ALLOW
@@ -437,12 +496,37 @@ Log "[tick-end] sources=%d refs=%d chunks=%d errors=%d duration=%s"
 
 ### 4.10 `config/log.go`
 
+This file ships two tightly-paired pieces: the file opener for `agent.log`, and a minimal formatted writer that emits the UTC-RFC3339 line format the spec §5 freezes.
+
 ```go
 func OpenAgentLog() (*os.File, error) {
     path := LogPath() // PR1 already exposes this
     f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
     if err != nil { return nil, err }
     return f, nil
+}
+
+// RFCLogger formats lines as: "<UTC-RFC3339> <printf-rendered>\n".
+// stdlib `log.New(...)` with `log.LstdFlags|log.LUTC` emits Go's
+// "YYYY/MM/DD HH:MM:SS" format — that violates the §5 external contract
+// which freezes UTC-RFC3339. RFCLogger is what the watcher loop and any
+// future component should use.
+//
+// The Printf signature matches watcher.Logger so RFCLogger satisfies
+// that interface directly. The format string must NOT include a
+// trailing newline; Printf appends one.
+type RFCLogger struct {
+    Target io.Writer
+    Now    func() time.Time // injectable; default time.Now
+}
+
+func NewRFCLogger(target io.Writer) *RFCLogger {
+    return &RFCLogger{Target: target, Now: time.Now}
+}
+
+func (l *RFCLogger) Printf(format string, args ...any) {
+    line := fmt.Sprintf(format, args...)
+    fmt.Fprintf(l.Target, "%s %s\n", l.Now().UTC().Format(time.RFC3339), line)
 }
 ```
 
@@ -481,7 +565,8 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
         return &ExitError{Code: 1, Err: fmt.Errorf("open agent.log: %w", err)}
     }
     defer logFile.Close()
-    logger := log.New(io.MultiWriter(logFile, cmd.ErrOrStderr()), "", log.LstdFlags|log.LUTC)
+    // Mirror agent.log lines to stderr for foreground inspection.
+    logger := config.NewRFCLogger(io.MultiWriter(logFile, cmd.ErrOrStderr()))
 
     loop := watcher.NewLoop(watcher.LoopOpts{
         Sources: []watcher.Source{
@@ -580,7 +665,7 @@ The PR3 server uses `(session_id, event_uuid)` dedup. PR2 does NOT attempt at-mo
 - `~/.caliber-agent/agent.log` append-only, 0600, UTC-RFC3339 timestamps, line-oriented
 - `~/.caliber-agent/state.json`:
   - `Files[path].Offset` = next byte to read
-  - `Files[path].LastSync` = last successful `SendChunk` ACK timestamp (UTC)
+  - `Files[path].LastSync` = UTC timestamp of the most recent successful **watermark advance** for that file (covers all three cases: sink ACK with chunk delivery, whitespace-only segment advance, and shrink reset to 0). Was previously specified as "sink ACK only" — redefined here because the watermark can legitimately advance without a sink call.
 - `Sink` interface + `Chunk` type are the seam for PR3
 - Environment overrides (test-only):
   - `CALIBER_CLAUDE_PROJECTS` — inherited from PR1 (already documented in PR1 §8)
@@ -645,6 +730,9 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
 - Incomplete trailing: seed `{"a":1}\n{"b":2` (no trailing `\n`) → only first line returned; `ToOffset=8` (after first `\n`); second-line bytes NOT consumed.
 - Empty lines: seed `{"a":1}\n\n  \n{"b":2}\n` → 2 events, `Skipped=2`, `ToOffset` covers all bytes.
 - Shrank: pre-seed offset=10000, file size=100 → returns `ErrFileShrank`.
+- Oversize line dropped: seed a single line of 5 MiB (>4 MiB cap) followed by `\n{"a":1}\n` → `Events=[{"a":1}]`, `OversizeDropped=1`, `ToOffset` covers ALL bytes including the dropped line.
+- Per-tick byte budget hit: seed 20 MiB of small JSONL events → `TickBudgetHit=true`, `cumulativeEventBytes <= maxTickBytes + one line slack`, `ToOffset` reflects exactly what was consumed.
+- Memory bound assertion: open through a counting wrapper, run Read on a 50 MiB file → assert reader bytes-consumed never exceeds `maxTickBytes + 1 MiB` (the bufio buffer + one in-flight line).
 - Gone: missing file → returns `ErrFileGone`.
 - Injected Open: byte-counting reader wrapper; assert Tail reads at most `size − fromOffset` bytes (no overscan).
 
@@ -669,7 +757,11 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
 - Failure A (file gone):
   - Fake Source emits a ref whose Path doesn't exist → log `[warn] file gone`, no Sink call, State unchanged.
 - Failure B (file shrank):
-  - Pre-seed state.json with offset=1000, real file size=10 → assert tail resets to 0, Chunk delivered with FromOffset=0, log has `[warn] file shrank`, State advances.
+  - Pre-seed state.json with offset=1000, real file size=10 (with `{"a":1}\n` content) → assert tail resets to 0, Chunk delivered with FromOffset=0, log has `[warn] file shrank`, State advances.
+- Failure B' (shrank to empty — regression for round-3 review):
+  - Pre-seed state.json with offset=1000, then truncate file to 0 bytes → first tick: ErrFileShrank → State.Files[path].Offset persisted to 0 BEFORE re-tail → re-tail returns empty TailResult → next tick stat sees size==0 matches state offset==0, no ErrFileShrank loop.
+- Failure B'' (shrank to incomplete line):
+  - Pre-seed offset=1000, truncate to `{"a":1` (no trailing `\n`, 6 bytes) → first tick: ErrFileShrank → persist offset=0 → re-tail produces TailResult with `Events=[]` and `ToOffset=0` (incomplete trailing line dropped) → State stays at offset 0, no infinite loop.
 - Failure C (sink error):
   - `FakeSink.Err = errors.New("disk full")` → assert State.Files untouched, log has `[error] sink`, Tick still returns nil.
 - Failure D (cwd unresolvable):
@@ -687,6 +779,8 @@ Target: maintain the 80% gate from PR1. `watcher/*` and `sink/*` are fully testa
 ### `config/log`
 
 - `t.TempDir()` HOME → `OpenAgentLog()` → file at `<HOME>/agent.log`, perm 0600, append-mode (close, reopen, write more, assert content concatenated).
+- `RFCLogger.Printf` with injected Now → assert output line matches regex `^2026-05-22T\d{2}:\d{2}:\d{2}Z (...) \n` and contains the printf-rendered payload exactly once.
+- `RFCLogger.Printf` with multi-arg format → assert args are interpolated before timestamp prepending (no double-formatting).
 
 ### `cli/run`
 
@@ -753,7 +847,7 @@ These surfaces lock once PR2 merges. Future PRs evolve, not break.
 - **`agent.log` path** `~/.caliber-agent/agent.log`, append-only, 0600
 - **`state.json`** semantics:
   - `Files[path].Offset` is the byte position from which the NEXT tail should read
-  - `Files[path].LastSync` is the UTC timestamp of the most recent successful sink ACK for that file
+  - `Files[path].LastSync` is the UTC timestamp of the most recent successful watermark advance for that file (sink ACK, whitespace-only advance, or shrink reset)
 - **Sink interface + Chunk type** locked at PR2 boundaries (see §4.1 / §4.2). PR3 only evolves `Chunk.Events` from `[]string` to `[]Event`.
 
 ---
