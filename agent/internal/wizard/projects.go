@@ -94,6 +94,11 @@ func resolveDir(dir string, open opener) (ProjectCandidate, bool) {
 
 // listJSONL returns the *.jsonl files in dir sorted newest-mtime-first and
 // the latest mtime observed.
+//
+// NOTE: this function mirrors agent/internal/cwdresolve/cwdresolve.go's
+// listJSONL but with a different return shape (also returns max mtime
+// for LastSeen). Worth unifying in Phase 3 if cwdresolve grows a more
+// capable surface.
 func listJSONL(dir string) ([]string, time.Time) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
