@@ -30,8 +30,3 @@ func Dispatch(source string, line string) (redact.Event, error) {
 	}
 }
 
-// TEMPORARY stubs — replaced by claude.go (Task 3.2) and codex.go (Task 3.3)
-// in this same Phase 3. Keeping them inline lets the package compile
-// while the dispatch_test.go runs against the routing logic only.
-func ParseClaudeEvent(line string) (redact.Event, error) { return redact.Event{}, ErrSkipLine }
-func ParseCodexEvent(line string) (redact.Event, error)  { return redact.Event{}, ErrSkipLine }
