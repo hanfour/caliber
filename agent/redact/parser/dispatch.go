@@ -29,4 +29,3 @@ func Dispatch(source string, line string) (redact.Event, error) {
 		return redact.Event{}, fmt.Errorf("parser: unknown source %q", source)
 	}
 }
-
