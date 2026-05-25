@@ -13,9 +13,9 @@ const TTL_SECONDS = 86400; // 24h
 // has no cached set and the server returns the default. A parity test
 // in tests/integration/rest/redactionSet.test.ts asserts these match.
 export const SERVER_DEFAULT_PATTERNS: RedactionPattern[] = [
-  { name: "anthropic_or_openai_legacy", regex: "sk-[a-zA-Z0-9_\\-]{20,}", replacement: "sk-***" },
-  { name: "openai_project",             regex: "sk-proj-[A-Za-z0-9_\\-]{20,}", replacement: "sk-proj-***" },
   { name: "anthropic_console",          regex: "sk-ant-api[0-9]{2}-[A-Za-z0-9_\\-]{20,}", replacement: "sk-ant-***" },
+  { name: "openai_project",             regex: "sk-proj-[A-Za-z0-9_\\-]{20,}", replacement: "sk-proj-***" },
+  { name: "anthropic_or_openai_legacy", regex: "sk-[a-zA-Z0-9_\\-]{20,}", replacement: "sk-***" },
   { name: "aws_access_key",             regex: "AKIA[0-9A-Z]{16}", replacement: "AKIA***" },
   { name: "github_pat",                 regex: "ghp_[A-Za-z0-9]{36,}", replacement: "ghp_***" },
   { name: "github_oauth",               regex: "gho_[A-Za-z0-9]{36,}", replacement: "gho_***" },

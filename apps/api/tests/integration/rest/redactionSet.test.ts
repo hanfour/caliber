@@ -1,4 +1,6 @@
 // apps/api/tests/integration/rest/redactionSet.test.ts
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
@@ -124,11 +126,7 @@ describe("GET /v1/redaction-set", () => {
   });
 });
 
-/*
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
-describe("SERVER_DEFAULT_PATTERNS / agent DefaultPatterns parity (re-enabled in PR3 Phase 4)", () => {
+describe("SERVER_DEFAULT_PATTERNS / agent DefaultPatterns parity", () => {
   it("server and agent default sets match by Name + RegexSrc + Replacement", () => {
     const goPath = join(
       __dirname, "..", "..", "..", "..", "..",
@@ -144,4 +142,3 @@ describe("SERVER_DEFAULT_PATTERNS / agent DefaultPatterns parity (re-enabled in 
     expect(goEntries).toEqual(SERVER_DEFAULT_PATTERNS);
   });
 });
-*/
