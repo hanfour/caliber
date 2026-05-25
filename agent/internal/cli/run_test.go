@@ -225,6 +225,43 @@ func TestRun_PersistentMode_TicksMultipleTimesUntilCancel(t *testing.T) {
 	}
 }
 
+func TestRun_InvalidMode_ReturnsExit1(t *testing.T) {
+	home := setupEnrolledHome(t)
+	_ = home
+
+	// Write a config with a typo'd mode.
+	if err := config.Save(&config.Config{
+		DeviceID:     "dev-abc",
+		Hostname:     "h4",
+		OS:           "darwin",
+		APIBaseURL:   "http://localhost:3001",
+		Mode:         "metadta-only", // deliberate typo
+		IncludePaths: []string{home + "/projects/allowed"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"run", "--once"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected error for invalid mode, got nil")
+	}
+	var ee *ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("expected *ExitError, got %T: %v", err, err)
+	}
+	if ee.Code != 1 {
+		t.Errorf("expected ExitError{Code:1}, got Code=%d", ee.Code)
+	}
+	if !strings.Contains(err.Error(), "invalid mode") {
+		t.Errorf("expected 'invalid mode' in error: %v", err)
+	}
+}
+
 func TestRun_OnceEndToEnd_FetchAndIngest(t *testing.T) {
 	home := setupEnrolledHome(t)
 
