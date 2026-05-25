@@ -2,8 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +18,27 @@ import (
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/internal/keychain"
 )
+
+// fakeAPIServer spins up a test server that handles /v1/redaction-set and
+// /v1/ingest, returning minimal valid responses. Tests that need a real
+// API endpoint to avoid HTTPSink retry timeouts use this helper.
+func fakeAPIServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/redaction-set":
+			w.WriteHeader(200)
+			w.Write([]byte(`{"patterns":[],"version":"v-test","ttl_seconds":3600}`))
+		case "/v1/ingest":
+			w.WriteHeader(200)
+			w.Write([]byte(`{"ingested":1,"deduped":0,"session_upserts":1,"errors":[]}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
 
 func setupEnrolledHome(t *testing.T) string {
 	t.Helper()
@@ -118,13 +144,17 @@ func TestRun_OnceWithEmptyAllowList_TicksAndExits(t *testing.T) {
 	}
 }
 
-func TestRun_OnceWithMatchingFile_ProducesChunkLine(t *testing.T) {
+func TestRun_OnceWithMatchingFile_ProducesIngestLine(t *testing.T) {
 	home := setupEnrolledHome(t)
+
+	srv := fakeAPIServer(t)
 
 	allowed := filepath.Join(home, "projects", "allowed")
 	os.MkdirAll(allowed, 0o755)
 	if err := config.Save(&config.Config{
 		DeviceID:     "dev-abc",
+		APIBaseURL:   srv.URL,
+		Mode:         "metadata-only",
 		IncludePaths: []string{allowed},
 	}); err != nil {
 		t.Fatal(err)
@@ -140,8 +170,9 @@ func TestRun_OnceWithMatchingFile_ProducesChunkLine(t *testing.T) {
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	line := `{"type":"user","uuid":"e-1","timestamp":"2026-05-23T10:00:00Z","cwd":"` + allowed + `","message":{"role":"user","content":"hello"}}`
 	if err := os.WriteFile(filepath.Join(projDir, "sess.jsonl"),
-		[]byte(`{"type":"user","cwd":"`+allowed+`"}`+"\n"), 0o644); err != nil {
+		[]byte(line+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -151,15 +182,15 @@ func TestRun_OnceWithMatchingFile_ProducesChunkLine(t *testing.T) {
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"run", "--once"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
-		t.Fatalf("run --once: %v", err)
+		t.Fatalf("run --once: %v\noutput: %s", err, buf.String())
 	}
 
 	bs, err := os.ReadFile(filepath.Join(home, "agent.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(bs), "[chunk]") {
-		t.Errorf("agent.log missing [chunk] line: %q", bs)
+	if !strings.Contains(string(bs), "[ingest]") {
+		t.Errorf("agent.log missing [ingest] line: %q", bs)
 	}
 }
 
@@ -191,5 +222,93 @@ func TestRun_PersistentMode_TicksMultipleTimesUntilCancel(t *testing.T) {
 	bs, _ := os.ReadFile(filepath.Join(home, "agent.log"))
 	if strings.Count(string(bs), "[tick-end]") < 2 {
 		t.Errorf("expected multiple [tick-end] lines, got %q", bs)
+	}
+}
+
+func TestRun_OnceEndToEnd_FetchAndIngest(t *testing.T) {
+	home := setupEnrolledHome(t)
+
+	var ingestPosts int
+	var redactionFetches int
+	var capturedIngestBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/redaction-set":
+			redactionFetches++
+			w.WriteHeader(200)
+			w.Write([]byte(`{"patterns":[{"name":"n","regex":"[0-9]+","replacement":"#"}],"version":"v-1","ttl_seconds":3600}`))
+		case "/v1/ingest":
+			ingestPosts++
+			gr, err := gzip.NewReader(r.Body)
+			if err != nil {
+				t.Fatalf("gunzip: %v", err)
+			}
+			raw, _ := io.ReadAll(gr)
+			_ = json.Unmarshal(raw, &capturedIngestBody)
+			w.WriteHeader(200)
+			w.Write([]byte(`{"ingested":1,"deduped":0,"session_upserts":1,"errors":[]}`))
+		default:
+			t.Errorf("unexpected URL %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+
+	allowed := filepath.Join(home, "projects", "allowed")
+	os.MkdirAll(allowed, 0o755)
+	if err := config.Save(&config.Config{
+		DeviceID:     "dev-abc",
+		APIBaseURL:   srv.URL,
+		Mode:         "metadata-only",
+		IncludePaths: []string{allowed},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeRoot := filepath.Join(home, "claude-projects")
+	t.Setenv("CALIBER_CLAUDE_PROJECTS", claudeRoot)
+	t.Setenv("CALIBER_CODEX_SESSIONS", filepath.Join(home, "codex-empty"))
+	os.MkdirAll(filepath.Join(home, "codex-empty"), 0o755)
+	encoded := "-" + strings.ReplaceAll(strings.TrimPrefix(allowed, "/"), "/", "-")
+	projDir := filepath.Join(claudeRoot, encoded)
+	os.MkdirAll(projDir, 0o755)
+	line := `{"type":"user","uuid":"e-1","timestamp":"2026-05-23T10:00:00Z","cwd":"` + allowed + `","message":{"role":"user","content":"hello"}}`
+	os.WriteFile(filepath.Join(projDir, "sess.jsonl"), []byte(line+"\n"), 0o644)
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"run", "--once"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("run --once: %v\noutput: %s", err, buf.String())
+	}
+
+	if redactionFetches != 1 {
+		t.Errorf("redaction-set fetches = %d, want 1", redactionFetches)
+	}
+	if ingestPosts != 1 {
+		t.Errorf("ingest posts = %d, want 1", ingestPosts)
+	}
+	if capturedIngestBody["redaction_mode"] != "metadata-only" {
+		t.Errorf("redaction_mode = %v", capturedIngestBody["redaction_mode"])
+	}
+
+	bs, _ := os.ReadFile(filepath.Join(home, "agent.log"))
+	log := string(bs)
+	if !strings.Contains(log, "[ingest]") {
+		t.Errorf("agent.log missing [ingest] line: %q", log)
+	}
+	if !strings.Contains(log, "[refresh]") {
+		t.Errorf("agent.log missing [refresh] line: %q", log)
+	}
+
+	rs, err := config.LoadRedactionSet()
+	if err != nil {
+		t.Fatalf("LoadRedactionSet: %v", err)
+	}
+	if rs.Version != "v-1" {
+		t.Errorf("redaction-set version = %q", rs.Version)
 	}
 }
