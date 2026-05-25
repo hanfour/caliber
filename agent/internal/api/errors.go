@@ -11,6 +11,7 @@ var (
 	ErrInvalidToken  = errors.New("api: invalid_token")
 	ErrTokenUsed     = errors.New("api: token_already_used")
 	ErrTokenExpired  = errors.New("api: token_expired")
+	ErrKeyRevoked    = errors.New("api: key_revoked")
 	ErrServerMisconf = errors.New("api: server misconfigured")
 )
 
@@ -38,6 +39,8 @@ func (e *APIError) Is(target error) bool {
 		return e.StatusCode == 410 && e.ErrorTag == "token_already_used"
 	case ErrTokenExpired:
 		return e.StatusCode == 410 && e.ErrorTag == "token_expired"
+	case ErrKeyRevoked:
+		return e.StatusCode == 401 && (e.ErrorTag == "key_revoked" || e.ErrorTag == "device_revoked")
 	case ErrServerMisconf:
 		return e.StatusCode == 500 && e.ErrorTag == "server_misconfigured"
 	}
