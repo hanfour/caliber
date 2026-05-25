@@ -36,6 +36,10 @@ export function redactionSetRoutes(env: ServerEnv): FastifyPluginAsync {
     fastify.get("/v1/redaction-set", async (req, reply) => {
       const auth = await resolveDeviceFromAuth(fastify.db, env, req.headers.authorization);
       if (!auth.ok) {
+        if (auth.error === "server_misconfigured") {
+          reply.code(500);
+          return { error: "server_misconfigured" };
+        }
         reply.code(401);
         return { error: auth.error };
       }
