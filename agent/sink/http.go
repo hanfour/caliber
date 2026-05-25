@@ -121,6 +121,24 @@ type ingestResponse struct {
 	} `json:"errors"`
 }
 
+// authError wraps an *api.APIError with a sentinel so callers can use
+// both errors.Is(err, api.ErrInvalidToken) and errors.As(err, &apiErr).
+type authError struct {
+	sentinel error
+	cause    *api.APIError
+}
+
+func (e *authError) Error() string        { return fmt.Sprintf("%s: %s", e.sentinel, e.cause) }
+func (e *authError) Is(target error) bool { return target == e.sentinel || errors.Is(e.cause, target) }
+func (e *authError) As(target any) bool {
+	if t, ok := target.(**api.APIError); ok {
+		*t = e.cause
+		return true
+	}
+	return false
+}
+func (e *authError) Unwrap() error { return e.cause }
+
 // SendChunk implements Sink. It marshals the Chunk into a gzipped JSON
 // payload and POSTs it to /v1/ingest with Bearer token auth. Transient
 // errors (5xx, 429, network) are retried per RetryPolicy; auth failures
@@ -193,9 +211,9 @@ func (h *HTTPSink) SendChunk(ctx context.Context, c Chunk) error {
 		switch {
 		case ae.StatusCode == 401:
 			if errors.Is(ae, api.ErrKeyRevoked) {
-				return fmt.Errorf("%w: %v", api.ErrKeyRevoked, ae)
+				return &authError{sentinel: api.ErrKeyRevoked, cause: ae}
 			}
-			return fmt.Errorf("%w: %v", api.ErrInvalidToken, ae)
+			return &authError{sentinel: api.ErrInvalidToken, cause: ae}
 		case ae.StatusCode == 400 || ae.StatusCode == 409 || ae.StatusCode == 410:
 			return apiErr
 		case ae.StatusCode == 429:
