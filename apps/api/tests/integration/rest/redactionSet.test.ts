@@ -123,3 +123,25 @@ describe("GET /v1/redaction-set", () => {
     expect(JSON.parse(res.body)).toEqual({ error: "key_revoked" });
   });
 });
+
+/*
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+describe("SERVER_DEFAULT_PATTERNS / agent DefaultPatterns parity (re-enabled in PR3 Phase 4)", () => {
+  it("server and agent default sets match by Name + RegexSrc + Replacement", () => {
+    const goPath = join(
+      __dirname, "..", "..", "..", "..", "..",
+      "agent", "redact", "regexes.go",
+    );
+    const goSource = readFileSync(goPath, "utf8");
+    const re = /\{Name:\s*"([^"]+)",\s*RegexSrc:\s*`([^`]+)`,\s*Replacement:\s*"([^"]+)"\}/g;
+    const goEntries: { name: string; regex: string; replacement: string }[] = [];
+    for (const m of goSource.matchAll(re)) {
+      goEntries.push({ name: m[1]!, regex: m[2]!, replacement: m[3]! });
+    }
+    expect(goEntries.length).toBeGreaterThan(0);
+    expect(goEntries).toEqual(SERVER_DEFAULT_PATTERNS);
+  });
+});
+*/
