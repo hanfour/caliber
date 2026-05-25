@@ -25,10 +25,10 @@ func TestLogSink_Happy_EmitsMetadataLine(t *testing.T) {
 	s.Now = fixedNow("2026-05-22T10:00:00Z")
 
 	err := s.SendChunk(context.Background(), Chunk{
-		File:       "/Users/h/.claude/projects/-Users-h-proj/sess.jsonl",
-		Source:     "claude",
-		SessionID:  "sess-1",
-		CWD:        "/Users/h/proj",
+		File:      "/Users/h/.claude/projects/-Users-h-proj/sess.jsonl",
+		Source:    "claude",
+		SessionID: "sess-1",
+		CWD:       "/Users/h/proj",
 		Events: []redact.Event{
 			{EventID: "e-1", EventType: "user"},
 			{EventID: "e-2", EventType: "assistant"},
@@ -84,7 +84,7 @@ func TestLogSink_FailingWriter_ReturnsWrappedError(t *testing.T) {
 	s := NewLogSink(w)
 	err := s.SendChunk(context.Background(), Chunk{
 		File:     "/x",
-		Events: []redact.Event{{EventID: "a", EventType: "user"}},
+		Events:   []redact.Event{{EventID: "a", EventType: "user"}},
 		ToOffset: 10,
 	})
 	if err == nil {
