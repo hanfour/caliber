@@ -9,6 +9,7 @@ import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
 import { devicesEnrollRoutes } from "./rest/devicesEnroll.js";
 import { ingestRoutes } from "./rest/ingest.js";
+import { redactionSetRoutes } from "./rest/redactionSet.js";
 import { startPartitionRollForwardCron } from "./services/clientEventsPartitions.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";
@@ -68,6 +69,7 @@ export async function buildServer() {
   await app.register(healthRoutes);
   await app.register(devicesEnrollRoutes(env));
   await app.register(ingestRoutes(env));
+  await app.register(redactionSetRoutes(env));
 
   // Daily roll-forward for client_events monthly partitions. Runs immediately
   // on boot so a fresh deploy is safe even if the daily timer hasn't ticked.

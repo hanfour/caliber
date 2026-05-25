@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/sink"
 )
@@ -471,6 +472,67 @@ func TestLoop_Run_TicksUntilContextCancel(t *testing.T) {
 	// First tick should deliver the chunk; subsequent ticks see no new bytes.
 	if len(cap.Chunks()) != 1 {
 		t.Errorf("expected exactly 1 chunk delivered, got %d", len(cap.Chunks()))
+	}
+}
+
+func TestLoop_Tick_PropagatesKeyRevokedFromSink(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", tmp)
+	proj := filepath.Join(tmp, "claude-projects", "-Users-h-p")
+	os.MkdirAll(proj, 0o755)
+	sess := filepath.Join(proj, "s.jsonl")
+	os.WriteFile(sess, []byte(`{"a":1}`+"\n"), 0o644)
+
+	fatalErr := &api.APIError{StatusCode: 401, ErrorTag: "key_revoked", Body: "revoked"}
+	cap := &captureSink{err: fatalErr}
+	state := &config.State{Files: map[string]config.FileWatermark{}}
+	log := &fakeLogger{}
+	loop := NewLoop(LoopOpts{
+		Sources: []Source{&fakeSource{name: "claude", refs: []FileRef{
+			{Path: sess, Source: "claude", SessionID: "s"},
+		}}},
+		Tailer: &Tailer{}, Chunker: &Chunker{}, Sink: cap,
+		Config:   &config.Config{IncludePaths: []string{"/Users/h/p"}},
+		State:    state,
+		Resolver: &fakeResolver{byDir: map[string]string{proj: "/Users/h/p"}},
+		Log:      log,
+		Interval: time.Hour,
+	})
+	err := loop.Tick(context.Background())
+	if !errors.Is(err, api.ErrKeyRevoked) {
+		t.Errorf("expected Tick to propagate ErrKeyRevoked, got %v", err)
+	}
+	// State must not advance on fatal error.
+	if state.Files[sess].Offset != 0 {
+		t.Errorf("offset advanced despite fatal sink error: %d", state.Files[sess].Offset)
+	}
+}
+
+func TestLoop_Tick_PropagatesInvalidTokenFromSink(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", tmp)
+	proj := filepath.Join(tmp, "claude-projects", "-Users-h-p")
+	os.MkdirAll(proj, 0o755)
+	sess := filepath.Join(proj, "s.jsonl")
+	os.WriteFile(sess, []byte(`{"a":1}`+"\n"), 0o644)
+
+	fatalErr := &api.APIError{StatusCode: 401, ErrorTag: "invalid_token", Body: "bad token"}
+	cap := &captureSink{err: fatalErr}
+	state := &config.State{Files: map[string]config.FileWatermark{}}
+	loop := NewLoop(LoopOpts{
+		Sources: []Source{&fakeSource{name: "claude", refs: []FileRef{
+			{Path: sess, Source: "claude", SessionID: "s"},
+		}}},
+		Tailer: &Tailer{}, Chunker: &Chunker{}, Sink: cap,
+		Config:   &config.Config{IncludePaths: []string{"/Users/h/p"}},
+		State:    state,
+		Resolver: &fakeResolver{byDir: map[string]string{proj: "/Users/h/p"}},
+		Log:      &fakeLogger{},
+		Interval: time.Hour,
+	})
+	err := loop.Tick(context.Background())
+	if !errors.Is(err, api.ErrInvalidToken) {
+		t.Errorf("expected Tick to propagate ErrInvalidToken, got %v", err)
 	}
 }
 

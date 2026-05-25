@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hanfour/ai-dev-eval/agent/redact"
 )
 
 func fixedNow(s string) func() time.Time {
@@ -23,11 +25,15 @@ func TestLogSink_Happy_EmitsMetadataLine(t *testing.T) {
 	s.Now = fixedNow("2026-05-22T10:00:00Z")
 
 	err := s.SendChunk(context.Background(), Chunk{
-		File:       "/Users/h/.claude/projects/-Users-h-proj/sess.jsonl",
-		Source:     "claude",
-		SessionID:  "sess-1",
-		CWD:        "/Users/h/proj",
-		Events:     []string{`{"a":1}`, `{"b":2}`, `{"c":3}`},
+		File:      "/Users/h/.claude/projects/-Users-h-proj/sess.jsonl",
+		Source:    "claude",
+		SessionID: "sess-1",
+		CWD:       "/Users/h/proj",
+		Events: []redact.Event{
+			{EventID: "e-1", EventType: "user"},
+			{EventID: "e-2", EventType: "assistant"},
+			{EventID: "e-3", EventType: "tool_use"},
+		},
 		FromOffset: 100,
 		ToOffset:   300,
 	})
@@ -56,7 +62,10 @@ func TestLogSink_Privacy_NoEventContentInOutput(t *testing.T) {
 	s := NewLogSink(&buf)
 	const canary = "my-fake-cda_test_should_never_appear"
 	err := s.SendChunk(context.Background(), Chunk{
-		Events: []string{canary, "another event"},
+		Events: []redact.Event{
+			{EventID: canary, EventType: "user", Content: canary},
+			{EventID: "e-2", EventType: "user"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("SendChunk: %v", err)
@@ -75,7 +84,7 @@ func TestLogSink_FailingWriter_ReturnsWrappedError(t *testing.T) {
 	s := NewLogSink(w)
 	err := s.SendChunk(context.Background(), Chunk{
 		File:     "/x",
-		Events:   []string{"a"},
+		Events:   []redact.Event{{EventID: "a", EventType: "user"}},
 		ToOffset: 10,
 	})
 	if err == nil {

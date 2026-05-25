@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/sink"
 )
@@ -178,6 +179,9 @@ SOURCELOOP:
 				if sendErr := l.sink.SendChunk(ctx, c); sendErr != nil {
 					l.log.Printf("[error] sink: %v", sendErr)
 					totalErrors++
+					if errors.Is(sendErr, api.ErrKeyRevoked) || errors.Is(sendErr, api.ErrInvalidToken) {
+						return sendErr // fatal — propagate to Loop.Run, then runRun
+					}
 					break
 				}
 				totalChunks++
