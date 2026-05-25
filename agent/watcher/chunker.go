@@ -18,7 +18,8 @@ func (c *Chunker) Split(ref FileRef, tr TailResult, cwd string) []sink.Chunk {
 		SessionID:       ref.SessionID,
 		ParentSessionID: ref.ParentSessionID,
 		CWD:             cwd,
-		Events:          tr.Events,
+		// TEMPORARY: chunker awaits Phase 9 rewrite for redact.Event support
+		Events: nil,
 		FromOffset:      tr.FromOffset,
 		ToOffset:        tr.ToOffset,
 	}}
