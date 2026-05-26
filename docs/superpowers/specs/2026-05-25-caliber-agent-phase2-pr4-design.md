@@ -249,9 +249,9 @@ flags: --yes          跳過互動確認
    - **時機 trade-off**：sentinel 寫在 prompt 之後，意味著 user 讀 prompt + 思考的數秒到數十秒內，running daemon（若 `--force` 場景）**可能仍送出少量 chunks**。這是有意取捨：
      - 優先保證「cancel = 0 side effect」（單純按錯指令不會 stop 跑得好好的 daemon）
      - prompt 時段 daemon 上傳延續其原本行為（user 還沒打 uninstall 之前 daemon 本來就在上傳），不是 uninstall 引入的新 side effect
-     - 真正的 cleanup race window（remote revoke + keychain + RemoveAll 期間）仍受 sentinel 完整保護
+     - 真正的 cleanup race window（remote revoke + keychain + ordered delete 期間）仍受 sentinel 完整保護
    - daemon 每 chunk 前檢查此 sentinel，存在則 `[fatal] uninstall in progress; aborting` exit 0
-   - sentinel 會在 step 6 `os.RemoveAll` 時被一併清除（不需額外 cleanup）
+   - sentinel 會在 step 6 ordered delete 的最後一個 entry (g) 被清除（不需額外 cleanup）
 
 4. **遠端 revoke**（除非 `--keep-remote`）：best-effort
    - 204 / 410：印 `[ok] device revoked at server` / `[ok] device already revoked at server`
@@ -261,7 +261,31 @@ flags: --yes          跳過互動確認
    - `ErrNotFound`：視為已清，印 `[ok] keychain entry already absent` 繼續
    - **其他錯誤**：印 `[error] keychain delete failed: <err>`，**exit 1**（local cleanup 失敗；token 可能仍可用）。此時 sentinel 仍存在，要 `os.Remove(.uninstalling)` 還原避免 daemon 永久卡死
 
-6. **檔案清理**：`os.RemoveAll(~/.caliber-agent/)`。失敗 → 印 `[error]` exit 1（同上要還原 sentinel）。
+6. **檔案清理（ordered explicit delete，不用 RemoveAll）**：必須以特定順序逐項刪除，**`.uninstalling` 一定最後刪**：
+
+   ```
+   a. os.Remove(~/.caliber-agent/config.toml)          # 先讓 daemon pre-flight 失敗
+   b. os.Remove(~/.caliber-agent/state.json)
+   c. os.Remove(~/.caliber-agent/redaction-set.json)
+   d. os.Remove(~/.caliber-agent/agent.log)
+   e. os.Remove(~/.caliber-agent/paused)               # 可能不存在 → ErrNotExist 忽略
+   f. os.Remove(~/.caliber-agent/.lock)                # 可能不存在
+   g. os.Remove(~/.caliber-agent/.uninstalling)        # 最後刪 sentinel
+   h. os.Remove(~/.caliber-agent/)                     # rmdir empty
+   ```
+
+   為什麼**不**用 `os.RemoveAll`：`RemoveAll` 內部用 `Readdir` 列出 entries 然後逐個刪，**Readdir 順序由 file system 決定、不可預期**。如果 `.uninstalling` 先被刪、`config.toml` 還在，並發 `caliber-agent run` 的 pre-flight 會：
+   - Stat dir → OK
+   - Stat `.uninstalling` → `ErrNotExist` → **過**（不知道 uninstall 還在進行）
+   - Stat `config.toml` → OK
+   - 進到 step 2 OpenFile `.lock` → **違反「uninstall 後該目錄不留檔」契約**
+
+   ordered delete 保證 sentinel 是 dir 內**最後一個**檔案：
+   - 在 (a)-(f) 期間：sentinel 存在 → 並發 run/pause pre-flight 立即看到並退出
+   - 在 (g) 後：dir 內只剩 dir 本身 → 並發 run/pause pre-flight 看到 `config.toml ErrNotExist` 退出
+   - 在 (h) 後：dir 不在 → 並發 run/pause pre-flight 看到 dir `ErrNotExist` 退出
+
+   任何 step 失敗 → 印 `[error]` + `os.Remove(.uninstalling)` 還原避免 daemon 永久卡死 + exit 1。但**例外**：若 (g) 已成功（sentinel 已刪）然後 (h) rmdir 失敗，**不還原 sentinel**（其他檔已不在，重寫 sentinel 反而會讓 daemon 卡死且無法清理）— 此時印 `[error] rmdir failed: <err>; manually 'rmdir ~/.caliber-agent/' to finish` exit 1。
 
 7. **印最終清單**（合規守則要求 — anti-forensics 反向：透明可審）：
 
@@ -283,12 +307,12 @@ flags: --yes          跳過互動確認
 
 退出碼：
 - 0 — 全部清理（含遠端 best-effort 失敗，但 keychain + fs 成功）
-- 1 — **本地清理任一步失敗**（包含 daemon 仍在跑且無 `--force` / keychain delete 非 ErrNotFound 失敗 / RemoveAll 失敗）；step 3 之後失敗必須 `os.Remove(.uninstalling)` 還原避免 daemon 永久卡死
+- 1 — **本地清理任一步失敗**（包含 daemon 仍在跑且無 `--force` / keychain delete 非 ErrNotFound 失敗 / ordered delete 任一 step 失敗）；step 3 之後失敗必須 `os.Remove(.uninstalling)` 還原避免 daemon 永久卡死（但 sentinel 已刪 + rmdir 失敗的特殊 case 例外，見 step 6）
 - 130 — user cancel 或 non-TTY without `--yes`；**因 sentinel 尚未寫入，無須還原**（這是新設計與 round 3 的主要差別 — sentinel 寫入移到 prompt 後）
 
 ### 3.7 `caliber-agent run` 行為微調（為支援 F2 lockfile + sentinel）
 
-`run` 啟動序列加入四個新動作（不改變 user-visible CLI）：
+`run` 啟動序列加入**五個**新動作（不改變 user-visible CLI）：
 
 1. **Pre-flight read-only checks（任何寫入動作之前完成）**：
    依序 stat，命中失敗即 exit，**不建立任何檔案、不執行任何 write syscall**：
@@ -297,7 +321,7 @@ flags: --yes          跳過互動確認
    - `os.Stat(~/.caliber-agent/config.toml)` → 套用 presence 規則：`ErrNotExist` → `[fatal] not enrolled (config.toml missing — partial cleanup?); re-enroll or remove ~/.caliber-agent/` exit 1
    - 這三條都不寫入。場景覆蓋：
      - 未 enroll：`dir not exist` → exit 1
-     - uninstall 進行中（任何階段，含 partial RemoveAll 後）：`.uninstalling` 仍在 → exit 0
+     - uninstall 進行中（任何階段，含 ordered delete (a)-(f)）：`.uninstalling` 仍在 → exit 0
      - stale empty config dir（user 手動 mkdir）：`config.toml missing` → exit 1（不會建 `.lock`）
 
 2. **取得 lockfile + 寫 PID**：
@@ -402,7 +426,9 @@ flags: --yes          跳過互動確認
 | user 讀 prompt 期間（sentinel 尚未寫） | ≤ 數十秒（user 思考時間） | 既有 daemon 上傳延續其原行為（**非** uninstall 引入） |
 | `uninstall` step 3 寫 sentinel → daemon 下次 per-chunk stat | 1 stat→SendChunk gap | 最多 1 個 in-flight chunk 送出 |
 | sentinel 寫入後到 daemon 完全 exit | ≤ 1 chunk send latency | HTTP request 已 in-flight 的話 server 仍會收 |
-| `uninstall` 跑到 cleanup 中、user 另開 terminal 跑 `run` | 0 | 新 daemon acquire lock 後 step 2 startup check 立即 exit；無 redaction-set fetch / 任何 network IO |
+| `uninstall` cleanup (a)-(f) 期間 user 另開 terminal 跑 `run` | 0 | sentinel 仍存在 → run pre-flight step 1 看到 `.uninstalling` 立即 exit 0；不建 `.lock`、無任何 IO |
+| `uninstall` cleanup (g)-(h) 之間 user 另開 terminal 跑 `run` | 0 | sentinel 已刪但 config.toml 也已刪 → run pre-flight 看到 `config.toml ErrNotExist` exit 1；不建 `.lock` |
+| `uninstall` cleanup 完成後 user 跑 `run` | 0 | dir 不存在 → pre-flight 立即 exit 1 not enrolled |
 
 ### 3.8 `caliber-agent enroll <token>` 新 flag
 
@@ -415,8 +441,8 @@ flags: --yes          跳過互動確認
 | 路徑 | Perm | 內容 | 寫入方 | 刪除方 |
 |---|---|---|---|---|
 | `~/.caliber-agent/paused` | 0o600 | 空檔（存在性 = 訊號） | `pause` | `resume` / `uninstall` |
-| `~/.caliber-agent/.lock` | 0o600 | 寫入 PID（換行終止） + `flock` 持有 | `run` 啟動（fd held during lifetime） | `uninstall` step 6 RemoveAll；process 死亡時 kernel 自動釋放 flock |
-| `~/.caliber-agent/.uninstalling` | 0o600 | 空檔（存在性 = 訊號） | `uninstall` step 3（**user 確認 yes 之後**，所有路徑包含 `--force`） | `uninstall` step 6 RemoveAll；step 5 或 6 失敗時 uninstall 手動 `os.Remove` 還原（避免 daemon 永久卡死）。**user cancel 時無須還原**（sentinel 尚未寫入） |
+| `~/.caliber-agent/.lock` | 0o600 | 寫入 PID（換行終止） + `flock` 持有 | `run` 啟動（fd held during lifetime） | `uninstall` step 6 ordered delete；process 死亡時 kernel 自動釋放 flock |
+| `~/.caliber-agent/.uninstalling` | 0o600 | 空檔（存在性 = 訊號） | `uninstall` step 3（**user 確認 yes 之後**，所有路徑包含 `--force`） | `uninstall` step 6 ordered delete；step 5 或 6 失敗時 uninstall 手動 `os.Remove` 還原（避免 daemon 永久卡死）。**user cancel 時無須還原**（sentinel 尚未寫入） |
 
 其餘 PR1/PR2/PR3 既有檔不變：`config.toml`、`state.json`、`redaction-set.json`、`agent.log`。
 
@@ -954,7 +980,7 @@ user      CLI            Server      Keychain    FS
  |         |------------------------------>|       |
  |         |       ok                     |       |
  |         |<------------------------------|       |
- |         | RemoveAll(~/.caliber-agent/) (含 .lock + .uninstalling)
+ |         | ordered delete: config.toml→state→...→.uninstalling→rmdir
  |         |---------------------------------------|------>|
  |         |       ok                              |       |
  |         |<--------------------------------------|-------|
@@ -963,14 +989,14 @@ user      CLI            Server      Keychain    FS
  |<--------|                                       |       |
 ```
 
-**完整順序：probe lock（no-create）→ prompt + 確認 → 寫 `.uninstalling` sentinel → 遠端 revoke → keychain delete → RemoveAll → 印清單**。理由：
+**完整順序：probe lock（no-create）→ prompt + 確認 → 寫 `.uninstalling` sentinel → 遠端 revoke → keychain delete → ordered delete（sentinel 最後）→ 印清單**。理由：
 
 1. probe 不建立 `.lock`（無 O_CREATE）— user cancel 不留檔
 2. prompt 在 sentinel 寫入之前 — user cancel 是真的 0 side effect（daemon 完全不受影響）
 3. sentinel 在 cleanup 啟動前 — running daemon 立即看到並退出，後續 remote/keychain/fs 期間 daemon 不再上傳
 4. 遠端先：用 keychain 內的 token 認證，必須在 keychain 刪除前完成
 5. keychain 再刪：失去這把鑰匙後本機不能再呼叫 server
-6. 最後刪檔：含 `config.toml`（device_id 來源），失去這個無法定位要刪哪個 keychain entry；`.uninstalling` 一併隨 `RemoveAll` 清除
+6. 最後刪檔：用 ordered delete（**不**用 `RemoveAll` — 順序不可預期會造成「sentinel 先刪、config 還在」的 race，見 §3.6 step 6）；`config.toml` 在 (a) 最先刪、`.uninstalling` 在 (g) 最後刪
 
 ### 7.4 uninstall degraded paths
 
@@ -983,11 +1009,11 @@ user      CLI            Server      Keychain    FS
 | 遠端 401 / network / 5xx | step 4 印 `[warn]`；繼續 step 5 + 6；最終清單把 remote 行改為 `✗ remote (failed: ...)`；退出碼 0 |
 | keychain ErrNotFound | step 5 印 `[ok] keychain entry already absent`；繼續 step 6 |
 | keychain 非 ErrNotFound 失敗 | step 5 印 `[error]`；`os.Remove(.uninstalling)` 還原；**exit 1**（token 可能仍可用） |
-| `RemoveAll` 失敗 | step 6 印 `[error]`；`os.Remove(.uninstalling)` 還原；退出碼 1 |
+| ordered delete 失敗 | step 6 印 `[error]`；`os.Remove(.uninstalling)` 還原；退出碼 1 |
 | user 拒絕 confirm (`n`) | exit 130；**sentinel 尚未寫**，0 side effect；無還原動作 |
 | non-TTY 無 `--yes` | 同上：early exit 130，0 side effect |
 | 未 enroll 就 uninstall | `config.Load() == ErrNotEnrolled` → 早期 exit 1（未 probe、未寫 sentinel） |
-| uninstall 中 user 另開 terminal 跑 `run` | 新 daemon acquire lock 成功 → §3.7 step 2 startup-time sentinel check 立即看到 `.uninstalling` → exit 0（無 redaction-set fetch / 任何 network IO） |
+| uninstall 中 user 另開 terminal 跑 `run` | §3.7 step 1 pre-flight 立即看到 `.uninstalling` 即 exit 0；若沒看到（pre-flight → acquire 之間 sentinel 才寫），step 3 post-lock re-check 攔下；任一情境都 0 network IO |
 
 ### 7.5 enrol → run → pause → resume → uninstall 完整生命週期
 
@@ -1005,7 +1031,7 @@ resume
 Ctrl+C
   → daemon graceful exit 130
 uninstall
-  → DELETE /v1/devices/me → keychain.Delete → RemoveAll(~/.caliber-agent/)
+  → DELETE /v1/devices/me → keychain.Delete → ordered delete (config.toml first, .uninstalling last, rmdir)
 ```
 
 ## 8. Error Handling
@@ -1031,7 +1057,7 @@ PR4 不新增 code；每子命令的對應：
 | `pause` | 成功（含重複） | 未 enroll / uninstall 進行中 / 罕見 IO failure | — | — |
 | `resume` | 成功（含未 pause） | IO 失敗 | — | — |
 | `status` | 成功 | 未 enroll | — | — |
-| `uninstall` | 全部清理（含遠端 best-effort 失敗，keychain + fs 全成功） | running daemon 拒絕 / keychain 非 ErrNotFound 失敗 / RemoveAll 失敗 | — | user 取消 / non-TTY 無 `--yes` |
+| `uninstall` | 全部清理（含遠端 best-effort 失敗，keychain + fs 全成功） | running daemon 拒絕 / keychain 非 ErrNotFound 失敗 / ordered delete 任一 step 失敗 | — | user 取消 / non-TTY 無 `--yes` |
 
 ### 8.2 邊界情境
 
@@ -1128,12 +1154,15 @@ TestStatus_NotEnrolled_Exit1
 TestStatus_Paused_ReflectedInOutput
 
 TestUninstall_HappyPath_AllSteps_SentinelWrittenAfterPromptThenRemoved   # R4-F3
+TestUninstall_OrderedCleanup_SentinelDeletedLast                          # R10-F1: 斷言 .uninstalling 是 dir 內最後一個被刪的檔
+TestUninstall_OrderedCleanup_ConfigTomlDeletedBeforeSentinel              # R10-F1: 斷言刪除順序 config.toml < sentinel
+TestUninstall_OrderedCleanup_RmdirFailsAfterSentinelRemoved_NoSentinelRestore  # R10-F1: rmdir 失敗時不重寫 sentinel
 TestUninstall_YesFlag_SkipsPrompt_SentinelWrittenImmediately
 TestUninstall_KeepRemote_SkipsServer
 TestUninstall_RemoteFails_LocalStillCleaned_Exit0
 TestUninstall_KeychainNotFound_Continues_Exit0
 TestUninstall_KeychainDeleteFails_Exit1_SentinelRestored      # R1-F4: token 殘留警示 + 還原 sentinel
-TestUninstall_LocalCleanupFails_Exit1_SentinelRestored        # R3: RemoveAll 失敗時還原 sentinel
+TestUninstall_LocalCleanupFails_Exit1_SentinelRestored        # R3: ordered delete 失敗時還原 sentinel
 TestUninstall_DeclinedConfirm_Exit130_ZeroSideEffect          # R4-F3: 零 fs/network/keychain side effect
 TestUninstall_NonTTY_NoYes_Exit130_ZeroSideEffect             # R4-F3: 同上
 TestUninstall_RunningDaemon_Default_Exit1_NoSentinelWritten   # R3: 偵測階段就拒，不寫 sentinel
@@ -1146,6 +1175,7 @@ TestRun_DoesNotMkdirAllOnStartup                        # R8-F1: 斷言整個 st
 TestRun_PreflightSentinelExists_NoLockCreated           # R9-F1: pre-flight 看到 .uninstalling → 不 OpenFile .lock 不留檔
 TestRun_PreflightConfigMissing_NoLockCreated            # R9-F1: dir 存在但 config.toml 缺 → 不 OpenFile .lock 不留檔
 TestRun_PostLockSentinelAppearedMidStartup_Exit0        # R9-F1: pre-flight 通過、acquire 之後 sentinel 才寫 → step 3 攔下
+TestRun_SentinelGoneButConfigStillPresent_PreflightFailsCleanly  # R10-F1: 模擬 RemoveAll 順序錯，driver 確認 ordered delete 阻擋此 race
 TestRun_AcquireLock_FailsIfAlreadyHeld_Exit1            # F2: 不允許 concurrent run
 TestRun_AcquireLock_FailedFlock_DoesNotTruncatePID      # R7-F1: flock 失敗不擦既有 PID
 TestRun_LockfileContainsPID                             # R2-F4: PID 寫入供 uninstall 顯示
@@ -1237,7 +1267,7 @@ devicesEnroll.test.ts: unchanged, run as regression
 
 ```
 TestUninstall_DoesNotTouchHomeOutsideCaliberAgent
-  // RemoveAll 只動 ~/.caliber-agent/，斷言 ~/.claude 和 ~/.codex 未被觸碰
+  // ordered delete 只動 ~/.caliber-agent/，斷言 ~/.claude 和 ~/.codex 未被觸碰
 
 TestWatcher_NeverReadsOutsideClaudeAndCodexRoots
   // 已存在於 PR2，PR4 加入 symlink dimension
@@ -1292,7 +1322,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 | `pause` | — | sentinel-based、idempotent |
 | `resume` | — | 同上反向 |
 | `status` | flag `--json` | **零網路呼叫**；human + JSON 兩種輸出 |
-| `uninstall` | flags `--yes` `--keep-remote` `--force` | 偵測 running daemon 拒絕（除 `--force`）；完整順序：**probe lock (no-create) → prompt + 確認 → 寫 `.uninstalling` sentinel → remote revoke → keychain delete → RemoveAll → 印清單**；keychain delete 非 ErrNotFound 失敗 → exit 1；user cancel 是真的 0 side effect |
+| `uninstall` | flags `--yes` `--keep-remote` `--force` | 偵測 running daemon 拒絕（除 `--force`）；完整順序：**probe lock (no-create) → prompt + 確認 → 寫 `.uninstalling` sentinel → remote revoke → keychain delete → ordered delete（config.toml first, .uninstalling last, rmdir）→ 印清單**；keychain delete 非 ErrNotFound 失敗 → exit 1；user cancel 是真的 0 side effect |
 | `enroll` 新 flag | `--insecure` | 寫入 `insecure_transport = true` 進 config.toml |
 
 ### 10.3 Agent 既有 surface 變更
