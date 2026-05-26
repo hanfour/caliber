@@ -63,7 +63,7 @@ PR4 完成後 caliber-agent 對齊以下違規攔截類別：
 | agent watcher | tick 開頭 + 每 SendChunk 前驗 .uninstalling + config + lock（F2/F5/R3） | stat + flock 探測 | `agent/watcher/loop.go:Tick` 與 chunk loop |
 | agent config | typed sentinels (ErrRootRemoved / ErrConfigRemoved / ErrUninstallInProgress) + precheckRuntime helper（R14-F1 / R15-F1） | 新增 sentinels + helper | `agent/internal/config/errors.go`、`agent/internal/config/precheck.go` |
 | agent config | SaveState / SaveRedactionSet 移除 MkdirAll、加 precheckRuntime（R14-F1） | 既有函式改寫 | `agent/internal/config/{state,redactionset}.go` |
-| agent config | SaveConfig 拆成 SaveConfigInitial（enroll 用，保留 MkdirAll）+ SaveConfig（runtime 用，precheck + 不 MkdirAll）（R15-F2） | 既有函式拆分 | `agent/internal/config/config.go` |
+| agent config | SaveConfig 拆成 SaveConfigInitial（enroll 用，保留 MkdirAll + first-write-aware precheck）+ SaveConfig（runtime 用，precheck + 不 MkdirAll）（R15-F2 / R19-F1） | 既有函式拆分；SaveConfigInitial 內部加 `root exists → sentinel check` 解 enroll preflight TOCTOU | `agent/internal/config/config.go` |
 | agent wizard | enroll wizard 兩處呼叫切換：first write 用 SaveConfigInitial、final include_paths 寫入用 SaveConfig（R15-F2 / R16-F2） | 既有 wizard 呼叫點切換 | `agent/internal/wizard/enroll.go:83,119` |
 | agent CLI | enroll 早期 sentinel + partial-cleanup preflight（R17-F1 / R18-F1） | runEnroll 開頭加兩條 stat 檢查、fail-closed | `agent/internal/cli/enroll.go` |
 | agent watcher | loop SaveState error typed dispatch — sentinel 類退出、IO 類 log+continue（R14-F1 / R15-F3） | error 處理升級為 typed switch | `agent/watcher/loop.go:136,169,189`、`agent/internal/cli/run.go` |
@@ -504,11 +504,39 @@ flags: --yes          跳過互動確認
    - `SaveState`：呼叫 `precheckRuntime()` + **不 MkdirAll** → write
    - `SaveRedactionSet`：同上
    - **`SaveConfig` 拆兩函式**：
-     - `SaveConfigInitial(cfg)` — enroll 用：**保留 MkdirAll**，第一次寫 root；**不**做 precheck（uninstall 不可能對「未 enroll」狀態進行）
+     - `SaveConfigInitial(cfg)` — enroll 用：**保留 MkdirAll**（root 不存在時建立）；對 `root 已存在` 場景套用 **first-write-aware precheck**（見下），對 `root 不存在` 場景直接 MkdirAll + write
      - `SaveConfig(cfg)` — add-path / remove-path / 其他 runtime 用：`precheckRuntime()` + 不 MkdirAll + write
      - **wizard.go 兩處呼叫點分別處理**：
        - line 83 (initial config write, root 尚未建立)：`config.Save(cfg)` → `config.SaveConfigInitial(cfg)`
        - line 119 (final include_paths write, root 已建立)：`config.Save(cfg)` → `config.SaveConfig(cfg)`（runtime 版本走 precheck，但 enroll 過程中 sentinel 不可能存在，precheck 必過）
+
+   **First-write-aware precheck（R19-F1 — 解 enroll TOCTOU）**：runEnroll preflight 與 SaveConfigInitial 之間有時間窗口（API call + keychain write），uninstall 若在此窗口寫 sentinel + 刪 config.toml，純 enroll preflight 擋不下。SaveConfigInitial 內部對「root 已存在」狀態再做一次 sentinel + partial-cleanup 檢查：
+
+   ```go
+   // agent/internal/config/config.go (SaveConfigInitial)
+   func SaveConfigInitial(c *Config) error {
+       root := RootDir()
+       if info, err := os.Stat(root); err == nil && info.IsDir() {
+           // root exists — re-run safety checks (catches preflight→here window)
+           if _, sErr := os.Stat(filepath.Join(root, ".uninstalling")); sErr == nil {
+               return ErrUninstallInProgress
+           } else if !errors.Is(sErr, fs.ErrNotExist) {
+               return fmt.Errorf("%w (sentinel stat: %v; fail-closed)", ErrUninstallInProgress, sErr)
+           }
+       } else if err == nil {
+           return fmt.Errorf("config: %s exists but is not a directory", root)
+       } else if !errors.Is(err, fs.ErrNotExist) {
+           return fmt.Errorf("config: stat root: %w", err)
+       }
+       // root 不存在（first-enroll）或 root 存在且 sentinel 不在 — 安全繼續
+       if err := os.MkdirAll(root, 0o700); err != nil { ... }
+       // ... CreateTemp + write + Rename atomic ...
+   }
+   ```
+
+   殘餘 race window：SaveConfigInitial 內部 sentinel stat 與 Rename 之間。Rename 本身 atomic，且這個窗口縮到毫秒級不可能用 user-level 操作觸發。可接受。
+
+   caller 處理：runEnroll 收到 `ErrUninstallInProgress` from SaveConfigInitial 仍 return exit 1（同 R17 preflight 失敗）。
 
    **為什麼必須檢查 config.toml**（解 (h)→(i) 視窗 race）：ordered_delete (g) 刪 config.toml、(h) 刪 sentinel、(i) rmdir。如果 in-flight SendChunk 在 (h) 完成後返回，看到 sentinel 不在、root 還在 → 沒有 config.toml 那條的話會誤判 daemon 仍可 SaveState → 違反契約。檢查 config.toml 把這個 (h)→(i) 視窗也擋下。
 
@@ -1391,6 +1419,9 @@ TestEnroll_SentinelPresent_Exit1_NoConfigWritten        # R17-F1: 拒絕後 conf
 TestEnroll_SentinelStatFails_FailsClosed                # R17-F1: stat 非 ErrNotExist → 拒絕
 TestEnroll_PartialCleanup_RootExistsConfigMissing_Exit1 # R18-F1: (h)→(i) 視窗拒絕 enroll，不重建 config.toml
 TestEnroll_RootMissing_FirstEnrollHappyPath             # R18-F1: 全乾淨狀態仍能正常 enroll
+TestSaveConfigInitial_SentinelAppearsAfterPreflight_Reject # R19-F1: 模擬 preflight 過了之後寫入 sentinel；SaveConfigInitial 內部 stat 仍會拒絕
+TestSaveConfigInitial_RootMissing_NoSentinelCheckNeeded    # R19-F1: root 不存在時 first-enroll 路徑不查 sentinel（不可能存在）
+TestSaveConfigInitial_RootIsFileNotDir_Error               # R19-F1: root 路徑是檔案而非目錄 → error
 ```
 
 #### watcher 層
