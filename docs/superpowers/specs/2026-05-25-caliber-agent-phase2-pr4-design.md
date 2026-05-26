@@ -207,17 +207,23 @@ flags: --yes          跳過互動確認
 
 行為：
 
-1. **Running-daemon detection**：嘗試 `flock(~/.caliber-agent/.lock, LOCK_EX | LOCK_NB)`。若拿不到（已有 daemon 持有），印：
+1. **Running-daemon detection + lock acquisition**：
+   - `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` 開檔
+   - `syscall.Flock(fd, LOCK_EX | LOCK_NB)` 嘗試 acquire
+   - **拿到 lock 後持有 fd 到整個 uninstall 流程結束**（最終 `os.RemoveAll` 完成才 close）。這避免 probe-then-release race（uninstall 在 step 1 與 step 5 之間，run 不能擠進來）
+   - **拿不到 lock**：讀 `.lock` 內容取得 PID（見下），印：
 
-   ```
-   caliber-agent run is currently active (PID <n>).
-   Stop it first with Ctrl+C (or `kill <n>`), then re-run uninstall.
-   Or pass --force to uninstall anyway (the running daemon may continue
-   to upload until it next tries to SaveState or refresh the redaction
-   set, then exit on its own).
-   ```
+     ```
+     caliber-agent run is currently active (PID <n>).
+     Stop it first with Ctrl+C (or `kill <n>`), then re-run uninstall.
+     Or pass --force to uninstall anyway (the running daemon may continue
+     to upload until its next per-chunk config check, then exit cleanly).
+     ```
 
-   exit 1，除非 `--force`。`--force` 路徑印 `[warn] uninstalling while daemon is running; daemon will exit on its next SaveState/refresh` 後繼續。
+     若讀 PID 失敗（檔案空 / 損壞）：訊息省略 `(PID <n>)` 那行括號，仍要求 user 停 daemon。
+
+   - exit 1，除非 `--force`
+   - `--force` 路徑：仍 acquire lock（process 死亡時 kernel 自動釋放，無 race）然後印 `[warn] uninstalling while daemon is running; daemon will exit on next per-chunk config check` 繼續
 
 2. **顯示影響範圍**：
 
@@ -266,16 +272,32 @@ flags: --yes          跳過互動確認
 
 ### 3.7 `caliber-agent run` 行為微調（為支援 F2 lockfile）
 
-`run` 啟動序列加入兩個新動作（不改變 user-visible CLI）：
+`run` 啟動序列加入三個新動作（不改變 user-visible CLI）：
 
-1. **取得 lockfile**：`MkdirAll(~/.caliber-agent/, 0o700)` + `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` + `syscall.Flock(fd, LOCK_EX|LOCK_NB)`。失敗（已有其他 `run` 持有）→ 印 `another caliber-agent run is already active` exit 1。
-2. **每 tick 開頭**：除既有 sentinel 檢查外，**新加** `os.Stat(~/.caliber-agent/config.toml)` 與 `os.Stat(~/.caliber-agent/.lock)`。若 `config.toml` 不在 → daemon 印 `[fatal] config removed; daemon exiting` exit 0；若 `.lock` 不在但 process 還活著（極端情境，例如 user 手動 `rm .lock`）→ 同樣 exit 0 避免「失去 lock 仍在跑」的混亂狀態。
-3. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，所以崩潰也不會留 stale lock。
+1. **取得 lockfile + 寫 PID**：
+   - `MkdirAll(~/.caliber-agent/, 0o700)`
+   - `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE|O_TRUNC, 0o600)`
+   - `syscall.Flock(fd, LOCK_EX|LOCK_NB)`。失敗 → 印 `another caliber-agent run is already active` exit 1
+   - 成功後 `fmt.Fprintf(fd, "%d\n", os.Getpid())` 寫入自己的 PID，供 `uninstall` 偵測時讀取顯示
+   - **持有 fd 到 process exit**
 
-這把 F2 race condition 根除：
-- `uninstall` 默認偵測 running daemon → 阻擋
-- 即使 `--force` 後 daemon 仍在跑，最多到下個 tick（≤ 60s）就會發現 config.toml 不見 → 自我 exit
-- HTTPSink 記憶體裡的 token 仍可能送出**至多一次** tick 內已開始的 chunk（這是設計上的可接受視窗，不是 race）
+2. **Tick 開頭 + 每 SendChunk 前 stop-condition check**：
+   - **Tick 開頭**：既有 sentinel + 新加 `os.Stat(config.toml)`、`os.Stat(.lock)`
+     - `config.toml` 不在 → `[fatal] config removed; daemon exiting` exit 0
+     - `.lock` 不在 → `[fatal] lockfile removed; daemon exiting` exit 0
+   - **Loop 內每個 `sink.SendChunk` 之前**：**重檢** `os.Stat(config.toml)`。不在則 `[fatal] config removed mid-tick; aborting remaining chunks` exit 0
+   - 這把 F5 race 縮到「stat 與單個 SendChunk 之間還在路上的 chunk」— 一個 tick 內若有 50 個 chunks，現在會在 chunk 1 後就退出，不是把 50 個 chunk 全送完才檢查
+
+3. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，崩潰不留 stale lock。
+
+這把 F2 race condition 根除為**最小**窗口：
+
+| 視窗 | 大小 | 後果 |
+|---|---|---|
+| `uninstall` 默認阻擋 running daemon | — | 0 chunk 上傳 |
+| `--force` 與 daemon 啟動之間的競爭 | flock 持有期間 0 | uninstall hold lock 直到 RemoveAll；daemon 不能 acquire |
+| `--force` 後既有 daemon 仍在跑、剛開始下個 tick | ≤ stat→SendChunk gap | 最多 1 個 in-flight chunk 送出（不是整個 tick 的 chunks） |
+| `--force` 後既有 daemon 已過完 stat check、正在跑 SendChunk | tail-end of 1 chunk | HTTP request 已經 in-flight 的話 server 仍會收 |
 
 ### 3.8 `caliber-agent enroll <token>` 新 flag
 
@@ -288,7 +310,7 @@ flags: --yes          跳過互動確認
 | 路徑 | Perm | 內容 | 寫入方 | 刪除方 |
 |---|---|---|---|---|
 | `~/.caliber-agent/paused` | 0o600 | 空檔（存在性 = 訊號） | `pause` | `resume` / `uninstall` |
-| `~/.caliber-agent/.lock` | 0o600 | 空檔 + `flock` 持有 | `run` 啟動（held during lifetime） | `uninstall`（process 死亡時 kernel 自動釋放 flock） |
+| `~/.caliber-agent/.lock` | 0o600 | 寫入 PID（換行終止） + `flock` 持有 | `run` 啟動（fd held during lifetime） | `uninstall`（acquire 後持有到 RemoveAll 結束；process 死亡時 kernel 自動釋放 flock） |
 
 其餘 PR1/PR2/PR3 既有檔不變：`config.toml`、`state.json`、`redaction-set.json`、`agent.log`。
 
@@ -368,9 +390,9 @@ Authorization: Bearer cda_*
 
 ### 5.2 Auth pipeline（PR3 helper + 新增 allow-revoked 變體）
 
-**重要**：PR3 既有的 `resolveDeviceFromAuth` 在 `device.revokedAt != null` 時直接回 401 `device_revoked`（`apps/api/src/rest/ingestAuth.ts:63`）。如果 revoke endpoint 直接用它，DELETE 重複呼叫永遠到不了 §5.3 的 `rowCount=0 → 410` 分支，10× concurrent revoke 也會得到 1×204 + 9×401（不是 spec 承諾的 1×204 + 9×410）。
+**重要**：PR3 既有的 `resolveDeviceFromAuth` 在 `device.revokedAt != null` 時直接回 401 `device_revoked`（`apps/api/src/rest/ingestAuth.ts:63`）。**且 revoke endpoint 的 UPDATE 同時把 `status` 設成 `'revoked'`**，所以即使 helper 跳過 `deviceRevokedAt` 檢查、`status !== "active"` 那條仍會把第二次 DELETE 擋成 401 `device_inactive` — 410 分支仍不可達。
 
-修法：新增 `resolveDeviceFromAuthAllowRevoked` 變體，**只**對 revoke endpoint 使用。它驗 token 結構、key 撤銷狀態、device 存在性，但**接受** `deviceRevokedAt != null` 並把該事實回傳給 caller，由 caller 判斷該回 204 還是 410。
+修法：新增 `resolveDeviceFromAuthAllowRevoked` 變體，**deviceRevokedAt 非 null 時 short-circuit return ok**（在 status 檢查之前），由 caller 判斷該回 204 還是 410。`device_inactive`（非 revoked 的 frozen / 其他狀態）仍是 401。
 
 ```ts
 // apps/api/src/rest/ingestAuth.ts (extend; ingest 路徑不變)
@@ -386,30 +408,79 @@ export async function resolveDeviceFromAuthAllowRevoked(
   | { ok: true; device: ResolvedDeviceWithStatus }
   | { ok: false; error: Exclude<AuthFailure, "device_revoked"> }
 > {
-  // 同 resolveDeviceFromAuth 邏輯，但移除 row.deviceRevokedAt !== null 那個 401 short-circuit；
-  // 改為把 alreadyRevoked = (row.deviceRevokedAt !== null) 透過 device 物件帶出去。
-  // device_inactive 仍是 401（status !== "active" 與 revoked 不同 — 例如管理員手動 freeze）。
+  // ... 前段同 resolveDeviceFromAuth（pepper check / Bearer / cda_ prefix / row lookup / keyRevokedAt）...
+  if (!row) return { ok: false, error: "invalid_token" };
+  if (row.keyRevokedAt !== null) return { ok: false, error: "key_revoked" };
+
+  // KEY DIFFERENCE: deviceRevokedAt 非 null 時 short-circuit return ok。
+  // 這條 MUST 早於 status check — 否則 revoke SQL 同時把 status 設成 'revoked'，
+  // 第二次 DELETE 會被 status !== 'active' 擋成 device_inactive。
+  if (row.deviceRevokedAt !== null) {
+    return {
+      ok: true,
+      device: {
+        deviceId: row.deviceId,
+        userId: row.userId,
+        orgId: row.orgId,
+        alreadyRevoked: true,
+      },
+    };
+  }
+
+  // 未 revoked 但 status 非 active（例如管理員 freeze）→ 拒絕，避免「frozen 後仍可自殺撤銷」。
+  if (row.status !== "active") return { ok: false, error: "device_inactive" };
+
+  return {
+    ok: true,
+    device: {
+      deviceId: row.deviceId,
+      userId: row.userId,
+      orgId: row.orgId,
+      alreadyRevoked: false,
+    },
+  };
 }
 ```
 
 ```ts
 // apps/api/src/rest/devicesRevokeSelf.ts (new)
-import { resolveDeviceFromAuthAllowRevoked } from "./ingestAuth";
+import type { FastifyPluginAsync } from "fastify";
+import type { ServerEnv } from "@caliber/config";
+import { resolveDeviceFromAuthAllowRevoked } from "./ingestAuth.js";
+import { writeAudit } from "../services/audit.js";
 
-fastify.delete("/v1/devices/me", async (req, reply) => {
-  const auth = await resolveDeviceFromAuthAllowRevoked(
-    fastify.db, fastify.env, req.headers.authorization,
-  );
-  if (!auth.ok) {
-    return reply.code(401).send({ error: auth.error });
-    // auth.error ∈ {"missing_token", "invalid_token", "key_revoked", "device_inactive", "server_misconfigured"}
-    // 注意：device_revoked 不在此 endpoint 的 401 set 內
-  }
-  if (auth.device.alreadyRevoked) {
-    return reply.code(410).send({ error: "device_already_revoked" });
-  }
-  // ... see §5.3 ...
-});
+export function devicesRevokeSelfRoutes(env: ServerEnv): FastifyPluginAsync {
+  return async (fastify) => {
+    fastify.delete("/v1/devices/me", async (req, reply) => {
+      if (!env.ENABLE_GATEWAY) {
+        reply.code(404);
+        return { error: "not_found" };
+      }
+
+      const auth = await resolveDeviceFromAuthAllowRevoked(
+        fastify.db, env, req.headers.authorization,
+      );
+      if (!auth.ok) {
+        if (auth.error === "server_misconfigured") {
+          reply.code(500);
+          return { error: "internal" };           // 500 not 401（見 F3 fix）
+        }
+        reply.code(401);
+        return { error: auth.error };
+        // 401 set: missing_token | invalid_token | key_revoked | device_inactive
+        // 注意：device_revoked 不在此 endpoint 的 401 set；alreadyRevoked → 410
+      }
+      if (auth.device.alreadyRevoked) {
+        reply.code(410);
+        return { error: "device_already_revoked" };
+      }
+      // ... see §5.3 ...
+    });
+  };
+}
+
+// server.ts 註冊（mirrors devicesEnrollRoutes / ingestRoutes pattern）：
+//   await app.register(devicesRevokeSelfRoutes(env));
 ```
 
 `POST /v1/ingest` 與 `GET /v1/redaction-set` 仍用既有 `resolveDeviceFromAuth`，**未改動**。
@@ -426,15 +497,15 @@ RETURNING id;
 - `rowCount = 1`：軟撤銷成功 → 204
 - `rowCount = 0`：device 已 revoked（與 PR3 ingest 認證流程的 `device_revoked` 路徑一致）→ 410
 
-同 transaction 插入 audit log：
+同 transaction 透過既有 `writeAudit` helper 寫 audit log（schema 用 `targetType`/`targetId`，**不是** `resourceType`/`resourceId`）：
 
 ```ts
-await tx.insert(auditLogs).values({
+await writeAudit(tx, {
+  actorUserId: auth.device.userId,        // 注意：ResolvedDevice 欄位在 device 物件下
   action: "device.self_revoked",          // new action type
-  actorUserId: auth.userId,
-  orgId: auth.orgId,
-  resourceType: "device",
-  resourceId: auth.device.id,
+  targetType: "device",
+  targetId: auth.device.deviceId,
+  orgId: auth.device.orgId,
   metadata: {
     trigger: "agent_uninstall",
     user_agent: req.headers["user-agent"],
@@ -451,9 +522,12 @@ await tx.insert(auditLogs).values({
 | 204 No Content | (empty) | 成功撤銷（第一次 DELETE） |
 | 410 Gone | `{"error":"device_already_revoked"}` | device 已被撤銷（idempotent；daemon 視為等同成功） |
 | 401 Unauthorized | `{"error":"missing_token" \| "invalid_token" \| "key_revoked" \| "device_inactive"}` | **不含 `device_revoked`** — 已撤銷走 410 而非 401 |
-| 500 | `{"error":"internal"}` | DB 例外 |
+| 404 Not Found | `{"error":"not_found"}` | `ENABLE_GATEWAY=false`（mirrors enroll endpoint） |
+| 500 Internal | `{"error":"internal"}` | DB 例外 **或** `server_misconfigured`（缺 `API_KEY_HASH_PEPPER` 等） |
 
-注意：401 set 從 ingest endpoint 的 5 種降到 4 種；少一個 `device_revoked`。這是本 endpoint 唯一允許「device 已撤銷狀態下仍可呼叫」的設計差異。
+注意 1：401 set 從 ingest endpoint 的 5 種降到 4 種；少一個 `device_revoked`。這是本 endpoint 唯一允許「device 已撤銷狀態下仍可呼叫」的設計差異。
+
+注意 2：helper return type 包含 `server_misconfigured`，但 route 必須對它回 **500** 而不是 401（缺 pepper 是 ops 配置問題，不是 caller 認證問題）。
 
 ### 5.5 Daemon 端 `Client.RevokeSelf`
 
@@ -939,7 +1013,9 @@ TestUninstall_RunningDaemon_Default_Exit1               # F2: lockfile detection
 TestUninstall_RunningDaemon_Force_Continues_WithWarn    # F2: --force 路徑
 
 TestRun_AcquireLock_FailsIfAlreadyHeld_Exit1            # F2: 不允許 concurrent run
-TestRun_TickDetectsConfigRemoved_ExitsCleanly           # F2: daemon 自我退出
+TestRun_LockfileContainsPID                             # F4: PID 寫入供 uninstall 顯示
+TestRun_TickDetectsConfigRemoved_ExitsCleanly           # F2: tick 開頭自我退出
+TestRun_PerChunkConfigCheck_AbortsRemainingChunks       # F5: 每 SendChunk 前重檢、不送完整 tick
 ```
 
 #### watcher 層
@@ -1088,7 +1164,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 | Path | 凍結點 |
 |---|---|
 | `~/.caliber-agent/paused` | 存在 = paused；空檔；perm 0o600 |
-| `~/.caliber-agent/.lock` | `run` 持有 flock；存在不代表 daemon 還活著（kernel 在 process 死亡釋放 flock，但檔案可能留下 — 用 `flock LOCK_NB` 探測活性，不是用 stat）；perm 0o600 |
+| `~/.caliber-agent/.lock` | `run` 持有 flock；內容為 PID（換行終止）— 顯示用，**活性偵測一律用 `flock LOCK_NB` 探測，不是 stat 或讀 PID**（kernel 在 process 死亡釋放 flock，但檔案可能留下；PID 不能用 `kill -0` 探活，因為 PID 可能 reuse） |
 | `~/.caliber-agent/config.toml` | 新增 `insecure_transport bool`（預設 false，缺失視為 false） |
 
 ### 10.5 Audit log action
@@ -1121,7 +1197,7 @@ Server side 不強制這些上限（保留彈性），但 per-org redaction set 
 | **R1.** `--insecure` 變成預設：使用者一次 enroll 用了 `--insecure` 後忘了，h4 stack 升級到 https 後 daemon 仍走 http | `run` 啟動每次印 `[warn] insecure transport`；`status` 輸出 `api_base_url: http://... (insecure)`；README 文件化 |
 | **R2.** EvalSymlinks 在 macOS 上慢：每 tick 對每個 ref 做 stat + EvalSymlinks 累積開銷 | Loop 內 cwdCache 已存在（PR2）；PR4 擴展 cache 至 `(rawPath → realPath)`，每 path 一次 EvalSymlinks |
 | **R3.** PR1 既有 config.toml 含未正規化路徑：升級到 PR4 後監看不到原本目錄 | 不 retro-normalise；user 透過 `remove-path` + `add-path` 遷移；README + CHANGELOG 提醒 |
-| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall。原 mitigation（依賴 SaveState 失敗自然退出）不成立 — `SaveState` 開頭就 `MkdirAll` 把目錄重建，loop 對 save 失敗只 log + 繼續，HTTPSink 持有記憶體裡的 token 仍能上傳 | **lockfile + 每 tick config 檢查**（§3.6 + §3.7）：`run` 啟動取 `~/.caliber-agent/.lock`；`uninstall` 偵測 lock → 默認拒絕 exit 1，需 `--force` 才繼續；daemon 每 tick 額外 stat config.toml + .lock，缺失即 `[fatal] exit 0`。最大 race window ≤ 1 tick interval (60s)，HTTPSink 已開始的 chunk 可能送出至多一次，這是設計可接受窗口 |
+| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall。原 mitigation（依賴 SaveState 失敗自然退出）不成立 — `SaveState` 開頭就 `MkdirAll` 把目錄重建，loop 對 save 失敗只 log + 繼續，HTTPSink 持有記憶體裡的 token 仍能上傳 | **lockfile + per-chunk stop-condition check**（§3.6 + §3.7）：`run` 啟動取 `~/.caliber-agent/.lock` 並持有 fd 到 process exit；`uninstall` 偵測 lock 默認拒絕、`--force` 後 acquire lock 持有到 RemoveAll 完成（避免 probe-then-release race）；daemon tick 開頭 + 每個 SendChunk 之前 stat config.toml，缺失即 `[fatal] exit 0`。最大 race window：**stat 與單個 SendChunk 之間 in-flight 的 1 個 chunk**（不是整個 tick 的 chunks） |
 | **R5.** server `device.self_revoked` audit action 名稱與既有 `device.revoked` 重疊：admin 看不出差別 | 用不同 action type；audit log UI（Phase 4）顯示時兩者各有圖示。本 PR 只負責新增 action enum |
 | **R6.** `--keep-remote` 變成劫持 backdoor：惡意腳本下 `uninstall --keep-remote` 後 server-side device 仍存活 | token 已在 keychain 被刪 → 本機無法重用；server-side device 不主動 revoke 是已知 trade-off（user 須到 web UI 處理）；stdout 強烈提示 |
 | **R7.** `add-path` / `uninstall` 在 CI / 腳本下卡住 | `isatty(stdin) == false` 時不嘗試讀 stdin，直接印 `non-interactive shell detected; pass --yes to confirm` exit 130；`echo y \| caliber-agent ...` 也會被拒，明確要求腳本作者加 `--yes` |
