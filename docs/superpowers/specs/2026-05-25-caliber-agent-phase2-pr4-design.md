@@ -60,8 +60,9 @@ PR4 完成後 caliber-agent 對齊以下違規攔截類別：
 | agent CLI | `--insecure` 新 flag（enroll only） | 新加 flag | `agent/internal/cli/enroll.go` |
 | agent watcher | symlink 防護 | 新邏輯 | `agent/watcher/loop.go`、`agent/watcher/claude.go`、`agent/watcher/codex.go`、`agent/internal/cwdresolve/cwdresolve.go` |
 | agent watcher | pause sentinel 檢查 | tick 開頭加 stat | `agent/watcher/loop.go:Tick` |
-| agent watcher | tick 開頭驗 config + lock 存在（F2） | tick 開頭加 stat + flock 探測 | `agent/watcher/loop.go:Tick` |
-| agent CLI | run lockfile acquire（F2） | 啟動 flock 持有 | `agent/internal/cli/run.go`、新 `agent/internal/lockfile/lockfile.go`（或 darwin-only `lockfile_darwin.go`） |
+| agent watcher | tick 開頭 + 每 SendChunk 前驗 .uninstalling + config + lock（F2/F5/R3） | stat + flock 探測 | `agent/watcher/loop.go:Tick` 與 chunk loop |
+| agent CLI | run lockfile acquire + PID 寫入（F2 + R2-F4） | 啟動 flock 持有 + PID 寫入 | `agent/internal/cli/run.go`、新 `agent/internal/lockfile/lockfile.go`（或 darwin-only `lockfile_darwin.go`） |
+| agent CLI | uninstall 寫 `.uninstalling` sentinel + 失敗時還原（R3-F2） | 新 sentinel 機制 | `agent/internal/cli/uninstall.go` |
 | agent redact | bootstrap/refresher 對 `ErrTooManyPatterns` 走 fallback（F3） | 既有 fail-open 修補 | `agent/internal/cli/redactionset.go`、`agent/internal/cli/run.go` (refresher goroutine) |
 | **server REST** | `resolveDeviceFromAuthAllowRevoked` 變體（F1） | 既有 helper 旁加 sister fn | `apps/api/src/rest/ingestAuth.ts` |
 | agent config | IncludePaths 正規化 | enroll/add-path 寫入前 EvalSymlinks + Clean | `agent/internal/config/config.go` 或新 `paths_normalise.go` |
@@ -207,68 +208,72 @@ flags: --yes          跳過互動確認
 
 行為：
 
-1. **Running-daemon detection + lock acquisition**：
-   - `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` 開檔
-   - `syscall.Flock(fd, LOCK_EX | LOCK_NB)` 嘗試 acquire
-   - **拿到 lock 後持有 fd 到整個 uninstall 流程結束**（最終 `os.RemoveAll` 完成才 close）。這避免 probe-then-release race（uninstall 在 step 1 與 step 5 之間，run 不能擠進來）
-   - **拿不到 lock**：讀 `.lock` 內容取得 PID（見下），印：
+1. **Running-daemon detection (no-acquire probe) + uninstall sentinel**：
+   - 開 `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` + `syscall.Flock(fd, LOCK_EX | LOCK_NB)` **僅作探活**。**立即 close fd 釋放結果**（不論成功失敗）— uninstall 不持有 lock；持有反而會擋住 daemon 在收到 stop sentinel 後想清理自己的 SaveState 之類動作。
+   - 探活成功（拿到 lock 又釋放）= 沒有 daemon 在跑 → 進 step 2
+   - 探活失敗（沒拿到 lock）= 有 daemon 在跑：
+     - 讀 `.lock` 內容取得 PID 印：
+       ```
+       caliber-agent run is currently active (PID <n>).
+       Stop it first with Ctrl+C (or `kill <n>`), then re-run uninstall.
+       Or pass --force to signal the daemon to exit and proceed with cleanup.
+       ```
+     - 若讀 PID 失敗（檔案空 / 損壞）省略 `(PID <n>)`
+     - exit 1，除非 `--force`
+   - `--force` 路徑：**不** acquire lock（daemon 持有，不可能拿到）。改為依賴 step 1.5 sentinel：
 
-     ```
-     caliber-agent run is currently active (PID <n>).
-     Stop it first with Ctrl+C (or `kill <n>`), then re-run uninstall.
-     Or pass --force to uninstall anyway (the running daemon may continue
-     to upload until its next per-chunk config check, then exit cleanly).
-     ```
+2. **`.uninstalling` stop sentinel（**所有** uninstall 路徑，不只 --force）**：
+   - `os.WriteFile(~/.caliber-agent/.uninstalling, []byte{}, 0o600)` 寫入空 sentinel
+   - daemon 每 chunk 前檢查此 sentinel（早於 config.toml stat），存在則 `[fatal] uninstall in progress; aborting` exit 0
+   - 這把保護擴大到**所有** uninstall 路徑：即使 user 用 Ctrl+C 停 daemon 後馬上跑 uninstall，舊 daemon 還未完全 exit 時 chunk send 也會被攔下
+   - sentinel 會在 step 5 `os.RemoveAll` 時被一併清除（不需要額外 cleanup）
 
-     若讀 PID 失敗（檔案空 / 損壞）：訊息省略 `(PID <n>)` 那行括號，仍要求 user 停 daemon。
-
-   - exit 1，除非 `--force`
-   - `--force` 路徑：仍 acquire lock（process 死亡時 kernel 自動釋放，無 race）然後印 `[warn] uninstalling while daemon is running; daemon will exit on next per-chunk config check` 繼續
-
-2. **顯示影響範圍**：
+3. **顯示影響範圍**：
 
    ```
    This will:
      1. Revoke this device at <api_base_url> (DELETE /v1/devices/me)
-     2. Remove ~/.caliber-agent/ (config, state, redaction-set, agent.log, .lock)
+     2. Remove ~/.caliber-agent/ (config, state, redaction-set, agent.log, .lock, .uninstalling)
      3. Remove keychain entry: tw.caliber.agent / <device_id>
    Continue? [y/N]
    ```
 
    `--yes` 跳過。非 TTY 場景見 §11 R7。
 
-3. **遠端 revoke**（除非 `--keep-remote`）：best-effort
+   **重要順序**：sentinel (step 2) 必須在 prompt (step 3) **之前** — user 看到 prompt 後讀 stdout、思考、回答的時間（可能數秒到數十秒）內，daemon 看到 sentinel 已停止上傳，避免「user 還在猶豫，daemon 還在送 chunk」的窗口。即使 user 最後選 N（130），sentinel 仍會在 user 取消後**手動 cleanup**：寫了 sentinel 但 user 取消 → uninstall 必須 `os.Remove(.uninstalling)` 還原狀態，否則 daemon 永久卡 `[fatal] uninstall in progress`。
+
+4. **遠端 revoke**（除非 `--keep-remote`）：best-effort
    - 204 / 410：印 `[ok] device revoked at server` / `[ok] device already revoked at server`
    - 401 / 403 / network / 5xx：印 `[warn] remote revoke failed: <reason>; continuing local cleanup` 並**繼續**
 
-4. **keychain 清理**：`keychain.Delete(deviceID)`。
+5. **keychain 清理**：`keychain.Delete(deviceID)`。
    - `ErrNotFound`：視為已清，印 `[ok] keychain entry already absent` 繼續
-   - **其他錯誤**：印 `[error] keychain delete failed: <err>`，**exit 1**（local cleanup 失敗；token 可能仍可用）
+   - **其他錯誤**：印 `[error] keychain delete failed: <err>`，**exit 1**（local cleanup 失敗；token 可能仍可用）。此時 sentinel 仍存在，要 `os.Remove(.uninstalling)` 還原避免 daemon 永久卡死
 
-5. **檔案清理**：`os.RemoveAll(~/.caliber-agent/)`。失敗 → 印 `[error]` exit 1。
+6. **檔案清理**：`os.RemoveAll(~/.caliber-agent/)`。失敗 → 印 `[error]` exit 1（同上要還原 sentinel）。
 
-6. **印最終清單**（合規守則要求 — anti-forensics 反向：透明可審）：
+7. **印最終清單**（合規守則要求 — anti-forensics 反向：透明可審）：
 
    ```
    Removed:
      ✓ remote device d_HxKp... (server: revoked at 2026-05-25T...)
      ✓ keychain entry tw.caliber.agent / d_HxKp...
-     ✓ ~/.caliber-agent/ (5 files, 12 KiB)
+     ✓ ~/.caliber-agent/ (6 files, 12 KiB)
    ```
 
-   若 step 3 失敗：
+   若 step 4 失敗：
 
    ```
    Partial:
      ✗ remote (failed: <reason>; revoke manually at <api_base_url>/dashboard/devices)
      ✓ keychain entry tw.caliber.agent / d_HxKp...
-     ✓ ~/.caliber-agent/ (5 files, 12 KiB)
+     ✓ ~/.caliber-agent/ (6 files, 12 KiB)
    ```
 
 退出碼：
 - 0 — 全部清理（含遠端 best-effort 失敗，但 keychain + fs 成功）
-- 1 — **本地清理任一步失敗**（包含 daemon 仍在跑且無 `--force` / keychain delete 非 ErrNotFound 失敗 / RemoveAll 失敗）
-- 130 — user cancel 或 non-TTY without `--yes`
+- 1 — **本地清理任一步失敗**（包含 daemon 仍在跑且無 `--force` / keychain delete 非 ErrNotFound 失敗 / RemoveAll 失敗）；失敗時必須 `os.Remove(.uninstalling)` 還原避免 daemon 永久卡死
+- 130 — user cancel 或 non-TTY without `--yes`；同樣必須還原 sentinel
 
 ### 3.7 `caliber-agent run` 行為微調（為支援 F2 lockfile）
 
@@ -282,11 +287,15 @@ flags: --yes          跳過互動確認
    - **持有 fd 到 process exit**
 
 2. **Tick 開頭 + 每 SendChunk 前 stop-condition check**：
-   - **Tick 開頭**：既有 sentinel + 新加 `os.Stat(config.toml)`、`os.Stat(.lock)`
-     - `config.toml` 不在 → `[fatal] config removed; daemon exiting` exit 0
-     - `.lock` 不在 → `[fatal] lockfile removed; daemon exiting` exit 0
-   - **Loop 內每個 `sink.SendChunk` 之前**：**重檢** `os.Stat(config.toml)`。不在則 `[fatal] config removed mid-tick; aborting remaining chunks` exit 0
-   - 這把 F5 race 縮到「stat 與單個 SendChunk 之間還在路上的 chunk」— 一個 tick 內若有 50 個 chunks，現在會在 chunk 1 後就退出，不是把 50 個 chunk 全送完才檢查
+   - **Tick 開頭**（**順序很重要**：sentinel 優先於 config）：
+     - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → `[fatal] uninstall in progress; aborting` exit 0
+     - 既有 paused sentinel 檢查（沿用 PR2 設計）
+     - `os.Stat(config.toml)` 不在 → `[fatal] config removed; daemon exiting` exit 0
+     - `os.Stat(.lock)` 不在 → `[fatal] lockfile removed; daemon exiting` exit 0
+   - **Loop 內每個 `sink.SendChunk` 之前**（早於 config.toml stat，因為 uninstall 寫 sentinel 早於 RemoveAll）：
+     - `os.Stat(.uninstalling)` 存在 → `[fatal] uninstall in progress; aborting remaining chunks` exit 0
+     - `os.Stat(config.toml)` 不在 → `[fatal] config removed mid-tick; aborting remaining chunks` exit 0
+   - 這把 F5 race 縮到「sentinel stat 與單個 SendChunk 之間 in-flight 的 1 chunk」— uninstall 順序是 sentinel → remote revoke → keychain → RemoveAll，所以 daemon 在 uninstall 剛開始 step 2 寫 sentinel 後就看到，整個 step 3-6 期間（含 prompt 等 user 確認）daemon 都已停止
 
 3. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，崩潰不留 stale lock。
 
@@ -295,9 +304,9 @@ flags: --yes          跳過互動確認
 | 視窗 | 大小 | 後果 |
 |---|---|---|
 | `uninstall` 默認阻擋 running daemon | — | 0 chunk 上傳 |
-| `--force` 與 daemon 啟動之間的競爭 | flock 持有期間 0 | uninstall hold lock 直到 RemoveAll；daemon 不能 acquire |
-| `--force` 後既有 daemon 仍在跑、剛開始下個 tick | ≤ stat→SendChunk gap | 最多 1 個 in-flight chunk 送出（不是整個 tick 的 chunks） |
-| `--force` 後既有 daemon 已過完 stat check、正在跑 SendChunk | tail-end of 1 chunk | HTTP request 已經 in-flight 的話 server 仍會收 |
+| `uninstall` step 2 寫 sentinel → daemon 下次 per-chunk stat | 1 stat→SendChunk gap | 最多 1 個 in-flight chunk 送出 |
+| sentinel 寫入後到 daemon 完全 exit | ≤ 1 chunk send latency | HTTP request 已 in-flight 的話 server 仍會收 |
+| `--force` 不 acquire lock，與 daemon 共存 | sentinel + per-chunk check 承擔 | 同上 — sentinel 已先寫，daemon 在最近的 per-chunk check 就退 |
 
 ### 3.8 `caliber-agent enroll <token>` 新 flag
 
@@ -310,7 +319,8 @@ flags: --yes          跳過互動確認
 | 路徑 | Perm | 內容 | 寫入方 | 刪除方 |
 |---|---|---|---|---|
 | `~/.caliber-agent/paused` | 0o600 | 空檔（存在性 = 訊號） | `pause` | `resume` / `uninstall` |
-| `~/.caliber-agent/.lock` | 0o600 | 寫入 PID（換行終止） + `flock` 持有 | `run` 啟動（fd held during lifetime） | `uninstall`（acquire 後持有到 RemoveAll 結束；process 死亡時 kernel 自動釋放 flock） |
+| `~/.caliber-agent/.lock` | 0o600 | 寫入 PID（換行終止） + `flock` 持有 | `run` 啟動（fd held during lifetime） | `uninstall` step 6 RemoveAll；process 死亡時 kernel 自動釋放 flock |
+| `~/.caliber-agent/.uninstalling` | 0o600 | 空檔（存在性 = 訊號） | `uninstall` step 2（**所有路徑**，不只 `--force`） | `uninstall` step 6 RemoveAll；任一 step 失敗 / user cancel 時 uninstall 手動 `os.Remove` 還原（避免 daemon 永久卡死） |
 
 其餘 PR1/PR2/PR3 既有檔不變：`config.toml`、`state.json`、`redaction-set.json`、`agent.log`。
 
@@ -361,7 +371,8 @@ PR1/PR2/PR3 既存 `config.toml` 若：
 ├── redaction-set.json     # 0o600  redaction-set fetch / cache 寫
 ├── agent.log              # 0o600  daemon 追加
 ├── paused                 # 0o600  pause/resume 寫（可能不存在）
-└── .lock                  # 0o600  run 啟動 flock 持有（可能不存在）
+├── .lock                  # 0o600  run 啟動 flock 持有（可能不存在）
+└── .uninstalling          # 0o600  uninstall 進行中 sentinel（可能不存在）
 ```
 
 `uninstall` 後該目錄 + keychain entry 不留任何檔案。
@@ -861,15 +872,15 @@ user      CLI            Server           Keychain       FS
 
 | 場景 | 行為 |
 |---|---|
-| daemon 仍在跑、無 `--force` | 偵測 `.lock` → 拒絕 exit 1（早於 step 1） |
-| daemon 仍在跑、`--force` | `[warn]` 後繼續；daemon 在下個 tick 自我退出（§3.7） |
-| `--keep-remote` | 跳過 step 1；stdout `Skipped remote revoke (--keep-remote). Manually revoke at <api_base_url>/dashboard/devices.`；繼續 step 2 + 3 |
-| 遠端 401 / network / 5xx | step 1 印 `[warn]`；繼續 step 2 + 3；最終清單把 remote 行改為 `✗ remote (failed: ...)`；退出碼 0 |
-| keychain ErrNotFound | step 2 印 `[ok] keychain entry already absent`；繼續 step 3 |
-| keychain 非 ErrNotFound 失敗 | step 2 印 `[error]`；**exit 1**（token 可能仍可用，user 必須處理） |
-| `RemoveAll` 失敗 | step 3 印 `[error]`；退出碼 1 |
-| user 拒絕 confirm (`n`) | exit 130，0 side effect |
-| 未 enroll 就 uninstall | `config.Load() == ErrNotEnrolled` → 早期 exit 1 |
+| daemon 仍在跑、無 `--force` | 偵測 `.lock` flock 失敗 → 拒絕 exit 1（早於寫 sentinel） |
+| daemon 仍在跑、`--force` | 不嘗試 acquire lock；step 2 寫 `.uninstalling` sentinel；daemon 在下個 per-chunk check 自我退出（§3.7） |
+| `--keep-remote` | 跳過 step 4；stdout `Skipped remote revoke (--keep-remote). Manually revoke at <api_base_url>/dashboard/devices.`；繼續 step 5 + 6 |
+| 遠端 401 / network / 5xx | step 4 印 `[warn]`；繼續 step 5 + 6；最終清單把 remote 行改為 `✗ remote (failed: ...)`；退出碼 0 |
+| keychain ErrNotFound | step 5 印 `[ok] keychain entry already absent`；繼續 step 6 |
+| keychain 非 ErrNotFound 失敗 | step 5 印 `[error]`；`os.Remove(.uninstalling)` 還原；**exit 1**（token 可能仍可用） |
+| `RemoveAll` 失敗 | step 6 印 `[error]`；`os.Remove(.uninstalling)` 還原；退出碼 1 |
+| user 拒絕 confirm (`n`) | `os.Remove(.uninstalling)` 還原；exit 130，0 side effect |
+| 未 enroll 就 uninstall | `config.Load() == ErrNotEnrolled` → 早期 exit 1（未寫 sentinel） |
 
 ### 7.5 enrol → run → pause → resume → uninstall 完整生命週期
 
@@ -1000,22 +1011,25 @@ TestStatus_JSON_StructuredOutput
 TestStatus_NotEnrolled_Exit1
 TestStatus_Paused_ReflectedInOutput
 
-TestUninstall_HappyPath_AllThreeSteps
+TestUninstall_HappyPath_AllSteps_SentinelWrittenThenRemoved
 TestUninstall_YesFlag_SkipsPrompt
 TestUninstall_KeepRemote_SkipsServer
 TestUninstall_RemoteFails_LocalStillCleaned_Exit0
 TestUninstall_KeychainNotFound_Continues_Exit0
-TestUninstall_KeychainDeleteFails_Exit1                 # F4: token 殘留警示
-TestUninstall_LocalCleanupFails_Exit1
-TestUninstall_DeclinedConfirm_Exit130_NoSideEffect
-TestUninstall_NonTTY_NoYes_Exit130
-TestUninstall_RunningDaemon_Default_Exit1               # F2: lockfile detection
-TestUninstall_RunningDaemon_Force_Continues_WithWarn    # F2: --force 路徑
+TestUninstall_KeychainDeleteFails_Exit1_SentinelRestored      # R1-F4 + R3: token 殘留警示 + 還原 sentinel
+TestUninstall_LocalCleanupFails_Exit1_SentinelRestored        # R3: RemoveAll 失敗時還原 sentinel
+TestUninstall_DeclinedConfirm_Exit130_SentinelRestored        # R3: user cancel 必須還原
+TestUninstall_NonTTY_NoYes_Exit130_NoSentinelLeak             # R3: 早期退出無需寫 sentinel
+TestUninstall_RunningDaemon_Default_Exit1_NoSentinelWritten   # R3: 偵測階段就拒，不寫 sentinel
+TestUninstall_RunningDaemon_Force_WritesSentinel_NoLockAcquire # R3-F1: --force 不持 lock，只靠 sentinel
+TestUninstall_SentinelWrittenBeforePrompt                      # R3: sentinel 必須早於 prompt 確認
 
 TestRun_AcquireLock_FailsIfAlreadyHeld_Exit1            # F2: 不允許 concurrent run
-TestRun_LockfileContainsPID                             # F4: PID 寫入供 uninstall 顯示
+TestRun_LockfileContainsPID                             # R2-F4: PID 寫入供 uninstall 顯示
 TestRun_TickDetectsConfigRemoved_ExitsCleanly           # F2: tick 開頭自我退出
-TestRun_PerChunkConfigCheck_AbortsRemainingChunks       # F5: 每 SendChunk 前重檢、不送完整 tick
+TestRun_TickDetectsUninstallSentinel_ExitsCleanly       # R3-F2: tick 開頭看到 .uninstalling 退出
+TestRun_PerChunkUninstallSentinel_AbortsRemainingChunks # R3-F2: 每 SendChunk 前先檢 sentinel（早於 config）
+TestRun_PerChunkConfigCheck_AbortsRemainingChunks       # F5: config 缺失也退出（雙重保險）
 ```
 
 #### watcher 層
@@ -1068,16 +1082,18 @@ TestRevokeSelf_NetworkError_Wrapped
 
 ### 9.3 Server-side 整合測試
 
-`apps/api/tests/integration/rest/devicesRevokeSelf.test.ts`，8 cases：
+`apps/api/tests/integration/rest/devicesRevokeSelf.test.ts`，10 cases：
 
-1. happy path → 204 + DB row `revokedAt` 設值 + audit log `device.self_revoked` 寫入
+1. happy path → 204 + DB row `revokedAt` 設值 + audit log `device.self_revoked` 寫入（透過 `writeAudit` helper，targetType/targetId 欄位）
 2. 重複呼叫 → 第二次 410 device_already_revoked（**驗證 allow-revoked 變體不會回 401**）
 3. invalid token → 401 invalid_token
 4. revoked key → 401 key_revoked
-5. **revoked device → 410 device_already_revoked**（**不是** 401；驗證 allow-revoked 邏輯）
+5. **revoked device → 410 device_already_revoked**（**不是** 401；驗證 deviceRevokedAt short-circuit 早於 status check）
 6. inactive device (status='frozen' 等非 revoked 的非 active) → 401 device_inactive
 7. ak_* token（非 cda_*）→ 401 invalid_token
 8. concurrent revoke（10× Promise.all）→ 1× 204 + 9× 410（與 #159 enrollment race 同 pattern）
+9. **`ENABLE_GATEWAY=false` → 404 not_found**（F3 contract；mirror enroll endpoint）
+10. **`API_KEY_HASH_PEPPER` 缺失 → 500 internal**（F3 contract；server_misconfigured 路徑 — 不是 401，避免把 ops 配置問題暴露成認證錯誤）
 
 Regression：
 
@@ -1136,7 +1152,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 
 | Endpoint | Method | Auth | 凍結點 |
 |---|---|---|---|
-| `/v1/devices/me` | DELETE | Bearer cda_* | 204 / 410 / 401 / 500 響應碼語意 |
+| `/v1/devices/me` | DELETE | Bearer cda_* | **204 / 410 / 401 / 404 / 500** 響應碼語意（404 = `ENABLE_GATEWAY=false`，mirror enroll；500 = DB 例外或 `server_misconfigured`） |
 
 ### 10.2 Agent CLI surface
 
@@ -1165,6 +1181,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 |---|---|
 | `~/.caliber-agent/paused` | 存在 = paused；空檔；perm 0o600 |
 | `~/.caliber-agent/.lock` | `run` 持有 flock；內容為 PID（換行終止）— 顯示用，**活性偵測一律用 `flock LOCK_NB` 探測，不是 stat 或讀 PID**（kernel 在 process 死亡釋放 flock，但檔案可能留下；PID 不能用 `kill -0` 探活，因為 PID 可能 reuse） |
+| `~/.caliber-agent/.uninstalling` | 存在 = uninstall 進行中；空檔；perm 0o600；任一 uninstall step 失敗或 user cancel 時必須 `os.Remove` 還原；daemon 每 chunk 前檢查（早於 config 檢查） |
 | `~/.caliber-agent/config.toml` | 新增 `insecure_transport bool`（預設 false，缺失視為 false） |
 
 ### 10.5 Audit log action
@@ -1197,7 +1214,7 @@ Server side 不強制這些上限（保留彈性），但 per-org redaction set 
 | **R1.** `--insecure` 變成預設：使用者一次 enroll 用了 `--insecure` 後忘了，h4 stack 升級到 https 後 daemon 仍走 http | `run` 啟動每次印 `[warn] insecure transport`；`status` 輸出 `api_base_url: http://... (insecure)`；README 文件化 |
 | **R2.** EvalSymlinks 在 macOS 上慢：每 tick 對每個 ref 做 stat + EvalSymlinks 累積開銷 | Loop 內 cwdCache 已存在（PR2）；PR4 擴展 cache 至 `(rawPath → realPath)`，每 path 一次 EvalSymlinks |
 | **R3.** PR1 既有 config.toml 含未正規化路徑：升級到 PR4 後監看不到原本目錄 | 不 retro-normalise；user 透過 `remove-path` + `add-path` 遷移；README + CHANGELOG 提醒 |
-| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall。原 mitigation（依賴 SaveState 失敗自然退出）不成立 — `SaveState` 開頭就 `MkdirAll` 把目錄重建，loop 對 save 失敗只 log + 繼續，HTTPSink 持有記憶體裡的 token 仍能上傳 | **lockfile + per-chunk stop-condition check**（§3.6 + §3.7）：`run` 啟動取 `~/.caliber-agent/.lock` 並持有 fd 到 process exit；`uninstall` 偵測 lock 默認拒絕、`--force` 後 acquire lock 持有到 RemoveAll 完成（避免 probe-then-release race）；daemon tick 開頭 + 每個 SendChunk 之前 stat config.toml，缺失即 `[fatal] exit 0`。最大 race window：**stat 與單個 SendChunk 之間 in-flight 的 1 個 chunk**（不是整個 tick 的 chunks） |
+| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall。原 mitigation（依賴 SaveState 失敗自然退出）不成立 — `SaveState` 開頭就 `MkdirAll` 把目錄重建，loop 對 save 失敗只 log + 繼續，HTTPSink 持有記憶體裡的 token 仍能上傳 | **flock 探活 (no-acquire) + `.uninstalling` stop sentinel + per-chunk check**（§3.6 + §3.7）：`run` 啟動取 `~/.caliber-agent/.lock` flock；`uninstall` 用 flock LOCK_NB 探活，拿不到默認拒絕、`--force` 不嘗試持有 lock；**所有** uninstall 路徑 step 2 寫 `.uninstalling` sentinel（早於 prompt + 所有 cleanup steps），任一 step 失敗 / 取消時 `os.Remove` 還原；daemon tick 開頭 + 每個 SendChunk 之前 **先 stat `.uninstalling`** 再 stat `config.toml`。最大 race window：**sentinel stat 與單個 SendChunk 之間 in-flight 的 1 個 chunk**（sentinel 寫在最早，涵蓋整個 cleanup 流程） |
 | **R5.** server `device.self_revoked` audit action 名稱與既有 `device.revoked` 重疊：admin 看不出差別 | 用不同 action type；audit log UI（Phase 4）顯示時兩者各有圖示。本 PR 只負責新增 action enum |
 | **R6.** `--keep-remote` 變成劫持 backdoor：惡意腳本下 `uninstall --keep-remote` 後 server-side device 仍存活 | token 已在 keychain 被刪 → 本機無法重用；server-side device 不主動 revoke 是已知 trade-off（user 須到 web UI 處理）；stdout 強烈提示 |
 | **R7.** `add-path` / `uninstall` 在 CI / 腳本下卡住 | `isatty(stdin) == false` 時不嘗試讀 stdin，直接印 `non-interactive shell detected; pass --yes to confirm` exit 130；`echo y \| caliber-agent ...` 也會被拒，明確要求腳本作者加 `--yes` |
