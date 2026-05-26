@@ -293,7 +293,7 @@ flags: --yes          跳過互動確認
    - **持有 fd 到 process exit**
 
 2. **Startup-time sentinel check（acquire lock 後立即，所有後續啟動動作之前）**：
-   - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → 立即（**不開 agent.log，不寫任何訊息進 fs**）以 stderr 輸出 `[fatal] uninstall in progress; aborting startup`，`close(.lock fd)` 釋放 flock 後 exit 0
+   - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → 立即（**不開 agent.log，不寫任何訊息進 fs**）返回 `&ExitError{Code: 0, Err: errors.New("[fatal] uninstall in progress; aborting startup")}`；Cobra 對該 `ExitError.Error()` 自動印到 stderr（`SilenceErrors=false`），不要手動 Fprintln 避免雙印。lockfd 在 `runRun` defer close 時釋放
    - **必須早於下列所有動作**（**not just network**）：
      - `config.Load()`（read-only，但確認意圖）
      - `LoadState()`（read-only）
@@ -315,8 +315,13 @@ flags: --yes          跳過互動確認
 
        // STEP 2: startup sentinel check — BEFORE any other local IO
        if _, err := os.Stat(config.UninstallSentinelPath()); err == nil {
-           fmt.Fprintln(cmd.ErrOrStderr(), "[fatal] uninstall in progress; aborting startup")
-           return &ExitError{Code: 0, Err: nil}
+           // 注意：root.go 設 SilenceErrors=false，Cobra 會自動印 err.Error() 到 stderr，
+           // 所以這裡 *不* 額外 Fprintln 避免雙印；訊息直接放進 ExitError.Err。
+           // 也不能傳 nil：既有 exit.go:19 `ExitError.Error()` 會 deref Err。
+           return &ExitError{
+               Code: 0,
+               Err:  errors.New("[fatal] uninstall in progress; aborting startup"),
+           }
        }
 
        // STEP 3+: existing config.Load / keychain.Get / BootstrapRedactionSet / loop
@@ -986,7 +991,7 @@ PR4 不新增 code；每子命令的對應：
 | `pause` 期間 `run` 收到 SIGINT | graceful exit 130；sentinel 保留；下次 `run` 仍空轉直到 `resume` |
 | 長期 paused 後 `run` | 正常空轉，每 60s 一行 `[paused] skipping tick`（log 噪音可接受） |
 | `uninstall` `remote_revoke` 完成、`keychain_delete` 中 SIGINT | exit 130；`.uninstalling` 殘留 → 重跑時 daemon 仍被擋；user 重跑 `uninstall` 第二次 `remote_revoke` 拿 410 idempotent → 繼續 `keychain_delete` + `remove_all` 完成 |
-| `uninstall` `remove_all` 中 SIGINT | exit 130；部分檔案已刪除（含可能尚未刪的 `.uninstalling`）；user 重跑 `uninstall --keep-remote`（device_id 可能已不在 config）— 若 config.toml 已刪只能手動 `rm -rf ~/.caliber-agent/` 清剩餘 |
+| `uninstall` `remove_all` 中 SIGINT | exit 130；部分檔案已刪除（含可能尚未刪的 `.uninstalling`、`config.toml`）。**重跑 `caliber-agent uninstall` 不可靠**：`config.Load() == ErrNotEnrolled` 早於 probe 退出（§3.6 開頭），無法定位 device_id 走 `keychain_delete`。**正確補救**：手動 `rm -rf ~/.caliber-agent/`（刪掉 `.uninstalling` 順便清掉 sentinel）+ 從 caliber web UI 手動 revoke device + 用 `security delete-generic-password -s tw.caliber.agent -a <device_id>` 清 keychain（若還記得 device_id）|
 | `add-path` 對相對路徑 `./foo` | 拒絕 + `[error] add-path requires absolute path` exit 64 |
 | `add-path` 對 broken symlink | `EvalSymlinks` 失敗 → `[error] cannot resolve path: <err>` exit 1 |
 | `remove-path` 對 broken symlink | 跳過 `EvalSymlinks`、以 input 字串比對 IncludePaths；找到則移除 |
