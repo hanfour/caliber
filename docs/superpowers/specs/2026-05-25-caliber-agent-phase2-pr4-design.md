@@ -64,7 +64,7 @@ PR4 完成後 caliber-agent 對齊以下違規攔截類別：
 | agent config | typed sentinels (ErrRootRemoved / ErrConfigRemoved / ErrUninstallInProgress) + precheckRuntime helper（R14-F1 / R15-F1） | 新增 sentinels + helper | `agent/internal/config/errors.go`、`agent/internal/config/precheck.go` |
 | agent config | SaveState / SaveRedactionSet 移除 MkdirAll、加 precheckRuntime（R14-F1） | 既有函式改寫 | `agent/internal/config/{state,redactionset}.go` |
 | agent config | SaveConfig 拆成 SaveConfigInitial（enroll 用，保留 MkdirAll）+ SaveConfig（runtime 用，precheck + 不 MkdirAll）（R15-F2） | 既有函式拆分 | `agent/internal/config/config.go` |
-| agent wizard | enroll wizard 改呼叫 SaveConfigInitial（R15-F2） | 既有 wizard 呼叫點切換 | `agent/internal/wizard/enroll.go:83` |
+| agent wizard | enroll wizard 兩處呼叫切換：first write 用 SaveConfigInitial、final include_paths 寫入用 SaveConfig（R15-F2 / R16-F2） | 既有 wizard 呼叫點切換 | `agent/internal/wizard/enroll.go:83,119` |
 | agent watcher | loop SaveState error typed dispatch — sentinel 類退出、IO 類 log+continue（R14-F1 / R15-F3） | error 處理升級為 typed switch | `agent/watcher/loop.go:136,169,189`、`agent/internal/cli/run.go` |
 | agent CLI | run lockfile acquire + PID 寫入（F2 + R2-F4） | 啟動 flock 持有 + PID 寫入 | `agent/internal/cli/run.go`、新 `agent/internal/lockfile/lockfile.go`（或 darwin-only `lockfile_darwin.go`） |
 | agent CLI | uninstall 寫 `.uninstalling` sentinel + 失敗時還原（R3-F2） | 新 sentinel 機制 | `agent/internal/cli/uninstall.go` |
@@ -463,28 +463,36 @@ flags: --yes          跳過互動確認
    )
 
    // agent/internal/config/precheck.go (new)
-   // precheckRuntime 在 SaveState/SaveRedactionSet/UpdateConfig 之前呼叫。
-   // 三條檢查的順序與 ordered_delete (g)→(h)→(i) 對齊：
-   //   - sentinel exists → uninstall 進行中 ((c)-(g))
-   //   - config.toml missing → ordered_delete 已過 (g) ((h)→(i) 視窗)
-   //   - root missing → ordered_delete 已過 (i)
+   // precheckRuntime 在 SaveState/SaveRedactionSet/SaveConfig 之前呼叫。
+   // 三條檢查的順序與 ordered_delete (i)→(h)→(g) **逆向**對齊（最後發生的 state 先檢查），
+   // 否則 stat 子路徑會在 root 不存在時也回 ErrNotExist 而誤分類為 ErrConfigRemoved：
+   //   1. root missing → ErrRootRemoved（ordered_delete 已過 (i)）
+   //   2. sentinel exists → ErrUninstallInProgress （cleanup (c)-(g) 進行中）
+   //   3. config.toml missing → ErrConfigRemoved（ordered_delete 已過 (g)，(h)→(i) 視窗）
    func precheckRuntime() error {
        root := RootDir()
+
+       // 1. root must exist — 最先檢查
+       if _, err := os.Stat(root); err != nil {
+           if errors.Is(err, fs.ErrNotExist) {
+               return ErrRootRemoved
+           }
+           // stat 暫時錯誤不擋寫（retry-friendly）
+       }
+
+       // 2. sentinel — fail-closed
        if _, err := os.Stat(filepath.Join(root, ".uninstalling")); err == nil {
            return ErrUninstallInProgress
        } else if !errors.Is(err, fs.ErrNotExist) {
            return fmt.Errorf("%w (sentinel stat failed: %v; fail-closed)", ErrUninstallInProgress, err)
        }
+
+       // 3. config.toml — ErrNotExist only（root 已驗存在）
        if _, err := os.Stat(filepath.Join(root, "config.toml")); err != nil {
            if errors.Is(err, fs.ErrNotExist) {
                return ErrConfigRemoved
            }
            // stat 暫時錯誤不擋寫（retry-friendly）
-       }
-       if _, err := os.Stat(root); err != nil {
-           if errors.Is(err, fs.ErrNotExist) {
-               return ErrRootRemoved
-           }
        }
        return nil
    }
@@ -497,7 +505,9 @@ flags: --yes          跳過互動確認
    - **`SaveConfig` 拆兩函式**：
      - `SaveConfigInitial(cfg)` — enroll 用：**保留 MkdirAll**，第一次寫 root；**不**做 precheck（uninstall 不可能對「未 enroll」狀態進行）
      - `SaveConfig(cfg)` — add-path / remove-path / 其他 runtime 用：`precheckRuntime()` + 不 MkdirAll + write
-     - wizard.go:83 既有 `config.Save(cfg)` 改呼叫 `config.SaveConfigInitial(cfg)`
+     - **wizard.go 兩處呼叫點分別處理**：
+       - line 83 (initial config write, root 尚未建立)：`config.Save(cfg)` → `config.SaveConfigInitial(cfg)`
+       - line 119 (final include_paths write, root 已建立)：`config.Save(cfg)` → `config.SaveConfig(cfg)`（runtime 版本走 precheck，但 enroll 過程中 sentinel 不可能存在，precheck 必過）
 
    **為什麼必須檢查 config.toml**（解 (h)→(i) 視窗 race）：ordered_delete (g) 刪 config.toml、(h) 刪 sentinel、(i) rmdir。如果 in-flight SendChunk 在 (h) 完成後返回，看到 sentinel 不在、root 還在 → 沒有 config.toml 那條的話會誤判 daemon 仍可 SaveState → 違反契約。檢查 config.toml 把這個 (h)→(i) 視窗也擋下。
 
@@ -569,7 +579,7 @@ flags: --yes          跳過互動確認
 |---|---|---|---|---|
 | `~/.caliber-agent/paused` | 0o600 | 空檔（存在性 = 訊號） | `pause` | `resume` / `uninstall` |
 | `~/.caliber-agent/.lock` | 0o600 | 寫入 PID（換行終止） + `flock` 持有 | `run` 啟動（fd held during lifetime） | `uninstall` step 6 ordered delete；process 死亡時 kernel 自動釋放 flock |
-| `~/.caliber-agent/.uninstalling` | 0o600 | 空檔（存在性 = 訊號） | `uninstall` step 3（**user 確認 yes 之後**，所有路徑包含 `--force`） | `uninstall` step 6 ordered delete；step 5 或 6 失敗時 uninstall 手動 `os.Remove` 還原（避免 daemon 永久卡死）。**user cancel 時無須還原**（sentinel 尚未寫入） |
+| `~/.caliber-agent/.uninstalling` | 0o600 | 空檔（存在性 = 訊號） | `uninstall` step 3（**user 確認 yes 之後**，所有路徑包含 `--force`） | `uninstall` step 6 ordered_delete entry (h)；ordered_delete (a)-(g) 失敗時 `os.Remove(.uninstalling)` **還原**給 retry；ordered_delete (h)/(i) 失敗時**不還原**（自己刪不掉、或 dir 已將要被 rmdir）— user 手動清理。**user cancel 時無須還原**（sentinel 尚未寫入） |
 
 其餘 PR1/PR2/PR3 既有檔不變：`config.toml`、`state.json`、`redaction-set.json`、`agent.log`。
 
@@ -1123,7 +1133,7 @@ user      CLI            Server      Keychain    FS
 3. sentinel 在 cleanup 啟動前 — running daemon 立即看到並退出，後續 remote/keychain/fs 期間 daemon 不再上傳
 4. 遠端先：用 keychain 內的 token 認證，必須在 keychain 刪除前完成
 5. keychain 再刪：失去這把鑰匙後本機不能再呼叫 server
-6. 最後刪檔：用 ordered delete（**不**用 `RemoveAll` — 順序不可預期會造成「sentinel 先刪、config 還在」的 race，見 §3.6 step 6）；optional artifacts (state / redaction-set / agent.log / paused / .lock) 先刪且 ErrNotExist 忽略 → `config.toml` 倒數第二刪 → `.uninstalling` 最後刪 → rmdir。設計 invariant：「sentinel 不在 & config 在」這個組合永遠不會發生
+6. 最後刪檔：用 ordered_delete（**不**用 `RemoveAll` — 順序不可預期會造成「sentinel 先刪、config 還在」的 race，見 §3.6 step 6）；optional artifacts (state / redaction-set / agent.log / paused / .lock) 先刪且 ErrNotExist 忽略 → tmp glob cleanup (`.config.toml.*` / `.state.json.*` / `.redaction-set.json.*` atomic-writer 殘檔) → `config.toml` 倒數第二刪 → `.uninstalling` 最後刪 → rmdir。設計 invariant：「sentinel 不在 & config 在」這個組合永遠不會發生
 
 ### 7.4 uninstall degraded paths
 
@@ -1482,7 +1492,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 |---|---|
 | `~/.caliber-agent/paused` | 存在 = paused；空檔；perm 0o600 |
 | `~/.caliber-agent/.lock` | `run` 持有 flock；內容為 PID（換行終止）— 顯示用，**活性偵測一律用 `flock LOCK_NB` 探測，不是 stat 或讀 PID**（kernel 在 process 死亡釋放 flock，但檔案可能留下；PID 不能用 `kill -0` 探活，因為 PID 可能 reuse） |
-| `~/.caliber-agent/.uninstalling` | 存在 = uninstall 進行中；空檔；perm 0o600；**user 確認 yes 後才寫**（cancel 不寫）；ordered_delete (a)-(g) 失敗時 `os.Remove(.uninstalling)` **還原**給 retry；ordered_delete (h)/(i) 失敗時**不還原**（自己刪不掉、或 dir 已將要被 rmdir）— user 須手動清理；daemon 在三點檢查：(1) run 啟動取得 lock 後（早於任何 IO） (2) tick 開頭 (3) 每 SendChunk 前 (4) 每 SaveState/SaveRedactionSet 前 |
+| `~/.caliber-agent/.uninstalling` | 存在 = uninstall 進行中；空檔；perm 0o600；**user 確認 yes 後才寫**（cancel 不寫）；ordered_delete (a)-(g) 失敗時 `os.Remove(.uninstalling)` **還原**給 retry；ordered_delete (h)/(i) 失敗時**不還原**（自己刪不掉、或 dir 已將要被 rmdir）— user 須手動清理；daemon 在**四點**檢查：(1) run 啟動取得 lock 後（早於任何 IO） (2) tick 開頭 (3) 每 SendChunk 前 (4) 每 SaveState/SaveConfig/SaveRedactionSet 前（透過 precheckRuntime） |
 | `~/.caliber-agent/config.toml` | 新增 `insecure_transport bool`（預設 false，缺失視為 false） |
 
 ### 10.5 Audit log action
@@ -1515,7 +1525,7 @@ Server side 不強制這些上限（保留彈性），但 per-org redaction set 
 | **R1.** `--insecure` 變成預設：使用者一次 enroll 用了 `--insecure` 後忘了，h4 stack 升級到 https 後 daemon 仍走 http | `run` 啟動每次印 `[warn] insecure transport`；`status` 輸出 `api_base_url: http://... (insecure)`；README 文件化 |
 | **R2.** EvalSymlinks 在 macOS 上慢：每 tick 對每個 ref 做 stat + EvalSymlinks 累積開銷 | Loop 內 cwdCache 已存在（PR2）；PR4 擴展 cache 至 `(rawPath → realPath)`，每 path 一次 EvalSymlinks |
 | **R3.** PR1 既有 config.toml 含未正規化路徑：升級到 PR4 後監看不到原本目錄 | 不 retro-normalise；user 透過 `remove-path` + `add-path` 遷移；README + CHANGELOG 提醒 |
-| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall。原 mitigation（依賴 SaveState 失敗自然退出）不成立 — `SaveState` 開頭就 `MkdirAll` 把目錄重建，loop 對 save 失敗只 log + 繼續，HTTPSink 持有記憶體裡的 token 仍能上傳 | **flock 探活 (no-create, no-acquire) + sentinel-after-prompt + 3-point check**（§3.6 + §3.7）：`run` 啟動取 `.lock` flock；`uninstall` 用 flock LOCK_NB **不帶 O_CREATE** 探活（cancel 不留空 `.lock`），拿不到默認拒絕、`--force` 不持 lock；**所有** uninstall 路徑於 step 3（user 確認 yes 之後）寫 `.uninstalling`；cleanup step 5/6 失敗時 `os.Remove` 還原；daemon 在三點檢查 sentinel：(a) `run` 啟動取得 lock 後 / 任何 network IO 前 (b) tick 開頭 (c) 每 SendChunk 之前。最大 race window：sentinel stat 與單個 SendChunk 之間 in-flight 的 1 chunk。**user cancel 是真的 0 side effect**（無 fs / network / keychain 變更） |
+| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall。原 mitigation（依賴 SaveState 失敗自然退出）不成立 — `SaveState` 開頭就 `MkdirAll` 把目錄重建，loop 對 save 失敗只 log + 繼續，HTTPSink 持有記憶體裡的 token 仍能上傳 | **flock 探活 (no-create, no-acquire) + sentinel-after-prompt + 4-point precheck + typed sentinels**（§3.6 + §3.7）：`run` 啟動取 `.lock` flock；`uninstall` 用 flock LOCK_NB **不帶 O_CREATE** 探活（cancel 不留空 `.lock`），拿不到默認拒絕、`--force` 不持 lock；**所有** uninstall 路徑於 step 3（user 確認 yes 之後）寫 `.uninstalling`；ordered_delete (a)-(g) 失敗時還原 sentinel 給 retry、(h)/(i) 失敗不還原；daemon 在**四點**檢查（早於任何 fs/network IO）：(1) run 啟動取得 lock 後 (2) tick 開頭 (3) 每 SendChunk 之前 (4) Save\* 之前 (precheckRuntime 套用 root/sentinel/config.toml 三條 stat)；SaveState 走 typed sentinel error 分派 — 三個 sentinel 之一即 daemon 退出，real IO 錯誤維持 log+continue。最大 race window：sentinel stat 與單個 SendChunk 之間 in-flight 的 1 chunk。**user cancel 是真的 0 side effect**（無 fs / network / keychain 變更） |
 | **R5.** server `device.self_revoked` audit action 名稱與既有 `device.revoked` 重疊：admin 看不出差別 | 用不同 action type；audit log UI（Phase 4）顯示時兩者各有圖示。本 PR 只負責新增 action enum |
 | **R6.** `--keep-remote` 變成劫持 backdoor：惡意腳本下 `uninstall --keep-remote` 後 server-side device 仍存活 | token 已在 keychain 被刪 → 本機無法重用；server-side device 不主動 revoke 是已知 trade-off（user 須到 web UI 處理）；stdout 強烈提示 |
 | **R7.** `add-path` / `uninstall` 在 CI / 腳本下卡住 | `isatty(stdin) == false` 時不嘗試讀 stdin，直接印 `non-interactive shell detected; pass --yes to confirm` exit 130；`echo y \| caliber-agent ...` 也會被拒，明確要求腳本作者加 `--yes` |
