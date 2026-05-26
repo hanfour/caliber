@@ -61,8 +61,11 @@ PR4 完成後 caliber-agent 對齊以下違規攔截類別：
 | agent watcher | symlink 防護 | 新邏輯 | `agent/watcher/loop.go`、`agent/watcher/claude.go`、`agent/watcher/codex.go`、`agent/internal/cwdresolve/cwdresolve.go` |
 | agent watcher | pause sentinel 檢查 | tick 開頭加 stat | `agent/watcher/loop.go:Tick` |
 | agent watcher | tick 開頭 + 每 SendChunk 前驗 .uninstalling + config + lock（F2/F5/R3） | stat + flock 探測 | `agent/watcher/loop.go:Tick` 與 chunk loop |
-| agent config | SaveState/SaveConfig/SaveRedactionSet 加 dir-must-exist + sentinel check（R14-F1） | 移除 MkdirAll，加 precheck | `agent/internal/config/{state,config,redactionset}.go` |
-| agent watcher | loop SaveState error 從 log+continue 改為 [fatal] exit 0（R14-F1） | 既有 error 處理升級 | `agent/watcher/loop.go:136,169,189` |
+| agent config | typed sentinels (ErrRootRemoved / ErrConfigRemoved / ErrUninstallInProgress) + precheckRuntime helper（R14-F1 / R15-F1） | 新增 sentinels + helper | `agent/internal/config/errors.go`、`agent/internal/config/precheck.go` |
+| agent config | SaveState / SaveRedactionSet 移除 MkdirAll、加 precheckRuntime（R14-F1） | 既有函式改寫 | `agent/internal/config/{state,redactionset}.go` |
+| agent config | SaveConfig 拆成 SaveConfigInitial（enroll 用，保留 MkdirAll）+ SaveConfig（runtime 用，precheck + 不 MkdirAll）（R15-F2） | 既有函式拆分 | `agent/internal/config/config.go` |
+| agent wizard | enroll wizard 改呼叫 SaveConfigInitial（R15-F2） | 既有 wizard 呼叫點切換 | `agent/internal/wizard/enroll.go:83` |
+| agent watcher | loop SaveState error typed dispatch — sentinel 類退出、IO 類 log+continue（R14-F1 / R15-F3） | error 處理升級為 typed switch | `agent/watcher/loop.go:136,169,189`、`agent/internal/cli/run.go` |
 | agent CLI | run lockfile acquire + PID 寫入（F2 + R2-F4） | 啟動 flock 持有 + PID 寫入 | `agent/internal/cli/run.go`、新 `agent/internal/lockfile/lockfile.go`（或 darwin-only `lockfile_darwin.go`） |
 | agent CLI | uninstall 寫 `.uninstalling` sentinel + 失敗時還原（R3-F2） | 新 sentinel 機制 | `agent/internal/cli/uninstall.go` |
 | agent redact | bootstrap/refresher 對 `ErrTooManyPatterns` 走 fallback（F3） | 既有 fail-open 修補 | `agent/internal/cli/redactionset.go`、`agent/internal/cli/run.go` (refresher goroutine) |
@@ -449,47 +452,95 @@ flags: --yes          跳過互動確認
 
    **但這還不夠** — daemon 在 SendChunk 成功後會呼叫 `config.SaveState`，而既有 `SaveState` (PR1 `state.go:46`) 開頭 `os.MkdirAll(root, 0o700)` 會**重建** uninstall 已刪的目錄，產生新的 `state.json` → 違反 §4.4「uninstall 後不留檔」。同樣影響 `SaveConfig` 與 `SaveRedactionSet`，三者皆在 PR1/PR3 用相同 mkdir-then-write pattern。
 
-   **修補**（PR4 必改）：所有 atomic-writer save functions 增加 dir-must-exist + sentinel check：
+   **修補**（PR4 必改）：引入 typed sentinel errors + 三條 precheck，所有 runtime save functions 都套用；enroll 的首次寫**不**走 precheck（豁免；它的工作就是建立 root）。
 
    ```go
-   // agent/internal/config/state.go (revised)
-   func SaveState(s *State) error {
+   // agent/internal/config/errors.go (new)
+   var (
+       ErrRootRemoved         = errors.New("config: root directory removed")
+       ErrConfigRemoved       = errors.New("config: config.toml removed")
+       ErrUninstallInProgress = errors.New("config: uninstall in progress")
+   )
+
+   // agent/internal/config/precheck.go (new)
+   // precheckRuntime 在 SaveState/SaveRedactionSet/UpdateConfig 之前呼叫。
+   // 三條檢查的順序與 ordered_delete (g)→(h)→(i) 對齊：
+   //   - sentinel exists → uninstall 進行中 ((c)-(g))
+   //   - config.toml missing → ordered_delete 已過 (g) ((h)→(i) 視窗)
+   //   - root missing → ordered_delete 已過 (i)
+   func precheckRuntime() error {
        root := RootDir()
-       // 1. dir must exist — 不 MkdirAll；uninstall 走 ordered_delete 後 dir 不在
+       if _, err := os.Stat(filepath.Join(root, ".uninstalling")); err == nil {
+           return ErrUninstallInProgress
+       } else if !errors.Is(err, fs.ErrNotExist) {
+           return fmt.Errorf("%w (sentinel stat failed: %v; fail-closed)", ErrUninstallInProgress, err)
+       }
+       if _, err := os.Stat(filepath.Join(root, "config.toml")); err != nil {
+           if errors.Is(err, fs.ErrNotExist) {
+               return ErrConfigRemoved
+           }
+           // stat 暫時錯誤不擋寫（retry-friendly）
+       }
        if _, err := os.Stat(root); err != nil {
            if errors.Is(err, fs.ErrNotExist) {
-               return fmt.Errorf("state: %s removed; daemon should exit", root)
+               return ErrRootRemoved
            }
-           return fmt.Errorf("state: stat %s: %w", root, err)
        }
-       // 2. sentinel check — uninstall 進行中拒絕寫
-       if _, err := os.Stat(filepath.Join(root, ".uninstalling")); err == nil {
-           return fmt.Errorf("state: uninstall in progress; refusing write")
-       } else if !errors.Is(err, fs.ErrNotExist) {
-           return fmt.Errorf("state: stat sentinel: %w; refusing write (fail-closed)", err)
-       }
-       // ... 既有 CreateTemp + write + rename 邏輯 ...
+       return nil
    }
    ```
 
-   `SaveConfig` 與 `SaveRedactionSet` 同樣套用。三者共用一個 `precheck(root) error` helper。
+   套用：
 
-   **Loop 對應**：watcher loop 內既有的 `if saveErr := config.SaveState(...); saveErr != nil { l.log.Printf("[error] save state: %v", saveErr) }` 三處（PR2 `loop.go:136,169,189`）改為**遇到此類 fatal error 立即 exit 0**：
+   - `SaveState`：呼叫 `precheckRuntime()` + **不 MkdirAll** → write
+   - `SaveRedactionSet`：同上
+   - **`SaveConfig` 拆兩函式**：
+     - `SaveConfigInitial(cfg)` — enroll 用：**保留 MkdirAll**，第一次寫 root；**不**做 precheck（uninstall 不可能對「未 enroll」狀態進行）
+     - `SaveConfig(cfg)` — add-path / remove-path / 其他 runtime 用：`precheckRuntime()` + 不 MkdirAll + write
+     - wizard.go:83 既有 `config.Save(cfg)` 改呼叫 `config.SaveConfigInitial(cfg)`
+
+   **為什麼必須檢查 config.toml**（解 (h)→(i) 視窗 race）：ordered_delete (g) 刪 config.toml、(h) 刪 sentinel、(i) rmdir。如果 in-flight SendChunk 在 (h) 完成後返回，看到 sentinel 不在、root 還在 → 沒有 config.toml 那條的話會誤判 daemon 仍可 SaveState → 違反契約。檢查 config.toml 把這個 (h)→(i) 視窗也擋下。
+
+   **Loop 對應**：watcher loop 既有 SaveState 錯誤處理（PR2 `loop.go:136,169,189`）改為**typed dispatch**：
 
    ```go
    if saveErr := config.SaveState(l.state); saveErr != nil {
-       l.log.Printf("[fatal] save state: %v; daemon exiting", saveErr)
-       return nil   // Tick 回 nil 由 Run 退出，或 propagate ExitError
+       switch {
+       case errors.Is(saveErr, config.ErrUninstallInProgress),
+            errors.Is(saveErr, config.ErrConfigRemoved),
+            errors.Is(saveErr, config.ErrRootRemoved):
+           // uninstall 訊號 → daemon 應該退；冒泡到 runRun 走 exit 0
+           l.log.Printf("[fatal] save state: %v; daemon exiting", saveErr)
+           return saveErr   // Loop.Run 收到後 return；runRun 看到此 sentinel 包成 &ExitError{Code: 0}
+       default:
+           // 真實 IO 錯誤（disk full / fsync / rename / temp file）— 維持 PR2 既有非 fatal 行為
+           l.log.Printf("[error] save state: %v", saveErr)
+           // 不退出；continue
+       }
    }
    ```
 
-   雖然 `SaveState` error 之前是非 fatal（log + continue），現在因為「dir 不在」訊號明確代表 uninstall 已執行 → daemon 必須 exit。
+   `runRun` 的處理（`cli/run.go`）：
+
+   ```go
+   if loopErr := loop.Run(ctx); loopErr != nil {
+       switch {
+       case errors.Is(loopErr, config.ErrUninstallInProgress),
+            errors.Is(loopErr, config.ErrConfigRemoved),
+            errors.Is(loopErr, config.ErrRootRemoved):
+           return &ExitError{Code: 0, Err: loopErr}
+       }
+       // existing ErrKeyRevoked / ErrInvalidToken handling unchanged
+       ...
+   }
+   ```
 
    修補後的 race window 變成：
 
    - sentinel 已寫但 daemon 仍在 SendChunk → 最多送出 1 in-flight chunk
-   - SendChunk 完成、嘗試 SaveState → SaveState 內 sentinel check 或 dir check 失敗 → daemon exit 0；**不會** MkdirAll 重建目錄、**不會** 寫 state.json
-   - 即使 sentinel check 因 OS race miss（極端罕見），dir check 也會擋下（dir 在 ordered_delete (i) rmdir 之後一定不在）
+   - SendChunk 完成、嘗試 SaveState → precheck 命中 sentinel / config / root 任一 → return typed error → loop 退出；**不會** MkdirAll 重建目錄、**不會** 寫 state.json
+   - (h)→(i) 視窗（sentinel 已刪、config 已刪、root 還在）：precheck 命中 `ErrConfigRemoved` → daemon 退
+   - 真實 IO 錯誤（disk-full etc.）：仍 log + continue（PR2 既有行為，不被 R14 升級誤殺）
 
 5. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，崩潰不留 stale lock。
 
@@ -1270,10 +1321,15 @@ TestRun_TickSentinelStatEACCES_FailsClosed              # R8-F2: tick 路徑 sen
 TestRun_TickConfigStatEACCES_DoesNotExit                # R8-F2: config stat 非 ErrNotExist 不退出（retry-friendly）
 TestRun_PerChunkUninstallSentinel_AbortsRemainingChunks # R3-F2: 每 SendChunk 前先檢 sentinel（早於 config）
 TestRun_PerChunkConfigCheck_AbortsRemainingChunks       # F5: config 缺失也退出（雙重保險）
-TestSaveState_RefusesWriteWhenDirRemoved                # R14-F1: dir 不在 → return error，daemon 退出
-TestSaveState_RefusesWriteWhenSentinelExists            # R14-F1: sentinel 在 → 拒寫
+TestSaveState_RefusesWriteWhenDirRemoved                # R14-F1: dir 不在 → ErrRootRemoved
+TestSaveState_RefusesWriteWhenSentinelExists            # R14-F1: sentinel 在 → ErrUninstallInProgress
+TestSaveState_RefusesWriteWhenConfigTomlRemoved         # R15-F1: (h)→(i) 視窗：sentinel 不在但 config.toml 不在 → ErrConfigRemoved
 TestSaveState_DoesNotMkdirAll                           # R14-F1: 斷言 save 不重建 dir
-TestRun_SaveStateFails_DaemonExitsCleanly               # R14-F1: loop 收到 SaveState error 視為 fatal exit 0
+TestSaveState_DiskFullReturnsRawIOError                 # R15-F3: real IO error 不是 sentinel，不該觸發 daemon exit
+TestRun_SaveStateSentinelError_DaemonExitsCleanly       # R14-F1 + R15-F3: typed sentinel → exit 0
+TestRun_SaveStateIOError_DaemonContinues                # R15-F3: non-sentinel IO error → log + continue（既有 PR2 行為）
+TestSaveConfigInitial_CreatesDirWhenAbsent              # R15-F2: enroll first-write happy path
+TestSaveConfig_RefusesWriteWhenDirRemoved               # R15-F2: runtime SaveConfig 走 precheck
 ```
 
 #### watcher 層
@@ -1426,7 +1482,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 |---|---|
 | `~/.caliber-agent/paused` | 存在 = paused；空檔；perm 0o600 |
 | `~/.caliber-agent/.lock` | `run` 持有 flock；內容為 PID（換行終止）— 顯示用，**活性偵測一律用 `flock LOCK_NB` 探測，不是 stat 或讀 PID**（kernel 在 process 死亡釋放 flock，但檔案可能留下；PID 不能用 `kill -0` 探活，因為 PID 可能 reuse） |
-| `~/.caliber-agent/.uninstalling` | 存在 = uninstall 進行中；空檔；perm 0o600；**user 確認 yes 後才寫**（cancel 不寫）；cleanup step 失敗時必須 `os.Remove` 還原；daemon 每 chunk 前檢查（早於 config 檢查），daemon `run` 啟動取得 lock 後也檢查（早於任何 network IO） |
+| `~/.caliber-agent/.uninstalling` | 存在 = uninstall 進行中；空檔；perm 0o600；**user 確認 yes 後才寫**（cancel 不寫）；ordered_delete (a)-(g) 失敗時 `os.Remove(.uninstalling)` **還原**給 retry；ordered_delete (h)/(i) 失敗時**不還原**（自己刪不掉、或 dir 已將要被 rmdir）— user 須手動清理；daemon 在三點檢查：(1) run 啟動取得 lock 後（早於任何 IO） (2) tick 開頭 (3) 每 SendChunk 前 (4) 每 SaveState/SaveRedactionSet 前 |
 | `~/.caliber-agent/config.toml` | 新增 `insecure_transport bool`（預設 false，缺失視為 false） |
 
 ### 10.5 Audit log action
