@@ -287,10 +287,11 @@ flags: --yes          跳過互動確認
 
 1. **取得 lockfile + 寫 PID**：
    - `MkdirAll(~/.caliber-agent/, 0o700)`
-   - `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE|O_TRUNC, 0o600)`
-   - `syscall.Flock(fd, LOCK_EX|LOCK_NB)`。失敗 → 印 `another caliber-agent run is already active` exit 1
-   - 成功後 `fmt.Fprintf(fd, "%d\n", os.Getpid())` 寫入自己的 PID，供 `uninstall` 偵測時讀取顯示
+   - `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` — **不帶 O_TRUNC**
+   - `syscall.Flock(fd, LOCK_EX|LOCK_NB)`。失敗 → 印 `another caliber-agent run is already active` exit 1（**flock 失敗後立即 close，不動檔案內容；既有 daemon 的 PID 保持完整**）
+   - 成功取得 flock 後再執行：`fd.Truncate(0)` → `fd.Seek(0, 0)` → `fmt.Fprintf(fd, "%d\n", os.Getpid())`
    - **持有 fd 到 process exit**
+   - **race 防護**：移除 `O_TRUNC` 是必要的 — 否則 second daemon open 時就 truncate，會在自己 flock 失敗前先擦掉既有 daemon 的 PID，違反「`.lock` 內容應為持有者 PID」契約
 
 2. **Startup-time sentinel check（acquire lock 後立即，所有後續啟動動作之前）**：
    - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → 立即（**不開 agent.log，不寫任何訊息進 fs**）返回 `&ExitError{Code: 0, Err: errors.New("[fatal] uninstall in progress; aborting startup")}`；Cobra 對該 `ExitError.Error()` 自動印到 stderr（`SilenceErrors=false`），不要手動 Fprintln 避免雙印。lockfd 在 `runRun` defer close 時釋放
@@ -314,14 +315,19 @@ flags: --yes          跳過互動確認
        defer lockFd.Close()
 
        // STEP 2: startup sentinel check — BEFORE any other local IO
-       if _, err := os.Stat(config.UninstallSentinelPath()); err == nil {
+       // Fail-closed semantics: stat error 非 ErrNotExist 一律當作 "sentinel 存在" 處理。
+       // 避免 EACCES / EIO 等被誤判成「不在 uninstall」而繼續上傳。
+       _, statErr := os.Stat(config.UninstallSentinelPath())
+       sentinelPresent := statErr == nil || !errors.Is(statErr, fs.ErrNotExist)
+       if sentinelPresent {
            // 注意：root.go 設 SilenceErrors=false，Cobra 會自動印 err.Error() 到 stderr，
            // 所以這裡 *不* 額外 Fprintln 避免雙印；訊息直接放進 ExitError.Err。
            // 也不能傳 nil：既有 exit.go:19 `ExitError.Error()` 會 deref Err。
-           return &ExitError{
-               Code: 0,
-               Err:  errors.New("[fatal] uninstall in progress; aborting startup"),
+           msg := "[fatal] uninstall in progress; aborting startup"
+           if statErr != nil {
+               msg = fmt.Sprintf("[fatal] cannot stat uninstall sentinel (%v); failing closed", statErr)
            }
+           return &ExitError{Code: 0, Err: errors.New(msg)}
        }
 
        // STEP 3+: existing config.Load / keychain.Get / BootstrapRedactionSet / loop
@@ -331,15 +337,18 @@ flags: --yes          跳過互動確認
    ```
 
 3. **Tick 開頭 + 每 SendChunk 前 stop-condition check**：
+   - **Fail-closed semantics 適用所有 stat 檢查**：除了 `fs.ErrNotExist`，所有 stat 錯誤都當作「sentinel 存在 / config 缺失」處理 — 即觸發退出。avoids EACCES/EIO 被誤判為「正常運行」。
    - **Tick 開頭**（**順序很重要**：sentinel 優先於 config）：
-     - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → `[fatal] uninstall in progress; aborting` exit 0
+     - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 / stat 非 ErrNotExist 錯誤 → `[fatal] uninstall in progress (or stat failed); aborting` exit 0
      - 既有 paused sentinel 檢查（沿用 PR2 設計）
-     - `os.Stat(config.toml)` 不在 → `[fatal] config removed; daemon exiting` exit 0
-     - `os.Stat(.lock)` 不在 → `[fatal] lockfile removed; daemon exiting` exit 0
+     - `os.Stat(config.toml)` 不在 / 非 ErrNotExist 之外的錯誤都不在此 short-circuit；只有純粹 ErrNotExist 才視為「config removed」退出（fail-closed 在這條反過來：可能是磁碟暫時 unavailable，配 retry-friendly）
+     - `os.Stat(.lock)` 不在 → `[fatal] lockfile removed; daemon exiting` exit 0（pure ErrNotExist 判定）
    - **Loop 內每個 `sink.SendChunk` 之前**（早於 config.toml stat，因為 uninstall 寫 sentinel 早於 RemoveAll）：
-     - `os.Stat(.uninstalling)` 存在 → `[fatal] uninstall in progress; aborting remaining chunks` exit 0
-     - `os.Stat(config.toml)` 不在 → `[fatal] config removed mid-tick; aborting remaining chunks` exit 0
+     - `os.Stat(.uninstalling)` 存在 / 非 ErrNotExist 錯誤 → `[fatal] uninstall in progress (or stat failed); aborting remaining chunks` exit 0
+     - `os.Stat(config.toml)` 不在（ErrNotExist）→ `[fatal] config removed mid-tick; aborting remaining chunks` exit 0
    - 這把 F5 race 縮到「sentinel stat 與單個 SendChunk 之間 in-flight 的 1 chunk」
+
+   **fail-closed 對應 sentinel 而非 config**：sentinel 是 stop signal（不應該誤判成「沒在 uninstall」），所以 stat 錯誤一律觸發退出；config.toml 是 config presence（不在 = uninstall 已刪），平時 stat 錯誤可能是暫時性故障，不該觸發退出 — 區分這兩種語意。`.lock` 同理只看 ErrNotExist（缺失代表被 uninstall 清掉，其他錯誤不應 panic 退出）。
 
 4. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，崩潰不留 stale lock。
 
@@ -990,7 +999,8 @@ PR4 不新增 code；每子命令的對應：
 |---|---|
 | `pause` 期間 `run` 收到 SIGINT | graceful exit 130；sentinel 保留；下次 `run` 仍空轉直到 `resume` |
 | 長期 paused 後 `run` | 正常空轉，每 60s 一行 `[paused] skipping tick`（log 噪音可接受） |
-| `uninstall` `remote_revoke` 完成、`keychain_delete` 中 SIGINT | exit 130；`.uninstalling` 殘留 → 重跑時 daemon 仍被擋；user 重跑 `uninstall` 第二次 `remote_revoke` 拿 410 idempotent → 繼續 `keychain_delete` + `remove_all` 完成 |
+| `uninstall` `remote_revoke` 完成、`keychain_delete` **尚未呼叫** 時 SIGINT | exit 130；`.uninstalling` 殘留 → 重跑時 daemon 仍被擋；user 重跑 `uninstall`，第二次 `remote_revoke` 拿 410 idempotent → 繼續 `keychain_delete` + `remove_all` 完成 |
+| `uninstall` `remote_revoke` + `keychain_delete` 完成、`remove_all` 之前 SIGINT | exit 130；keychain token 已不見，重跑 `caliber-agent uninstall` 走第二次 `remote_revoke` 會 401 invalid_token（無法 authenticate）。**正確補救**：重跑 `caliber-agent uninstall --keep-remote`（既然 remote 已 revoked），跳過 remote 直接 `keychain_delete`（拿 ErrNotFound → 視為已清）→ `remove_all` 完成 |
 | `uninstall` `remove_all` 中 SIGINT | exit 130；部分檔案已刪除（含可能尚未刪的 `.uninstalling`、`config.toml`）。**重跑 `caliber-agent uninstall` 不可靠**：`config.Load() == ErrNotEnrolled` 早於 probe 退出（§3.6 開頭），無法定位 device_id 走 `keychain_delete`。**正確補救**：手動 `rm -rf ~/.caliber-agent/`（刪掉 `.uninstalling` 順便清掉 sentinel）+ 從 caliber web UI 手動 revoke device + 用 `security delete-generic-password -s tw.caliber.agent -a <device_id>` 清 keychain（若還記得 device_id）|
 | `add-path` 對相對路徑 `./foo` | 拒絕 + `[error] add-path requires absolute path` exit 64 |
 | `add-path` 對 broken symlink | `EvalSymlinks` 失敗 → `[error] cannot resolve path: <err>` exit 1 |
