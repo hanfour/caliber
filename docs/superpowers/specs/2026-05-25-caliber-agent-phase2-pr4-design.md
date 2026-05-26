@@ -12,7 +12,7 @@ supersedes: docs/superpowers/specs/2026-05-23-caliber-agent-phase2-pr3-design.md
 
 ### Goals
 
-1. **5 個子命令落地**: `add-path` / `remove-path` / `pause` / `resume` / `status` / `uninstall` 從 `ExitNotImplemented` 換成真實作。
+1. **6 個子命令落地**: `add-path` / `remove-path` / `pause` / `resume` / `status` / `uninstall` 從 `ExitNotImplemented` 換成真實作。
 2. **移除 `set-mode` 子命令**: 從 `root.AddCommand` 拿掉、刪檔 + 對應測試。Mode 切換改由直接編輯 `config.toml` + 重啟 `run` 的流程；PR3 OBS-2 已建立的 startup mode allowlist 仍守住。
 3. **合規硬化 audit 必修 9 項**: symlink 防護、HTTPS scheme 強制、regex 上限、PersistentFlag 限縮、文案修正、env 變數文件化 — 全部對應 audit report 條目。
 4. **Server side `DELETE /v1/devices/me`**: 給 daemon `uninstall` 呼叫，cda_* Bearer auth、軟撤銷 device、寫 audit log。
@@ -60,6 +60,10 @@ PR4 完成後 caliber-agent 對齊以下違規攔截類別：
 | agent CLI | `--insecure` 新 flag（enroll only） | 新加 flag | `agent/internal/cli/enroll.go` |
 | agent watcher | symlink 防護 | 新邏輯 | `agent/watcher/loop.go`、`agent/watcher/claude.go`、`agent/watcher/codex.go`、`agent/internal/cwdresolve/cwdresolve.go` |
 | agent watcher | pause sentinel 檢查 | tick 開頭加 stat | `agent/watcher/loop.go:Tick` |
+| agent watcher | tick 開頭驗 config + lock 存在（F2） | tick 開頭加 stat + flock 探測 | `agent/watcher/loop.go:Tick` |
+| agent CLI | run lockfile acquire（F2） | 啟動 flock 持有 | `agent/internal/cli/run.go`、新 `agent/internal/lockfile/lockfile.go`（或 darwin-only `lockfile_darwin.go`） |
+| agent redact | bootstrap/refresher 對 `ErrTooManyPatterns` 走 fallback（F3） | 既有 fail-open 修補 | `agent/internal/cli/redactionset.go`、`agent/internal/cli/run.go` (refresher goroutine) |
+| **server REST** | `resolveDeviceFromAuthAllowRevoked` 變體（F1） | 既有 helper 旁加 sister fn | `apps/api/src/rest/ingestAuth.ts` |
 | agent config | IncludePaths 正規化 | enroll/add-path 寫入前 EvalSymlinks + Clean | `agent/internal/config/config.go` 或新 `paths_normalise.go` |
 | agent config | HTTPS scheme 驗證 | enroll wizard + Load 加驗 | `agent/internal/cli/enroll.go`、`agent/internal/wizard/enroll.go`、`agent/internal/config/config.go` |
 | agent config | `insecure_transport` 新欄位 | schema 擴充 | `agent/internal/config/config.go` |
@@ -198,51 +202,82 @@ JSON：
 args:  none
 flags: --yes          跳過互動確認
        --keep-remote  跳過 server-side revoke（已從 web UI revoke / token 失效 / 離線）
+       --force        即使偵測到 daemon 正在跑也強制 uninstall（不建議）
 ```
 
 行為：
 
-1. **顯示影響範圍**：
+1. **Running-daemon detection**：嘗試 `flock(~/.caliber-agent/.lock, LOCK_EX | LOCK_NB)`。若拿不到（已有 daemon 持有），印：
+
+   ```
+   caliber-agent run is currently active (PID <n>).
+   Stop it first with Ctrl+C (or `kill <n>`), then re-run uninstall.
+   Or pass --force to uninstall anyway (the running daemon may continue
+   to upload until it next tries to SaveState or refresh the redaction
+   set, then exit on its own).
+   ```
+
+   exit 1，除非 `--force`。`--force` 路徑印 `[warn] uninstalling while daemon is running; daemon will exit on its next SaveState/refresh` 後繼續。
+
+2. **顯示影響範圍**：
 
    ```
    This will:
      1. Revoke this device at <api_base_url> (DELETE /v1/devices/me)
-     2. Remove ~/.caliber-agent/ (config, state, redaction-set, agent.log)
+     2. Remove ~/.caliber-agent/ (config, state, redaction-set, agent.log, .lock)
      3. Remove keychain entry: tw.caliber.agent / <device_id>
    Continue? [y/N]
    ```
 
    `--yes` 跳過。非 TTY 場景見 §11 R7。
 
-2. **遠端 revoke**（除非 `--keep-remote`）：best-effort
+3. **遠端 revoke**（除非 `--keep-remote`）：best-effort
    - 204 / 410：印 `[ok] device revoked at server` / `[ok] device already revoked at server`
    - 401 / 403 / network / 5xx：印 `[warn] remote revoke failed: <reason>; continuing local cleanup` 並**繼續**
 
-3. **keychain 清理**：`keychain.Delete(deviceID)`，`ErrNotFound` 視為已清；其他錯印 `[warn]` 繼續
+4. **keychain 清理**：`keychain.Delete(deviceID)`。
+   - `ErrNotFound`：視為已清，印 `[ok] keychain entry already absent` 繼續
+   - **其他錯誤**：印 `[error] keychain delete failed: <err>`，**exit 1**（local cleanup 失敗；token 可能仍可用）
 
-4. **檔案清理**：`os.RemoveAll(~/.caliber-agent/)`
+5. **檔案清理**：`os.RemoveAll(~/.caliber-agent/)`。失敗 → 印 `[error]` exit 1。
 
-5. **印最終清單**（合規守則要求 — anti-forensics 反向：透明可審）：
+6. **印最終清單**（合規守則要求 — anti-forensics 反向：透明可審）：
 
    ```
    Removed:
      ✓ remote device d_HxKp... (server: revoked at 2026-05-25T...)
      ✓ keychain entry tw.caliber.agent / d_HxKp...
-     ✓ ~/.caliber-agent/ (4 files, 12 KiB)
+     ✓ ~/.caliber-agent/ (5 files, 12 KiB)
    ```
 
-   若 step 1 失敗：
+   若 step 3 失敗：
 
    ```
    Partial:
      ✗ remote (failed: <reason>; revoke manually at <api_base_url>/dashboard/devices)
      ✓ keychain entry tw.caliber.agent / d_HxKp...
-     ✓ ~/.caliber-agent/ (4 files, 12 KiB)
+     ✓ ~/.caliber-agent/ (5 files, 12 KiB)
    ```
 
-退出碼：0 全部清理（含遠端 best-effort 失敗）/ 1 本地檔清理失敗 / 130 user cancel 或 non-TTY without `--yes`
+退出碼：
+- 0 — 全部清理（含遠端 best-effort 失敗，但 keychain + fs 成功）
+- 1 — **本地清理任一步失敗**（包含 daemon 仍在跑且無 `--force` / keychain delete 非 ErrNotFound 失敗 / RemoveAll 失敗）
+- 130 — user cancel 或 non-TTY without `--yes`
 
-### 3.7 `caliber-agent enroll <token>` 新 flag
+### 3.7 `caliber-agent run` 行為微調（為支援 F2 lockfile）
+
+`run` 啟動序列加入兩個新動作（不改變 user-visible CLI）：
+
+1. **取得 lockfile**：`MkdirAll(~/.caliber-agent/, 0o700)` + `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` + `syscall.Flock(fd, LOCK_EX|LOCK_NB)`。失敗（已有其他 `run` 持有）→ 印 `another caliber-agent run is already active` exit 1。
+2. **每 tick 開頭**：除既有 sentinel 檢查外，**新加** `os.Stat(~/.caliber-agent/config.toml)` 與 `os.Stat(~/.caliber-agent/.lock)`。若 `config.toml` 不在 → daemon 印 `[fatal] config removed; daemon exiting` exit 0；若 `.lock` 不在但 process 還活著（極端情境，例如 user 手動 `rm .lock`）→ 同樣 exit 0 避免「失去 lock 仍在跑」的混亂狀態。
+3. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，所以崩潰也不會留 stale lock。
+
+這把 F2 race condition 根除：
+- `uninstall` 默認偵測 running daemon → 阻擋
+- 即使 `--force` 後 daemon 仍在跑，最多到下個 tick（≤ 60s）就會發現 config.toml 不見 → 自我 exit
+- HTTPSink 記憶體裡的 token 仍可能送出**至多一次** tick 內已開始的 chunk（這是設計上的可接受視窗，不是 race）
+
+### 3.8 `caliber-agent enroll <token>` 新 flag
 
 新增 `--insecure` flag。預設拒絕 http:// scheme；`--insecure` 後允許並把 `insecure_transport = true` 寫進 config.toml。詳見 §6.2。
 
@@ -253,8 +288,9 @@ flags: --yes          跳過互動確認
 | 路徑 | Perm | 內容 | 寫入方 | 刪除方 |
 |---|---|---|---|---|
 | `~/.caliber-agent/paused` | 0o600 | 空檔（存在性 = 訊號） | `pause` | `resume` / `uninstall` |
+| `~/.caliber-agent/.lock` | 0o600 | 空檔 + `flock` 持有 | `run` 啟動（held during lifetime） | `uninstall`（process 死亡時 kernel 自動釋放 flock） |
 
-唯一新增的本地檔。其餘 PR1/PR2/PR3 既有檔不變：`config.toml`、`state.json`、`redaction-set.json`、`agent.log`。
+其餘 PR1/PR2/PR3 既有檔不變：`config.toml`、`state.json`、`redaction-set.json`、`agent.log`。
 
 ### 4.2 `config.toml` schema 變更
 
@@ -302,7 +338,8 @@ PR1/PR2/PR3 既存 `config.toml` 若：
 ├── state.json             # 0o600  watcher tick 寫
 ├── redaction-set.json     # 0o600  redaction-set fetch / cache 寫
 ├── agent.log              # 0o600  daemon 追加
-└── paused                 # 0o600  pause/resume 寫（可能不存在）
+├── paused                 # 0o600  pause/resume 寫（可能不存在）
+└── .lock                  # 0o600  run 啟動 flock 持有（可能不存在）
 ```
 
 `uninstall` 後該目錄 + keychain entry 不留任何檔案。
@@ -329,22 +366,53 @@ Authorization: Bearer cda_*
 
 無 request body。
 
-### 5.2 Auth pipeline（沿用 PR3 共用 helper）
+### 5.2 Auth pipeline（PR3 helper + 新增 allow-revoked 變體）
+
+**重要**：PR3 既有的 `resolveDeviceFromAuth` 在 `device.revokedAt != null` 時直接回 401 `device_revoked`（`apps/api/src/rest/ingestAuth.ts:63`）。如果 revoke endpoint 直接用它，DELETE 重複呼叫永遠到不了 §5.3 的 `rowCount=0 → 410` 分支，10× concurrent revoke 也會得到 1×204 + 9×401（不是 spec 承諾的 1×204 + 9×410）。
+
+修法：新增 `resolveDeviceFromAuthAllowRevoked` 變體，**只**對 revoke endpoint 使用。它驗 token 結構、key 撤銷狀態、device 存在性，但**接受** `deviceRevokedAt != null` 並把該事實回傳給 caller，由 caller 判斷該回 204 還是 410。
+
+```ts
+// apps/api/src/rest/ingestAuth.ts (extend; ingest 路徑不變)
+export interface ResolvedDeviceWithStatus extends ResolvedDevice {
+  alreadyRevoked: boolean;
+}
+
+export async function resolveDeviceFromAuthAllowRevoked(
+  db: Database,
+  env: ServerEnv,
+  authHeader: string | undefined,
+): Promise<
+  | { ok: true; device: ResolvedDeviceWithStatus }
+  | { ok: false; error: Exclude<AuthFailure, "device_revoked"> }
+> {
+  // 同 resolveDeviceFromAuth 邏輯，但移除 row.deviceRevokedAt !== null 那個 401 short-circuit；
+  // 改為把 alreadyRevoked = (row.deviceRevokedAt !== null) 透過 device 物件帶出去。
+  // device_inactive 仍是 401（status !== "active" 與 revoked 不同 — 例如管理員手動 freeze）。
+}
+```
 
 ```ts
 // apps/api/src/rest/devicesRevokeSelf.ts (new)
-import { resolveDeviceFromAuth } from "./ingestAuth";  // PR3 extracted
+import { resolveDeviceFromAuthAllowRevoked } from "./ingestAuth";
 
 fastify.delete("/v1/devices/me", async (req, reply) => {
-  const auth = await resolveDeviceFromAuth(req, fastify.db);
+  const auth = await resolveDeviceFromAuthAllowRevoked(
+    fastify.db, fastify.env, req.headers.authorization,
+  );
   if (!auth.ok) {
     return reply.code(401).send({ error: auth.error });
-    // auth.error ∈ {"invalid_token", "key_revoked", "device_revoked"}
+    // auth.error ∈ {"missing_token", "invalid_token", "key_revoked", "device_inactive", "server_misconfigured"}
+    // 注意：device_revoked 不在此 endpoint 的 401 set 內
   }
-  // auth.device, auth.userId, auth.orgId now available
+  if (auth.device.alreadyRevoked) {
+    return reply.code(410).send({ error: "device_already_revoked" });
+  }
   // ... see §5.3 ...
 });
 ```
+
+`POST /v1/ingest` 與 `GET /v1/redaction-set` 仍用既有 `resolveDeviceFromAuth`，**未改動**。
 
 ### 5.3 DB transaction
 
@@ -380,10 +448,12 @@ await tx.insert(auditLogs).values({
 
 | 狀態 | 回應 body | 場景 |
 |---|---|---|
-| 204 No Content | (empty) | 成功撤銷 |
+| 204 No Content | (empty) | 成功撤銷（第一次 DELETE） |
 | 410 Gone | `{"error":"device_already_revoked"}` | device 已被撤銷（idempotent；daemon 視為等同成功） |
-| 401 Unauthorized | `{"error":"invalid_token" \| "key_revoked" \| "device_revoked"}` | 沿用 PR3 三種 sentinel |
+| 401 Unauthorized | `{"error":"missing_token" \| "invalid_token" \| "key_revoked" \| "device_inactive"}` | **不含 `device_revoked`** — 已撤銷走 410 而非 401 |
 | 500 | `{"error":"internal"}` | DB 例外 |
+
+注意：401 set 從 ingest endpoint 的 5 種降到 4 種；少一個 `device_revoked`。這是本 endpoint 唯一允許「device 已撤銷狀態下仍可呼叫」的設計差異。
 
 ### 5.5 Daemon 端 `Client.RevokeSelf`
 
@@ -445,10 +515,18 @@ func ValidateAPIBaseURL(raw string, allowInsecure bool) error {
     if err != nil || u.Scheme == "" || u.Host == "" {
         return fmt.Errorf("invalid api_base_url: %q", raw)
     }
-    if u.Scheme != "https" && !allowInsecure {
-        return fmt.Errorf("api_base_url must be https:// (got %q); use --insecure to override", u.Scheme)
+    // 嚴格白名單：永遠允許 https；只有 --insecure 才額外允許 http。
+    // 拒絕 ftp / file / gopher / 自訂 scheme 等任何非 http(s) 形式。
+    if u.Scheme == "https" {
+        return nil
     }
-    return nil
+    if u.Scheme == "http" && allowInsecure {
+        return nil
+    }
+    if u.Scheme == "http" {
+        return fmt.Errorf("api_base_url uses http://; pass --insecure to allow (dev/local only)")
+    }
+    return fmt.Errorf("api_base_url must be https:// (got scheme %q)", u.Scheme)
 }
 ```
 
@@ -498,10 +576,70 @@ func (r *RedactionSet) Compile() error {
 - `MaxPatternCount = 100`：bundled 11 個；8× 寬餘
 - Server 64 KiB body cap 是外層保護；本層是內層保護
 
-策略：
+策略 — **兩種錯誤類型分離，且必須改既有 bootstrap + refresher**：
 
-- `len(Patterns) > MaxPatternCount`：整個 set 拒絕（return error），caller fallback 用 stale cache 或 bundled default
-- 個別 pattern 超過 `MaxRegexSrcLen`：走既有「per-pattern fault-tolerant」邏輯 — 該 pattern 跳過 + aggregate error 列出，其他 pattern 繼續使用
+```go
+// agent/redact/set.go (new sentinel)
+var ErrTooManyPatterns = errors.New("redact: pattern count exceeded MaxPatternCount")
+
+func (r *RedactionSet) Compile() error {
+    if len(r.Patterns) > MaxPatternCount {
+        // hard fail — 不要 compile 任何 pattern，避免 fail-open
+        return fmt.Errorf("%w: got %d limit %d", ErrTooManyPatterns, len(r.Patterns), MaxPatternCount)
+    }
+    // ... existing per-pattern compile，個別 RegexSrc 過長或語法錯誤走 aggregate error ...
+}
+```
+
+| 錯誤類型 | sentinel | caller 行為 |
+|---|---|---|
+| Count limit 超過 | `errors.Is(err, ErrTooManyPatterns)` | **set 不可用**：bootstrap fallback 至 stale cache → bundled default；refresher 保留現有 set 不取代 |
+| 個別 pattern 過長 / 語法錯 | aggregate error（非 sentinel） | **set 可用，壞 pattern 跳過**：bootstrap/refresher `[warn]` 後 `Set(set)` |
+
+**必須改既有程式碼**（這是 PR3 既有的 fail-open 源頭）：
+
+```go
+// agent/internal/cli/redactionset.go: BootstrapRedactionSet（既有 line 85-89 是 fail-open 源）
+// before:
+//     if err := set.Compile(); err != nil {
+//         logger.Printf("[warn] %v", err)
+//     }
+//     prov.Set(set)                       // <-- 這行對 ErrTooManyPatterns 是 fail-open
+//     _ = config.SaveRedactionSet(set)
+// after:
+if err := set.Compile(); err != nil {
+    if errors.Is(err, redact.ErrTooManyPatterns) {
+        logger.Printf("[error] fresh redaction-set rejected: %v; falling back", err)
+        // 同 fetch 失敗的 stale/default fallback 路徑
+        if hasCache {
+            _ = cached.Compile()
+            prov.Set(cached)
+            return prov, nil
+        }
+        prov.Set(redact.DefaultSet())
+        return prov, nil
+    }
+    logger.Printf("[warn] %v", err)        // per-pattern errors — set 仍可用
+}
+prov.Set(set)
+_ = config.SaveRedactionSet(set)
+
+// agent/internal/cli/run.go refresher goroutine 同樣處理：
+// ErrTooManyPatterns → 保留現有 setProvider.Current()，不取代；log [error]
+// 其他 Compile error → 既有 [warn] + Set(set) 行為不變
+```
+
+關鍵保證：**ErrTooManyPatterns 永遠不會讓 nil-Regex 的 set 取代既有 set**。若 daemon 啟動時 fresh fetch 撞 ErrTooManyPatterns 且無 cache，fallback 為 `redact.DefaultSet()`（bundled），絕不可能是 nil regex set。
+
+Regression tests（必須）：
+
+```
+TestBootstrap_FreshFetchTooManyPatterns_FallsBackToStale
+TestBootstrap_FreshFetchTooManyPatterns_NoCache_FallsBackToDefault
+TestRefresher_FreshFetchTooManyPatterns_KeepsCurrent
+TestRedactionSetCompile_TooManyPatterns_NoCompileMutation
+  // 斷言 Compile() 回 ErrTooManyPatterns 後 Patterns[i].Regex 全部仍是 nil 且 set 未被外部 caller 使用
+```
 
 ### 6.4 `--api-base-url` 限縮到 enroll only（W4）
 
@@ -649,9 +787,12 @@ user      CLI            Server           Keychain       FS
 
 | 場景 | 行為 |
 |---|---|
+| daemon 仍在跑、無 `--force` | 偵測 `.lock` → 拒絕 exit 1（早於 step 1） |
+| daemon 仍在跑、`--force` | `[warn]` 後繼續；daemon 在下個 tick 自我退出（§3.7） |
 | `--keep-remote` | 跳過 step 1；stdout `Skipped remote revoke (--keep-remote). Manually revoke at <api_base_url>/dashboard/devices.`；繼續 step 2 + 3 |
 | 遠端 401 / network / 5xx | step 1 印 `[warn]`；繼續 step 2 + 3；最終清單把 remote 行改為 `✗ remote (failed: ...)`；退出碼 0 |
-| keychain ErrNotFound | step 2 印 `[warn] keychain entry already absent`；繼續 step 3 |
+| keychain ErrNotFound | step 2 印 `[ok] keychain entry already absent`；繼續 step 3 |
+| keychain 非 ErrNotFound 失敗 | step 2 印 `[error]`；**exit 1**（token 可能仍可用，user 必須處理） |
 | `RemoveAll` 失敗 | step 3 印 `[error]`；退出碼 1 |
 | user 拒絕 confirm (`n`) | exit 130，0 side effect |
 | 未 enroll 就 uninstall | `config.Load() == ErrNotEnrolled` → 早期 exit 1 |
@@ -698,7 +839,7 @@ PR4 不新增 code；每子命令的對應：
 | `pause` | 成功（含重複） | IO 失敗（極罕見） | — | — |
 | `resume` | 成功（含未 pause） | IO 失敗 | — | — |
 | `status` | 成功 | 未 enroll | — | — |
-| `uninstall` | 全部清理（含遠端 best-effort 失敗） | 本地清理失敗 | — | user 取消 / non-TTY 無 `--yes` |
+| `uninstall` | 全部清理（含遠端 best-effort 失敗，keychain + fs 全成功） | running daemon 拒絕 / keychain 非 ErrNotFound 失敗 / RemoveAll 失敗 | — | user 取消 / non-TTY 無 `--yes` |
 
 ### 8.2 邊界情境
 
@@ -719,12 +860,14 @@ PR4 不新增 code；每子命令的對應：
 | 場景 | 退出碼 | 理由 |
 |---|---|---|
 | 全部 3 步成功 | 0 | 顯然 |
-| step 1 失敗（遠端）、step 2 + 3 成功 | **0** | 本地完全乾淨；user 看 stdout 警告知道要手動 revoke |
+| step 1 失敗（遠端）、step 2 + 3 成功 | **0** | 本地 token + 檔案乾淨；user 看 stdout 警告知道要手動 revoke |
 | step 1 + 2 成功、step 3 失敗（RemoveAll） | 1 | 本地殘留檔案，user 必須處理 |
-| step 1 成功、step 2 失敗（keychain） | **0** | 罕見；step 3 仍乾淨 |
+| step 1 成功、step 2 keychain ErrNotFound | **0** | 罕見；視為已清；step 3 仍乾淨 |
+| step 1 成功、step 2 keychain 非 ErrNotFound 失敗 | **1** | token 仍可能在本機；step 3 跳過；user 必須處理（避免 credential 被重用） |
+| daemon 仍在跑且無 `--force` | 1 | 早期拒絕；要 user 先停 daemon |
 | 未 enroll 就跑 uninstall | 1 | `ErrNotEnrolled` 早期 exit |
 
-**設計原則**：「本地清理成功 = uninstall 對 user 的承諾達成」。只有本地 RemoveAll 失敗才回 1。
+**設計原則修正**（vs 初版）：「本地清理成功 = uninstall 對 user 的承諾達成」**且 token 必須被消滅**。Keychain delete 是 token 消滅的唯一手段；非 ErrNotFound 失敗代表 token 可能仍可用，必須以 exit 1 警示 user。
 
 ### 8.4 API errors 對應
 
@@ -787,10 +930,16 @@ TestUninstall_HappyPath_AllThreeSteps
 TestUninstall_YesFlag_SkipsPrompt
 TestUninstall_KeepRemote_SkipsServer
 TestUninstall_RemoteFails_LocalStillCleaned_Exit0
-TestUninstall_KeychainNotFound_Continues
+TestUninstall_KeychainNotFound_Continues_Exit0
+TestUninstall_KeychainDeleteFails_Exit1                 # F4: token 殘留警示
 TestUninstall_LocalCleanupFails_Exit1
 TestUninstall_DeclinedConfirm_Exit130_NoSideEffect
 TestUninstall_NonTTY_NoYes_Exit130
+TestUninstall_RunningDaemon_Default_Exit1               # F2: lockfile detection
+TestUninstall_RunningDaemon_Force_Continues_WithWarn    # F2: --force 路徑
+
+TestRun_AcquireLock_FailsIfAlreadyHeld_Exit1            # F2: 不允許 concurrent run
+TestRun_TickDetectsConfigRemoved_ExitsCleanly           # F2: daemon 自我退出
 ```
 
 #### watcher 層
@@ -822,8 +971,12 @@ TestConfig_RejectsInconsistent_HTTPWithoutInsecure
 
 ```
 TestPatternCompile_RejectsOversized_KeepsOthers
-TestRedactionSetCompile_RejectsTooManyPatterns
-TestRedactionSetCompile_AtBoundary
+TestRedactionSetCompile_RejectsTooManyPatterns_ErrSentinel        # F3: ErrTooManyPatterns 必出
+TestRedactionSetCompile_TooManyPatterns_NoCompileMutation         # F3: 拒絕後 Regex 仍 nil；caller 必須走 fallback
+TestRedactionSetCompile_AtBoundary                                # exactly MaxPatternCount = ok
+TestBootstrap_FreshFetchTooManyPatterns_FallsBackToStale          # F3: bootstrap fallback 不接受 nil-regex set
+TestBootstrap_FreshFetchTooManyPatterns_NoCache_FallsBackToDefault
+TestRefresher_FreshFetchTooManyPatterns_KeepsCurrent              # F3: refresher 不取代
 ```
 
 #### api 層
@@ -839,15 +992,16 @@ TestRevokeSelf_NetworkError_Wrapped
 
 ### 9.3 Server-side 整合測試
 
-`apps/api/tests/integration/rest/devicesRevokeSelf.test.ts`，7 cases：
+`apps/api/tests/integration/rest/devicesRevokeSelf.test.ts`，8 cases：
 
-1. 200 happy path → 204 + DB row `revokedAt` 設值 + audit log 寫入
-2. 重複呼叫 → 第二次 410 device_already_revoked
+1. happy path → 204 + DB row `revokedAt` 設值 + audit log `device.self_revoked` 寫入
+2. 重複呼叫 → 第二次 410 device_already_revoked（**驗證 allow-revoked 變體不會回 401**）
 3. invalid token → 401 invalid_token
 4. revoked key → 401 key_revoked
-5. revoked device → 401 device_revoked
-6. ak_* token（非 cda_*）→ 401 invalid_token
-7. concurrent revoke（10× Promise.all）→ 1× 204 + 9× 410（與 #159 enrollment race 同 pattern）
+5. **revoked device → 410 device_already_revoked**（**不是** 401；驗證 allow-revoked 邏輯）
+6. inactive device (status='frozen' 等非 revoked 的非 active) → 401 device_inactive
+7. ak_* token（非 cda_*）→ 401 invalid_token
+8. concurrent revoke（10× Promise.all）→ 1× 204 + 9× 410（與 #159 enrollment race 同 pattern）
 
 Regression：
 
@@ -886,9 +1040,11 @@ go test ./... -race
 ./scripts/coverage.sh                       # ≥ 80% gate
 
 cd ../apps/api
-pnpm exec vitest run tests/integration/rest/devicesRevokeSelf.test.ts
-pnpm exec vitest run tests/integration/rest/devicesEnroll.test.ts   # regression
-pnpm exec vitest run tests/integration/rest/ingest.test.ts          # regression
+# Integration suite excludes itself from default `pnpm test` via vitest.config.ts:7;
+# must use the dedicated integration config (mirrors `pnpm test:integration` script).
+pnpm exec vitest run --config vitest.integration.config.ts tests/integration/rest/devicesRevokeSelf.test.ts
+pnpm exec vitest run --config vitest.integration.config.ts tests/integration/rest/devicesEnroll.test.ts   # regression
+pnpm exec vitest run --config vitest.integration.config.ts tests/integration/rest/ingest.test.ts          # regression
 pnpm -r build
 ```
 
@@ -915,7 +1071,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 | `pause` | — | sentinel-based、idempotent |
 | `resume` | — | 同上反向 |
 | `status` | flag `--json` | **零網路呼叫**；human + JSON 兩種輸出 |
-| `uninstall` | flags `--yes` `--keep-remote` | 三步順序：remote → keychain → fs；本地清成功即 exit 0 |
+| `uninstall` | flags `--yes` `--keep-remote` `--force` | 偵測 running daemon 拒絕（除 `--force`）；三步順序：remote → keychain → fs；keychain delete 非 ErrNotFound 失敗 → exit 1 |
 | `enroll` 新 flag | `--insecure` | 寫入 `insecure_transport = true` 進 config.toml |
 
 ### 10.3 Agent 既有 surface 變更
@@ -932,6 +1088,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 | Path | 凍結點 |
 |---|---|
 | `~/.caliber-agent/paused` | 存在 = paused；空檔；perm 0o600 |
+| `~/.caliber-agent/.lock` | `run` 持有 flock；存在不代表 daemon 還活著（kernel 在 process 死亡釋放 flock，但檔案可能留下 — 用 `flock LOCK_NB` 探測活性，不是用 stat）；perm 0o600 |
 | `~/.caliber-agent/config.toml` | 新增 `insecure_transport bool`（預設 false，缺失視為 false） |
 
 ### 10.5 Audit log action
@@ -964,7 +1121,7 @@ Server side 不強制這些上限（保留彈性），但 per-org redaction set 
 | **R1.** `--insecure` 變成預設：使用者一次 enroll 用了 `--insecure` 後忘了，h4 stack 升級到 https 後 daemon 仍走 http | `run` 啟動每次印 `[warn] insecure transport`；`status` 輸出 `api_base_url: http://... (insecure)`；README 文件化 |
 | **R2.** EvalSymlinks 在 macOS 上慢：每 tick 對每個 ref 做 stat + EvalSymlinks 累積開銷 | Loop 內 cwdCache 已存在（PR2）；PR4 擴展 cache 至 `(rawPath → realPath)`，每 path 一次 EvalSymlinks |
 | **R3.** PR1 既有 config.toml 含未正規化路徑：升級到 PR4 後監看不到原本目錄 | 不 retro-normalise；user 透過 `remove-path` + `add-path` 遷移；README + CHANGELOG 提醒 |
-| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall | `RemoveAll(~/.caliber-agent/)` 後 daemon 下個 tick 嘗試 `SaveState` 會失敗 → `[error] save state` log → daemon 自然 exit；README 寫明 uninstall 前先停 run |
+| **R4.** `uninstall` 與 `run` 同時執行：terminal A 跑 daemon、terminal B 跑 uninstall。原 mitigation（依賴 SaveState 失敗自然退出）不成立 — `SaveState` 開頭就 `MkdirAll` 把目錄重建，loop 對 save 失敗只 log + 繼續，HTTPSink 持有記憶體裡的 token 仍能上傳 | **lockfile + 每 tick config 檢查**（§3.6 + §3.7）：`run` 啟動取 `~/.caliber-agent/.lock`；`uninstall` 偵測 lock → 默認拒絕 exit 1，需 `--force` 才繼續；daemon 每 tick 額外 stat config.toml + .lock，缺失即 `[fatal] exit 0`。最大 race window ≤ 1 tick interval (60s)，HTTPSink 已開始的 chunk 可能送出至多一次，這是設計可接受窗口 |
 | **R5.** server `device.self_revoked` audit action 名稱與既有 `device.revoked` 重疊：admin 看不出差別 | 用不同 action type；audit log UI（Phase 4）顯示時兩者各有圖示。本 PR 只負責新增 action enum |
 | **R6.** `--keep-remote` 變成劫持 backdoor：惡意腳本下 `uninstall --keep-remote` 後 server-side device 仍存活 | token 已在 keychain 被刪 → 本機無法重用；server-side device 不主動 revoke 是已知 trade-off（user 須到 web UI 處理）；stdout 強烈提示 |
 | **R7.** `add-path` / `uninstall` 在 CI / 腳本下卡住 | `isatty(stdin) == false` 時不嘗試讀 stdin，直接印 `non-interactive shell detected; pass --yes to confirm` exit 130；`echo y \| caliber-agent ...` 也會被拒，明確要求腳本作者加 `--yes` |
