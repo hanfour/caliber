@@ -510,33 +510,41 @@ flags: --yes          跳過互動確認
        - line 83 (initial config write, root 尚未建立)：`config.Save(cfg)` → `config.SaveConfigInitial(cfg)`
        - line 119 (final include_paths write, root 已建立)：`config.Save(cfg)` → `config.SaveConfig(cfg)`（runtime 版本走 precheck，但 enroll 過程中 sentinel 不可能存在，precheck 必過）
 
-   **First-write-aware precheck（R19-F1 — 解 enroll TOCTOU）**：runEnroll preflight 與 SaveConfigInitial 之間有時間窗口（API call + keychain write），uninstall 若在此窗口寫 sentinel + 刪 config.toml，純 enroll preflight 擋不下。SaveConfigInitial 內部對「root 已存在」狀態再做一次 sentinel + partial-cleanup 檢查：
+   **First-write-aware precheck（R19-F1 / R20-F1 — 解 enroll TOCTOU）**：runEnroll preflight 與 SaveConfigInitial 之間有時間窗口（API call + keychain write），uninstall 若在此窗口寫 sentinel 或走到 (h)（sentinel 已刪、config.toml 已刪、root 還在），純 enroll preflight 擋不下。SaveConfigInitial 內部對「root 已存在」狀態完整重做 enroll preflight 的**兩條** check：
 
    ```go
    // agent/internal/config/config.go (SaveConfigInitial)
+   var ErrPartialUninstall = errors.New("config: partial uninstall detected (root exists, config.toml missing)")
+
    func SaveConfigInitial(c *Config) error {
        root := RootDir()
        if info, err := os.Stat(root); err == nil && info.IsDir() {
-           // root exists — re-run safety checks (catches preflight→here window)
+           // root exists — re-run BOTH preflight checks (catches preflight→here window)
+           // (1) sentinel — fail-closed
            if _, sErr := os.Stat(filepath.Join(root, ".uninstalling")); sErr == nil {
                return ErrUninstallInProgress
            } else if !errors.Is(sErr, fs.ErrNotExist) {
                return fmt.Errorf("%w (sentinel stat: %v; fail-closed)", ErrUninstallInProgress, sErr)
+           }
+           // (2) partial-cleanup — root 在但 config.toml 不在 = ordered_delete (h) 已過
+           if _, cErr := os.Stat(filepath.Join(root, "config.toml")); errors.Is(cErr, fs.ErrNotExist) {
+               return ErrPartialUninstall
            }
        } else if err == nil {
            return fmt.Errorf("config: %s exists but is not a directory", root)
        } else if !errors.Is(err, fs.ErrNotExist) {
            return fmt.Errorf("config: stat root: %w", err)
        }
-       // root 不存在（first-enroll）或 root 存在且 sentinel 不在 — 安全繼續
+       // root 不存在（first-enroll）— sentinel + config.toml 不可能存在，跳過 check 安全繼續
+       // 或 root 存在、兩條 check 都過（既有 enrolled 走 --force 路徑）
        if err := os.MkdirAll(root, 0o700); err != nil { ... }
        // ... CreateTemp + write + Rename atomic ...
    }
    ```
 
-   殘餘 race window：SaveConfigInitial 內部 sentinel stat 與 Rename 之間。Rename 本身 atomic，且這個窗口縮到毫秒級不可能用 user-level 操作觸發。可接受。
+   殘餘 race window：SaveConfigInitial 內部 stat 與 Rename 之間。Rename 本身 atomic，且這個窗口縮到毫秒級不可能用 user-level 操作觸發。可接受。
 
-   caller 處理：runEnroll 收到 `ErrUninstallInProgress` from SaveConfigInitial 仍 return exit 1（同 R17 preflight 失敗）。
+   caller 處理：runEnroll 收到 `ErrUninstallInProgress` 或 `ErrPartialUninstall` from SaveConfigInitial 仍 return exit 1（同 R17/R18 preflight 失敗訊息）。
 
    **為什麼必須檢查 config.toml**（解 (h)→(i) 視窗 race）：ordered_delete (g) 刪 config.toml、(h) 刪 sentinel、(i) rmdir。如果 in-flight SendChunk 在 (h) 完成後返回，看到 sentinel 不在、root 還在 → 沒有 config.toml 那條的話會誤判 daemon 仍可 SaveState → 違反契約。檢查 config.toml 把這個 (h)→(i) 視窗也擋下。
 
@@ -600,7 +608,10 @@ flags: --yes          跳過互動確認
 
 新增 `--insecure` flag。預設拒絕 http:// scheme；`--insecure` 後允許並把 `insecure_transport = true` 寫進 config.toml。詳見 §6.2。
 
-**Enroll-time sentinel preflight（R17-F1）**：`SaveConfigInitial` 為了支援 first-time write 故意 bypass `precheckRuntime`（保留 `MkdirAll`、不檢查 sentinel）。但這留下漏洞：uninstall 進行中（特別是 (g) 完成之後、(i) 之前的視窗），若 user 在另一 terminal 跑 `caliber-agent enroll <token>` 或 `enroll --force`，會建立新的 root + config.toml，違反 uninstall 契約。
+**Enroll-time sentinel preflight（R17-F1 / R18-F1）**：`SaveConfigInitial` 為了支援 first-time write 不走完整 `precheckRuntime`（仍保留 `MkdirAll`），但**會在 root exists 時做 first-write-aware sentinel + partial-uninstall checks**（見 §6.2 SaveConfigInitial snippet）。因此 enroll 兩道防線：
+
+1. **runEnroll early preflight**（本節） — 早期、便宜，在 API call / keychain write 之前阻擋已可見的 uninstall
+2. **SaveConfigInitial 內部 first-write-aware precheck**（§6.2） — 即使 preflight 過了之後 uninstall 才開始，仍能在最後一刻拒絕
 
 修補：`runEnroll`（`cli/enroll.go`）在做 API call / keychain write / SaveConfigInitial **之前**做兩條 preflight check：
 
@@ -1420,6 +1431,7 @@ TestEnroll_SentinelStatFails_FailsClosed                # R17-F1: stat 非 ErrNo
 TestEnroll_PartialCleanup_RootExistsConfigMissing_Exit1 # R18-F1: (h)→(i) 視窗拒絕 enroll，不重建 config.toml
 TestEnroll_RootMissing_FirstEnrollHappyPath             # R18-F1: 全乾淨狀態仍能正常 enroll
 TestSaveConfigInitial_SentinelAppearsAfterPreflight_Reject # R19-F1: 模擬 preflight 過了之後寫入 sentinel；SaveConfigInitial 內部 stat 仍會拒絕
+TestSaveConfigInitial_RootExistsConfigMissing_RejectAfterPreflight  # R20-F1: ordered_delete (h) 已過、root 還在的窗口；SaveConfigInitial 必須拒絕
 TestSaveConfigInitial_RootMissing_NoSentinelCheckNeeded    # R19-F1: root 不存在時 first-enroll 路徑不查 sentinel（不可能存在）
 TestSaveConfigInitial_RootIsFileNotDir_Error               # R19-F1: root 路徑是檔案而非目錄 → error
 ```
