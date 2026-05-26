@@ -286,7 +286,19 @@ flags: --yes          跳過互動確認
    - Stat `config.toml` → OK
    - 進到 step 2 OpenFile `.lock` → **違反「uninstall 後該目錄不留檔」契約**
 
-   為什麼 config.toml 倒數第二（**不**第一）：retry 友善 — 若 cleanup 中途失敗（任一 step a-f）且 sentinel 還原，user 重跑 `uninstall` 時 config.toml 仍存在，pre-flight 通過、重走 cleanup；如果 config.toml 在 step a 就刪，重跑會撞 ErrNotEnrolled 早期退出，user 無法繼續完成 cleanup。
+   為什麼 config.toml 倒數第二（**不**第一）：retry 友善 — 若 cleanup 中途失敗於 step (a)-(e) 且 sentinel 還原成功，user 重跑 `uninstall` 時 config.toml 仍存在，pre-flight 通過、重走 cleanup；如果 config.toml 在 step a 就刪，重跑會撞 ErrNotEnrolled 早期退出，user 無法繼續完成 cleanup。
+
+   **retry 適用範圍（重要邊界）**：
+
+   | 失敗點 | 可重跑 `uninstall`？ | 補救 |
+   |---|---|---|
+   | (a)-(e) 任一 step 出現非 ErrNotExist 錯誤 | ✓ | 還原 sentinel + exit 1 → user 重跑 `uninstall`，pre-flight 看到 config.toml + 寫新 sentinel + 從頭走 cleanup |
+   | (f) config.toml 刪除失敗 | ✓ | 還原 sentinel + exit 1 → 同上 |
+   | (f) 成功之後、(g) 之前 SIGINT / crash | ✗ | config.toml 已不在、sentinel 還在 → 重跑撞 pre-flight 第三條 ErrNotEnrolled → 須手動 `rm -rf ~/.caliber-agent/` 並到 web UI revoke device（見 §8.2） |
+   | (g) sentinel 刪除失敗 | ✗ | sentinel 已刪不重寫；其他檔已不在 → 須手動 rmdir |
+   | (h) rmdir 失敗 | ✗ | 空 dir 殘留 → 印錯誤訊息要 user 手動 `rmdir ~/.caliber-agent/` |
+
+   retry-friendliness 涵蓋的是「handled errors during cleanup steps (a)-(f)」，**不**涵蓋 (f) 之後的中斷。中斷後續手動補救流程已於 §8.2 列出。
 
    ordered delete 保證的不變條件（任何時刻 `.uninstalling` 與 `config.toml` 的狀態組合）：
    - (a)-(e) 期間：sentinel 在、config 在 → 並發 run/pause 看到 sentinel 立即退出
@@ -990,7 +1002,7 @@ user      CLI            Server      Keychain    FS
  |         |------------------------------>|       |
  |         |       ok                     |       |
  |         |<------------------------------|       |
- |         | ordered delete: config.toml→state→...→.uninstalling→rmdir
+ |         | ordered_delete: state/redaction-set/log/paused/.lock (optional, ErrNotExist OK) → config.toml → .uninstalling → rmdir
  |         |---------------------------------------|------>|
  |         |       ok                              |       |
  |         |<--------------------------------------|-------|
@@ -1019,7 +1031,9 @@ user      CLI            Server      Keychain    FS
 | 遠端 401 / network / 5xx | step 4 印 `[warn]`；繼續 step 5 + 6；最終清單把 remote 行改為 `✗ remote (failed: ...)`；退出碼 0 |
 | keychain ErrNotFound | step 5 印 `[ok] keychain entry already absent`；繼續 step 6 |
 | keychain 非 ErrNotFound 失敗 | step 5 印 `[error]`；`os.Remove(.uninstalling)` 還原；**exit 1**（token 可能仍可用） |
-| ordered delete 失敗 | step 6 印 `[error]`；`os.Remove(.uninstalling)` 還原；退出碼 1 |
+| ordered_delete (a)-(f) 失敗 | step 6 印 `[error]`；`os.Remove(.uninstalling)` **還原**（user 可重跑）；退出碼 1 |
+| ordered_delete (g) sentinel 刪除失敗 | 其他檔已不在；sentinel **不還原**；退出碼 1 |
+| ordered_delete (h) rmdir 失敗 | 空 dir 殘留；sentinel 已刪不還原；印 `manually 'rmdir ~/.caliber-agent/' to finish`；退出碼 1 |
 | user 拒絕 confirm (`n`) | exit 130；**sentinel 尚未寫**，0 side effect；無還原動作 |
 | non-TTY 無 `--yes` | 同上：early exit 130，0 side effect |
 | 未 enroll 就 uninstall | `config.Load() == ErrNotEnrolled` → 早期 exit 1（未 probe、未寫 sentinel） |
@@ -1041,7 +1055,7 @@ resume
 Ctrl+C
   → daemon graceful exit 130
 uninstall
-  → DELETE /v1/devices/me → keychain.Delete → ordered delete (config.toml first, .uninstalling last, rmdir)
+  → DELETE /v1/devices/me → keychain.Delete → ordered_delete (optional artifacts first, config.toml second-to-last, .uninstalling last, rmdir)
 ```
 
 ## 8. Error Handling
@@ -1096,7 +1110,9 @@ step 名稱同 §8.2。
 | `remote_revoke` 失敗、`keychain_delete` + `ordered_delete` 成功 | **0** | 本地 token + 檔案乾淨；user 看 stdout 警告知道要手動 revoke |
 | `remote_revoke` 成功、`keychain_delete` ErrNotFound、`ordered_delete` 成功 | **0** | 罕見；視為已清；`ordered_delete` 仍乾淨 |
 | `remote_revoke` 成功、`keychain_delete` 非 ErrNotFound 失敗 | **1** | token 仍可能在本機；`ordered_delete` 跳過；user 必須處理（避免 credential 被重用）；sentinel 還原 |
-| `remote_revoke` + `keychain_delete` 成功、`ordered_delete` 失敗 | 1 | 本地殘留檔案；sentinel 還原 |
+| `remote_revoke` + `keychain_delete` 成功、`ordered_delete` (a)-(f) 失敗 | 1 | 本地殘留檔案；sentinel **還原**（user 可重跑 uninstall） |
+| `remote_revoke` + `keychain_delete` 成功、`ordered_delete` (g) sentinel 刪除失敗 | 1 | 其他檔已不在；sentinel **不還原**（重寫沒意義） |
+| `remote_revoke` + `keychain_delete` 成功、`ordered_delete` (h) rmdir 失敗 | 1 | 空 dir 殘留；sentinel **已刪、不還原**；user 手動 `rmdir` |
 | daemon 仍在跑且無 `--force`（`probe` 階段拒絕） | 1 | 早期拒絕；要 user 先停 daemon；**未寫 sentinel** |
 | user 在 `prompt` 階段選 `n` | 130 | **未寫 sentinel**，0 side effect |
 | 未 enroll 就跑 uninstall | 1 | `ErrNotEnrolled` 早於 `probe` 退出 |
@@ -1332,7 +1348,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 | `pause` | — | sentinel-based、idempotent |
 | `resume` | — | 同上反向 |
 | `status` | flag `--json` | **零網路呼叫**；human + JSON 兩種輸出 |
-| `uninstall` | flags `--yes` `--keep-remote` `--force` | 偵測 running daemon 拒絕（除 `--force`）；完整順序：**probe lock (no-create) → prompt + 確認 → 寫 `.uninstalling` sentinel → remote revoke → keychain delete → ordered delete（optional → config.toml → .uninstalling → rmdir）→ 印清單**；keychain delete 非 ErrNotFound 失敗 → exit 1；user cancel 是真的 0 side effect；invariant：sentinel 不在時 config.toml 也一定不在 |
+| `uninstall` | flags `--yes` `--keep-remote` `--force` | 偵測 running daemon 拒絕（除 `--force`）；完整順序：**probe lock (no-create) → prompt + 確認 → 寫 `.uninstalling` sentinel → remote revoke → keychain delete → ordered_delete（optional artifacts first, config.toml second-to-last, .uninstalling last, rmdir）→ 印清單**；keychain delete 非 ErrNotFound 失敗 → exit 1；user cancel 是真的 0 side effect；invariant：sentinel 不在時 config.toml 也一定不在 |
 | `enroll` 新 flag | `--insecure` | 寫入 `insecure_transport = true` 進 config.toml |
 
 ### 10.3 Agent 既有 surface 變更
