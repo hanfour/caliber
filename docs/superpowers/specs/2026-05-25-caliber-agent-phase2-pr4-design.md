@@ -65,6 +65,7 @@ PR4 完成後 caliber-agent 對齊以下違規攔截類別：
 | agent config | SaveState / SaveRedactionSet 移除 MkdirAll、加 precheckRuntime（R14-F1） | 既有函式改寫 | `agent/internal/config/{state,redactionset}.go` |
 | agent config | SaveConfig 拆成 SaveConfigInitial（enroll 用，保留 MkdirAll）+ SaveConfig（runtime 用，precheck + 不 MkdirAll）（R15-F2） | 既有函式拆分 | `agent/internal/config/config.go` |
 | agent wizard | enroll wizard 兩處呼叫切換：first write 用 SaveConfigInitial、final include_paths 寫入用 SaveConfig（R15-F2 / R16-F2） | 既有 wizard 呼叫點切換 | `agent/internal/wizard/enroll.go:83,119` |
+| agent CLI | enroll 早期 sentinel preflight（R17-F1） | runEnroll 開頭加 stat 檢查、failr-closed | `agent/internal/cli/enroll.go` |
 | agent watcher | loop SaveState error typed dispatch — sentinel 類退出、IO 類 log+continue（R14-F1 / R15-F3） | error 處理升級為 typed switch | `agent/watcher/loop.go:136,169,189`、`agent/internal/cli/run.go` |
 | agent CLI | run lockfile acquire + PID 寫入（F2 + R2-F4） | 啟動 flock 持有 + PID 寫入 | `agent/internal/cli/run.go`、新 `agent/internal/lockfile/lockfile.go`（或 darwin-only `lockfile_darwin.go`） |
 | agent CLI | uninstall 寫 `.uninstalling` sentinel + 失敗時還原（R3-F2） | 新 sentinel 機制 | `agent/internal/cli/uninstall.go` |
@@ -567,9 +568,34 @@ flags: --yes          跳過互動確認
 | `uninstall` cleanup (h)-(i) 之間（sentinel 也剛刪、dir 空） | 0 | sentinel 已不在但 config.toml 也已不在 → pre-flight `config.toml ErrNotExist` exit 1；不建 `.lock` |
 | `uninstall` cleanup 完成後 user 跑 `run` | 0 | dir 不存在 → pre-flight 立即 exit 1 not enrolled |
 
-### 3.8 `caliber-agent enroll <token>` 新 flag
+### 3.8 `caliber-agent enroll <token>` 新 flag + sentinel preflight
 
 新增 `--insecure` flag。預設拒絕 http:// scheme；`--insecure` 後允許並把 `insecure_transport = true` 寫進 config.toml。詳見 §6.2。
+
+**Enroll-time sentinel preflight（R17-F1）**：`SaveConfigInitial` 為了支援 first-time write 故意 bypass `precheckRuntime`（保留 `MkdirAll`、不檢查 sentinel）。但這留下漏洞：uninstall 進行中（特別是 (g) 完成之後、(i) 之前的視窗），若 user 在另一 terminal 跑 `caliber-agent enroll <token>` 或 `enroll --force`，會建立新的 root + config.toml，違反 uninstall 契約。
+
+修補：`runEnroll`（`cli/enroll.go`）在做 API call / keychain write / SaveConfigInitial **之前**先檢查 `~/.caliber-agent/.uninstalling`（fail-closed）：
+
+```go
+// agent/internal/cli/enroll.go (revised early in runEnroll, before config.Load)
+sentinelPath := filepath.Join(config.RootDir(), ".uninstalling")
+if _, err := os.Stat(sentinelPath); err == nil {
+    return &ExitError{
+        Code: 1,
+        Err:  errors.New("[fatal] uninstall in progress; refusing to enroll"),
+    }
+} else if !errors.Is(err, fs.ErrNotExist) {
+    return &ExitError{
+        Code: 1,
+        Err:  fmt.Errorf("[fatal] cannot stat uninstall sentinel (%v); failing closed", err),
+    }
+}
+// existing logic continues: config.Load() / --force handling / API call / SaveConfigInitial...
+```
+
+順序：sentinel check 必須在 API call / keychain write 之前 — 否則 enroll 會先打 server 然後才發現該拒絕。
+
+退出碼變更：enroll 新增 exit 1 場景「uninstall in progress」。原 exit 1 場景（already enrolled without --force、invalid URL、API failure 等）保持不變。
 
 ## 4. File State Changes
 
@@ -1130,7 +1156,7 @@ user      CLI            Server      Keychain    FS
 
 1. probe 不建立 `.lock`（無 O_CREATE）— user cancel 不留檔
 2. prompt 在 sentinel 寫入之前 — user cancel 是真的 0 side effect（daemon 完全不受影響）
-3. sentinel 在 cleanup 啟動前 — running daemon 立即看到並退出，後續 remote/keychain/fs 期間 daemon 不再上傳
+3. sentinel 在 cleanup 啟動前 — running daemon 在下一個 stop-condition check point（tick 開頭 / per-SendChunk / per-Save\*）看到並退出。**最多 1 個 in-flight chunk** 可能在 stat 與 SendChunk 之間已開始送出（見 §3.7 race window 表 + R4 mitigation），後續 remote/keychain/fs 期間 daemon 已停止
 4. 遠端先：用 keychain 內的 token 認證，必須在 keychain 刪除前完成
 5. keychain 再刪：失去這把鑰匙後本機不能再呼叫 server
 6. 最後刪檔：用 ordered_delete（**不**用 `RemoveAll` — 順序不可預期會造成「sentinel 先刪、config 還在」的 race，見 §3.6 step 6）；optional artifacts (state / redaction-set / agent.log / paused / .lock) 先刪且 ErrNotExist 忽略 → tmp glob cleanup (`.config.toml.*` / `.state.json.*` / `.redaction-set.json.*` atomic-writer 殘檔) → `config.toml` 倒數第二刪 → `.uninstalling` 最後刪 → rmdir。設計 invariant：「sentinel 不在 & config 在」這個組合永遠不會發生
@@ -1340,6 +1366,9 @@ TestRun_SaveStateSentinelError_DaemonExitsCleanly       # R14-F1 + R15-F3: typed
 TestRun_SaveStateIOError_DaemonContinues                # R15-F3: non-sentinel IO error → log + continue（既有 PR2 行為）
 TestSaveConfigInitial_CreatesDirWhenAbsent              # R15-F2: enroll first-write happy path
 TestSaveConfig_RefusesWriteWhenDirRemoved               # R15-F2: runtime SaveConfig 走 precheck
+TestEnroll_SentinelPresent_Exit1_NoAPICall              # R17-F1: 拒絕 enroll 且不打 server
+TestEnroll_SentinelPresent_Exit1_NoConfigWritten        # R17-F1: 拒絕後 config.toml 仍不存在
+TestEnroll_SentinelStatFails_FailsClosed                # R17-F1: stat 非 ErrNotExist → 拒絕
 ```
 
 #### watcher 層
