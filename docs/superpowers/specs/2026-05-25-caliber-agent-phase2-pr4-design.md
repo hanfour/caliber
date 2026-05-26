@@ -65,7 +65,7 @@ PR4 完成後 caliber-agent 對齊以下違規攔截類別：
 | agent config | SaveState / SaveRedactionSet 移除 MkdirAll、加 precheckRuntime（R14-F1） | 既有函式改寫 | `agent/internal/config/{state,redactionset}.go` |
 | agent config | SaveConfig 拆成 SaveConfigInitial（enroll 用，保留 MkdirAll）+ SaveConfig（runtime 用，precheck + 不 MkdirAll）（R15-F2） | 既有函式拆分 | `agent/internal/config/config.go` |
 | agent wizard | enroll wizard 兩處呼叫切換：first write 用 SaveConfigInitial、final include_paths 寫入用 SaveConfig（R15-F2 / R16-F2） | 既有 wizard 呼叫點切換 | `agent/internal/wizard/enroll.go:83,119` |
-| agent CLI | enroll 早期 sentinel preflight（R17-F1） | runEnroll 開頭加 stat 檢查、failr-closed | `agent/internal/cli/enroll.go` |
+| agent CLI | enroll 早期 sentinel + partial-cleanup preflight（R17-F1 / R18-F1） | runEnroll 開頭加兩條 stat 檢查、fail-closed | `agent/internal/cli/enroll.go` |
 | agent watcher | loop SaveState error typed dispatch — sentinel 類退出、IO 類 log+continue（R14-F1 / R15-F3） | error 處理升級為 typed switch | `agent/watcher/loop.go:136,169,189`、`agent/internal/cli/run.go` |
 | agent CLI | run lockfile acquire + PID 寫入（F2 + R2-F4） | 啟動 flock 持有 + PID 寫入 | `agent/internal/cli/run.go`、新 `agent/internal/lockfile/lockfile.go`（或 darwin-only `lockfile_darwin.go`） |
 | agent CLI | uninstall 寫 `.uninstalling` sentinel + 失敗時還原（R3-F2） | 新 sentinel 機制 | `agent/internal/cli/uninstall.go` |
@@ -574,12 +574,14 @@ flags: --yes          跳過互動確認
 
 **Enroll-time sentinel preflight（R17-F1）**：`SaveConfigInitial` 為了支援 first-time write 故意 bypass `precheckRuntime`（保留 `MkdirAll`、不檢查 sentinel）。但這留下漏洞：uninstall 進行中（特別是 (g) 完成之後、(i) 之前的視窗），若 user 在另一 terminal 跑 `caliber-agent enroll <token>` 或 `enroll --force`，會建立新的 root + config.toml，違反 uninstall 契約。
 
-修補：`runEnroll`（`cli/enroll.go`）在做 API call / keychain write / SaveConfigInitial **之前**先檢查 `~/.caliber-agent/.uninstalling`（fail-closed）：
+修補：`runEnroll`（`cli/enroll.go`）在做 API call / keychain write / SaveConfigInitial **之前**做兩條 preflight check：
 
 ```go
 // agent/internal/cli/enroll.go (revised early in runEnroll, before config.Load)
-sentinelPath := filepath.Join(config.RootDir(), ".uninstalling")
-if _, err := os.Stat(sentinelPath); err == nil {
+root := config.RootDir()
+
+// (1) sentinel check — fail-closed
+if _, err := os.Stat(filepath.Join(root, ".uninstalling")); err == nil {
     return &ExitError{
         Code: 1,
         Err:  errors.New("[fatal] uninstall in progress; refusing to enroll"),
@@ -590,12 +592,30 @@ if _, err := os.Stat(sentinelPath); err == nil {
         Err:  fmt.Errorf("[fatal] cannot stat uninstall sentinel (%v); failing closed", err),
     }
 }
+
+// (2) partial-cleanup check (R18-F1) — root exists 但 config.toml 不存在 = ordered_delete
+//     已過 (h)（sentinel 也已刪）但 (i) 未完成，這個視窗 enroll 不該重建 config.toml
+if rootInfo, rErr := os.Stat(root); rErr == nil && rootInfo.IsDir() {
+    if _, cErr := os.Stat(filepath.Join(root, "config.toml")); errors.Is(cErr, fs.ErrNotExist) {
+        return &ExitError{
+            Code: 1,
+            Err:  errors.New("[fatal] partial uninstall detected (root exists, config.toml missing); manually 'rm -rf ~/.caliber-agent/' then retry enroll"),
+        }
+    }
+}
+
 // existing logic continues: config.Load() / --force handling / API call / SaveConfigInitial...
 ```
 
-順序：sentinel check 必須在 API call / keychain write 之前 — 否則 enroll 會先打 server 然後才發現該拒絕。
+兩條合起來涵蓋 uninstall 全週期：
 
-退出碼變更：enroll 新增 exit 1 場景「uninstall in progress」。原 exit 1 場景（already enrolled without --force、invalid URL、API failure 等）保持不變。
+- sentinel exists（cleanup (c)-(g)）→ check 1 命中
+- (h) 完成（sentinel 已刪、config.toml 已刪、root 還在）→ check 2 命中
+- (i) 完成（root 也已刪）→ root stat ErrNotExist → 視為 first-enroll happy path
+
+順序：兩條都必須在 API call / keychain write 之前。
+
+退出碼變更：enroll 新增兩個 exit 1 場景「uninstall in progress」與「partial uninstall detected」。原 exit 1 場景（already enrolled without --force、invalid URL、API failure 等）保持不變。
 
 ## 4. File State Changes
 
@@ -1369,6 +1389,8 @@ TestSaveConfig_RefusesWriteWhenDirRemoved               # R15-F2: runtime SaveCo
 TestEnroll_SentinelPresent_Exit1_NoAPICall              # R17-F1: 拒絕 enroll 且不打 server
 TestEnroll_SentinelPresent_Exit1_NoConfigWritten        # R17-F1: 拒絕後 config.toml 仍不存在
 TestEnroll_SentinelStatFails_FailsClosed                # R17-F1: stat 非 ErrNotExist → 拒絕
+TestEnroll_PartialCleanup_RootExistsConfigMissing_Exit1 # R18-F1: (h)→(i) 視窗拒絕 enroll，不重建 config.toml
+TestEnroll_RootMissing_FirstEnrollHappyPath             # R18-F1: 全乾淨狀態仍能正常 enroll
 ```
 
 #### watcher 層
