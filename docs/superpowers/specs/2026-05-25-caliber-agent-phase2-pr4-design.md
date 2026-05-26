@@ -292,11 +292,38 @@ flags: --yes          跳過互動確認
    - 成功後 `fmt.Fprintf(fd, "%d\n", os.Getpid())` 寫入自己的 PID，供 `uninstall` 偵測時讀取顯示
    - **持有 fd 到 process exit**
 
-2. **Startup-time sentinel check（acquire lock 後立即，所有 network/IO 動作之前）**：
-   - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → `[fatal] uninstall in progress; aborting startup` exit 0
-   - **必須早於** `config.Load()` / `keychain.Get()` / `BootstrapRedactionSet()`（後者會發 HTTP）
-   - 避免「uninstall 跑到 cleanup 中段、user 在另一個 terminal 跑 `caliber-agent run`、新 daemon acquire lock 成功並開始 fetch redaction-set」這條 race
-   - 之後再做 `config.Load` → `keychain.Get` → `BootstrapRedactionSet`
+2. **Startup-time sentinel check（acquire lock 後立即，所有後續啟動動作之前）**：
+   - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → 立即（**不開 agent.log，不寫任何訊息進 fs**）以 stderr 輸出 `[fatal] uninstall in progress; aborting startup`，`close(.lock fd)` 釋放 flock 後 exit 0
+   - **必須早於下列所有動作**（**not just network**）：
+     - `config.Load()`（read-only，但確認意圖）
+     - `LoadState()`（read-only）
+     - `OpenAgentLog()`（**會建立或 append `agent.log`**）
+     - `keychain.Get()`（會跨 process 呼叫 `/usr/bin/security`）
+     - `BootstrapRedactionSet()`（會發 HTTP）
+   - **唯一可接受的先行動作**是 step 1 的 `MkdirAll(~/.caliber-agent/, 0o700)` + `.lock` 開檔 + flock + 寫 PID。理由：lockfile 是「正確處理 sentinel 的前置條件」（要先持有 lock 才能保證 single-writer 對 `.uninstalling` 判讀）。`.lock` 本身的存在不算 anti-forensics 違規 — 它本來就是 lifecycle artifact。
+   - 退出時必須 close lockfd 釋放 flock 給其他 process（不留 stale flock）
+
+   實作層級的具體要求：
+
+   ```go
+   // agent/internal/cli/run.go (revised order)
+   func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
+       // STEP 1: lockfile + PID
+       lockFd, err := acquireRunLock()  // MkdirAll + OpenFile + Flock + WritePID
+       if err != nil { return err }
+       defer lockFd.Close()
+
+       // STEP 2: startup sentinel check — BEFORE any other local IO
+       if _, err := os.Stat(config.UninstallSentinelPath()); err == nil {
+           fmt.Fprintln(cmd.ErrOrStderr(), "[fatal] uninstall in progress; aborting startup")
+           return &ExitError{Code: 0, Err: nil}
+       }
+
+       // STEP 3+: existing config.Load / keychain.Get / BootstrapRedactionSet / loop
+       cfg, err := config.Load()
+       ...
+   }
+   ```
 
 3. **Tick 開頭 + 每 SendChunk 前 stop-condition check**：
    - **Tick 開頭**（**順序很重要**：sentinel 優先於 config）：
@@ -952,12 +979,14 @@ PR4 不新增 code；每子命令的對應：
 
 ### 8.2 邊界情境
 
+`uninstall` step 名稱對應 §3.6：probe → prompt → sentinel → remote_revoke → keychain_delete → remove_all → listing.
+
 | 情境 | 處理 |
 |---|---|
 | `pause` 期間 `run` 收到 SIGINT | graceful exit 130；sentinel 保留；下次 `run` 仍空轉直到 `resume` |
 | 長期 paused 後 `run` | 正常空轉，每 60s 一行 `[paused] skipping tick`（log 噪音可接受） |
-| `uninstall` step 1 完成、step 2 中 SIGINT | exit 130；user 重跑 `uninstall` 時 step 1 拿到 410 idempotent → 繼續完成 step 2 + 3 |
-| `uninstall` step 3 中 SIGINT | exit 130；部分檔案已刪除；user 重跑會走 `--keep-remote` 路徑清理剩餘 |
+| `uninstall` `remote_revoke` 完成、`keychain_delete` 中 SIGINT | exit 130；`.uninstalling` 殘留 → 重跑時 daemon 仍被擋；user 重跑 `uninstall` 第二次 `remote_revoke` 拿 410 idempotent → 繼續 `keychain_delete` + `remove_all` 完成 |
+| `uninstall` `remove_all` 中 SIGINT | exit 130；部分檔案已刪除（含可能尚未刪的 `.uninstalling`）；user 重跑 `uninstall --keep-remote`（device_id 可能已不在 config）— 若 config.toml 已刪只能手動 `rm -rf ~/.caliber-agent/` 清剩餘 |
 | `add-path` 對相對路徑 `./foo` | 拒絕 + `[error] add-path requires absolute path` exit 64 |
 | `add-path` 對 broken symlink | `EvalSymlinks` 失敗 → `[error] cannot resolve path: <err>` exit 1 |
 | `remove-path` 對 broken symlink | 跳過 `EvalSymlinks`、以 input 字串比對 IncludePaths；找到則移除 |
@@ -966,17 +995,20 @@ PR4 不新增 code；每子命令的對應：
 
 ### 8.3 `uninstall` 部分失敗的退出碼語意
 
+step 名稱同 §8.2。
+
 | 場景 | 退出碼 | 理由 |
 |---|---|---|
-| 全部 3 步成功 | 0 | 顯然 |
-| step 1 失敗（遠端）、step 2 + 3 成功 | **0** | 本地 token + 檔案乾淨；user 看 stdout 警告知道要手動 revoke |
-| step 1 + 2 成功、step 3 失敗（RemoveAll） | 1 | 本地殘留檔案，user 必須處理 |
-| step 1 成功、step 2 keychain ErrNotFound | **0** | 罕見；視為已清；step 3 仍乾淨 |
-| step 1 成功、step 2 keychain 非 ErrNotFound 失敗 | **1** | token 仍可能在本機；step 3 跳過；user 必須處理（避免 credential 被重用） |
-| daemon 仍在跑且無 `--force` | 1 | 早期拒絕；要 user 先停 daemon |
-| 未 enroll 就跑 uninstall | 1 | `ErrNotEnrolled` 早期 exit |
+| 全部 cleanup steps 成功（`remote_revoke` + `keychain_delete` + `remove_all`） | 0 | 顯然 |
+| `remote_revoke` 失敗、`keychain_delete` + `remove_all` 成功 | **0** | 本地 token + 檔案乾淨；user 看 stdout 警告知道要手動 revoke |
+| `remote_revoke` 成功、`keychain_delete` ErrNotFound、`remove_all` 成功 | **0** | 罕見；視為已清；`remove_all` 仍乾淨 |
+| `remote_revoke` 成功、`keychain_delete` 非 ErrNotFound 失敗 | **1** | token 仍可能在本機；`remove_all` 跳過；user 必須處理（避免 credential 被重用）；sentinel 還原 |
+| `remote_revoke` + `keychain_delete` 成功、`remove_all` 失敗 | 1 | 本地殘留檔案；sentinel 還原 |
+| daemon 仍在跑且無 `--force`（`probe` 階段拒絕） | 1 | 早期拒絕；要 user 先停 daemon；**未寫 sentinel** |
+| user 在 `prompt` 階段選 `n` | 130 | **未寫 sentinel**，0 side effect |
+| 未 enroll 就跑 uninstall | 1 | `ErrNotEnrolled` 早於 `probe` 退出 |
 
-**設計原則修正**（vs 初版）：「本地清理成功 = uninstall 對 user 的承諾達成」**且 token 必須被消滅**。Keychain delete 是 token 消滅的唯一手段；非 ErrNotFound 失敗代表 token 可能仍可用，必須以 exit 1 警示 user。
+**設計原則**：「本地清理成功 = uninstall 對 user 的承諾達成」**且 token 必須被消滅**。`keychain_delete` 是 token 消滅的唯一手段；非 ErrNotFound 失敗代表 token 可能仍可用，必須以 exit 1 警示 user。
 
 ### 8.4 API errors 對應
 
@@ -1103,7 +1135,8 @@ TestRevokeSelf_204_Success
 TestRevokeSelf_410_Idempotent_NoError
 TestRevokeSelf_401_InvalidToken
 TestRevokeSelf_401_KeyRevoked
-TestRevokeSelf_500_ReturnsAPIError
+TestRevokeSelf_404_ReturnsAPIError                # R5-F4: ENABLE_GATEWAY=false; 不可當 idempotent / nil
+TestRevokeSelf_500_ReturnsAPIError                # DB 例外 + server_misconfigured
 TestRevokeSelf_NetworkError_Wrapped
 ```
 
@@ -1190,7 +1223,7 @@ PR4 merge 後這些介面凍結，未來 PR 只能擴充、不能 break。
 | `pause` | — | sentinel-based、idempotent |
 | `resume` | — | 同上反向 |
 | `status` | flag `--json` | **零網路呼叫**；human + JSON 兩種輸出 |
-| `uninstall` | flags `--yes` `--keep-remote` `--force` | 偵測 running daemon 拒絕（除 `--force`）；三步順序：remote → keychain → fs；keychain delete 非 ErrNotFound 失敗 → exit 1 |
+| `uninstall` | flags `--yes` `--keep-remote` `--force` | 偵測 running daemon 拒絕（除 `--force`）；完整順序：**probe lock (no-create) → prompt + 確認 → 寫 `.uninstalling` sentinel → remote revoke → keychain delete → RemoveAll → 印清單**；keychain delete 非 ErrNotFound 失敗 → exit 1；user cancel 是真的 0 side effect |
 | `enroll` 新 flag | `--insecure` | 寫入 `insecure_transport = true` 進 config.toml |
 
 ### 10.3 Agent 既有 surface 變更
