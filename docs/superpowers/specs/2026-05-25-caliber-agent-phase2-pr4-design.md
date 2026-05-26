@@ -135,13 +135,17 @@ args:  none
 flags: (none)
 ```
 
-行為：
+行為（**all read-only checks before any write**）：
 
-1. **先驗 config dir 存在**（同 `run` step 1 理由）：`os.Stat(~/.caliber-agent/)` 回 `ErrNotExist` → `[fatal] not enrolled` exit 1。**`pause` 不 MkdirAll**，避免未 enroll 跑 pause 留下殘檔，或 uninstall 進行中重建目錄
-2. `os.WriteFile(~/.caliber-agent/paused, []byte{}, 0o600)`
-3. 印 `paused. running daemon will skip ticks on next interval. resume with 'caliber-agent resume'.`
+1. `os.Stat(~/.caliber-agent/)` 回 `ErrNotExist` → `[fatal] not enrolled` exit 1。**不 MkdirAll**
+2. `os.Stat(~/.caliber-agent/.uninstalling)` 套用 sentinel fail-closed 規則（存在 / 非 ErrNotExist 錯誤）→ `[fatal] uninstall in progress; refusing to pause` exit 1（不寫 paused — 不該在 uninstall 期間建立新訊號）
+3. `os.Stat(~/.caliber-agent/config.toml)` `ErrNotExist` → `[fatal] not enrolled (config.toml missing)` exit 1
+4. `os.WriteFile(~/.caliber-agent/paused, []byte{}, 0o600)`
+5. 印 `paused. running daemon will skip ticks on next interval. resume with 'caliber-agent resume'.`
 
-退出碼：0（idempotent — 重複 pause 不報錯）/ 1（未 enroll）
+退出碼：
+- 0 — 成功（含重複 pause idempotent）
+- 1 — 未 enroll / uninstall 進行中 / 罕見 IO failure
 
 ### 3.4 `caliber-agent resume`
 
@@ -286,17 +290,28 @@ flags: --yes          跳過互動確認
 
 `run` 啟動序列加入四個新動作（不改變 user-visible CLI）：
 
-1. **取得 lockfile + 寫 PID**：
-   - **先驗 config dir 存在**：`os.Stat(~/.caliber-agent/)` 回 `ErrNotExist` → `[fatal] not enrolled (config directory missing); run 'caliber-agent enroll <token>' first` exit 1。**`run` 不做 `MkdirAll`**。
-     - 理由 1：未 enroll 的 user 跑 `caliber-agent run` 不該意外建立 `~/.caliber-agent/` 與 `.lock`
-     - 理由 2（更重要）：`uninstall` 已 `RemoveAll(~/.caliber-agent/)` 但 process 還未結束時，user 在另一個 terminal 跑 `caliber-agent run`，若 `run` 會 MkdirAll 就會把目錄重建，違反 §4.4「uninstall 後該目錄與 keychain entry 不留任何檔案」契約
-   - dir 存在後 `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` — **不帶 O_TRUNC**
+1. **Pre-flight read-only checks（任何寫入動作之前完成）**：
+   依序 stat，命中失敗即 exit，**不建立任何檔案、不執行任何 write syscall**：
+   - `os.Stat(~/.caliber-agent/)` → 套用 §3.7 step 3 表格的 dir presence 規則：`ErrNotExist` → `[fatal] not enrolled (config directory missing); run 'caliber-agent enroll <token>' first` exit 1
+   - `os.Stat(~/.caliber-agent/.uninstalling)` → 套用 sentinel 規則（fail-closed）：存在或 stat 非 ErrNotExist 錯誤 → `[fatal] uninstall in progress (or stat failed); aborting startup` exit 0
+   - `os.Stat(~/.caliber-agent/config.toml)` → 套用 presence 規則：`ErrNotExist` → `[fatal] not enrolled (config.toml missing — partial cleanup?); re-enroll or remove ~/.caliber-agent/` exit 1
+   - 這三條都不寫入。場景覆蓋：
+     - 未 enroll：`dir not exist` → exit 1
+     - uninstall 進行中（任何階段，含 partial RemoveAll 後）：`.uninstalling` 仍在 → exit 0
+     - stale empty config dir（user 手動 mkdir）：`config.toml missing` → exit 1（不會建 `.lock`）
+
+2. **取得 lockfile + 寫 PID**：
+   - `os.OpenFile(~/.caliber-agent/.lock, O_RDWR|O_CREATE, 0o600)` — **不帶 O_TRUNC**，**不帶 MkdirAll**（dir 已在 step 1 驗證存在）
    - `syscall.Flock(fd, LOCK_EX|LOCK_NB)`。失敗 → 印 `another caliber-agent run is already active` exit 1（**flock 失敗後立即 close，不動檔案內容；既有 daemon 的 PID 保持完整**）
    - 成功取得 flock 後再執行：`fd.Truncate(0)` → `fd.Seek(0, 0)` → `fmt.Fprintf(fd, "%d\n", os.Getpid())`
    - **持有 fd 到 process exit**
    - **race 防護**：移除 `O_TRUNC` 是必要的 — 否則 second daemon open 時就 truncate，會在自己 flock 失敗前先擦掉既有 daemon 的 PID，違反「`.lock` 內容應為持有者 PID」契約
 
-2. **Startup-time sentinel check（acquire lock 後立即，所有後續啟動動作之前）**：
+3. **Post-lock sentinel re-check（acquire lock 後立即，所有後續啟動動作之前）**：
+
+   為什麼 step 1 已 stat 過 sentinel 還要再做一次？因為 pre-flight stat 與 step 2 OpenFile + Flock 之間有時間窗口 — uninstall 可能在那個窗口寫入 sentinel。Acquire lock 是 atomic single-writer point，是「我可以信任接下來看到的世界」的唯一時刻。
+
+
    - `os.Stat(~/.caliber-agent/.uninstalling)` 存在 → 立即（**不開 agent.log，不寫任何訊息進 fs**）返回 `&ExitError{Code: 0, Err: errors.New("[fatal] uninstall in progress; aborting startup")}`；Cobra 對該 `ExitError.Error()` 自動印到 stderr（`SilenceErrors=false`），不要手動 Fprintln 避免雙印。lockfd 在 `runRun` defer close 時釋放
    - **必須早於下列所有動作**（**not just network**）：
      - `config.Load()`（read-only，但確認意圖）
@@ -312,14 +327,23 @@ flags: --yes          跳過互動確認
    ```go
    // agent/internal/cli/run.go (revised order)
    func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
-       // STEP 1: lockfile + PID
-       lockFd, err := acquireRunLock()  // MkdirAll + OpenFile + Flock + WritePID
+       // STEP 1: Pre-flight read-only checks (no MkdirAll, no OpenFile write)
+       if err := preflightChecks(); err != nil {
+           // dir missing / sentinel present / config.toml missing
+           return err
+       }
+
+       // STEP 2: lockfile + PID
+       //   acquireRunLock = OpenFile(.lock, O_RDWR|O_CREATE, 0o600)
+       //                    + Flock(LOCK_EX|LOCK_NB)
+       //                    + Truncate(0) + Seek(0,0) + WritePID
+       //   *不* MkdirAll — STEP 1 已驗證 dir 存在
+       lockFd, err := acquireRunLock()
        if err != nil { return err }
        defer lockFd.Close()
 
-       // STEP 2: startup sentinel check — BEFORE any other local IO
-       // Fail-closed semantics: stat error 非 ErrNotExist 一律當作 "sentinel 存在" 處理。
-       // 避免 EACCES / EIO 等被誤判成「不在 uninstall」而繼續上傳。
+       // STEP 3: Post-lock sentinel re-check (catches pre-flight → acquire 窗口)
+       // Fail-closed: stat error 非 ErrNotExist 一律當作 "sentinel 存在" 處理。
        _, statErr := os.Stat(config.UninstallSentinelPath())
        sentinelPresent := statErr == nil || !errors.Is(statErr, fs.ErrNotExist)
        if sentinelPresent {
@@ -333,13 +357,13 @@ flags: --yes          跳過互動確認
            return &ExitError{Code: 0, Err: errors.New(msg)}
        }
 
-       // STEP 3+: existing config.Load / keychain.Get / BootstrapRedactionSet / loop
+       // STEP 4+: existing config.Load / keychain.Get / BootstrapRedactionSet / loop
        cfg, err := config.Load()
        ...
    }
    ```
 
-3. **Tick 開頭 + 每 SendChunk 前 stop-condition check**：
+4. **Tick 開頭 + 每 SendChunk 前 stop-condition check**：
 
    三個 path 的 stat 規則（明確、互不矛盾）：
 
@@ -368,7 +392,7 @@ flags: --yes          跳過互動確認
 
    這把 race 縮到「sentinel stat 與單個 SendChunk 之間 in-flight 的 1 chunk」。
 
-4. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，崩潰不留 stale lock。
+5. **graceful exit**：context cancel / SIGTERM 時 close fd 釋放 lock。flock 在 process 死亡時 kernel 自動釋放，崩潰不留 stale lock。
 
 這把 race condition 根除為**最小**窗口：
 
@@ -1004,7 +1028,7 @@ PR4 不新增 code；每子命令的對應：
 |---|---|---|---|---|
 | `add-path` | 成功 / 已在 list | path 無效 / IO 失敗 | args 錯誤 | user 取消 / non-TTY 無 `--yes` |
 | `remove-path` | 成功 / 不在 list | IO 失敗 | args 錯誤 | — |
-| `pause` | 成功（含重複） | IO 失敗（極罕見） | — | — |
+| `pause` | 成功（含重複） | 未 enroll / uninstall 進行中 / 罕見 IO failure | — | — |
 | `resume` | 成功（含未 pause） | IO 失敗 | — | — |
 | `status` | 成功 | 未 enroll | — | — |
 | `uninstall` | 全部清理（含遠端 best-effort 失敗，keychain + fs 全成功） | running daemon 拒絕 / keychain 非 ErrNotFound 失敗 / RemoveAll 失敗 | — | user 取消 / non-TTY 無 `--yes` |
@@ -1093,6 +1117,8 @@ TestRemovePath_NormalisesBeforeMatch
 TestPause_TouchesSentinel
 TestPause_Idempotent
 TestPause_NoConfigDir_Exit1                            # R8-F1: 未 enroll 不建目錄
+TestPause_ConfigTomlMissing_Exit1_NoPausedFileCreated  # R9-F1: stale empty dir 不建 paused
+TestPause_UninstallInProgress_Exit1_NoPausedFileCreated # R9-F1: uninstall 期間拒絕寫 paused
 TestResume_RemovesSentinel
 TestResume_NotPaused_NoOp
 
@@ -1117,6 +1143,9 @@ TestUninstall_LockProbe_ErrNotExist_TreatedAsNoDaemon         # R4-F2: ErrNotExi
 
 TestRun_NoConfigDir_Exit1                               # R8-F1: 沒 ~/.caliber-agent/ 直接 not enrolled exit 1，不 MkdirAll
 TestRun_DoesNotMkdirAllOnStartup                        # R8-F1: 斷言整個 startup 路徑 zero MkdirAll syscall
+TestRun_PreflightSentinelExists_NoLockCreated           # R9-F1: pre-flight 看到 .uninstalling → 不 OpenFile .lock 不留檔
+TestRun_PreflightConfigMissing_NoLockCreated            # R9-F1: dir 存在但 config.toml 缺 → 不 OpenFile .lock 不留檔
+TestRun_PostLockSentinelAppearedMidStartup_Exit0        # R9-F1: pre-flight 通過、acquire 之後 sentinel 才寫 → step 3 攔下
 TestRun_AcquireLock_FailsIfAlreadyHeld_Exit1            # F2: 不允許 concurrent run
 TestRun_AcquireLock_FailedFlock_DoesNotTruncatePID      # R7-F1: flock 失敗不擦既有 PID
 TestRun_LockfileContainsPID                             # R2-F4: PID 寫入供 uninstall 顯示
