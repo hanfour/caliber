@@ -280,6 +280,8 @@ func configSentinelExit(err error) *ExitError {
 	return nil
 }
 
+// codexSessionsRoot returns the default ~/.codex/sessions path.
+// CALIBER_CODEX_SESSIONS env overrides for advanced/dev use (see agent/README.md).
 func codexSessionsRoot() string {
 	if override := os.Getenv("CALIBER_CODEX_SESSIONS"); override != "" {
 		return override

@@ -133,8 +133,8 @@ func translateEnrollErr(err error) error {
 	return err
 }
 
-// claudeProjectsRoot returns the default ~/.claude/projects path. Tests can
-// override via CALIBER_CLAUDE_PROJECTS env (undocumented; tests only).
+// claudeProjectsRoot returns the default ~/.claude/projects path.
+// CALIBER_CLAUDE_PROJECTS env overrides for advanced/dev use (see agent/README.md).
 func claudeProjectsRoot() string {
 	if override := os.Getenv("CALIBER_CLAUDE_PROJECTS"); override != "" {
 		return override

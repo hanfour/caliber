@@ -236,9 +236,9 @@ SOURCELOOP:
 	return nil
 }
 
-// preTickChecks runs the read-only sentinel + config + lockfile stats at the
-// start of every Tick. Spec §3.7 step 4 / R10-F1. Order matches the runRun
-// pre-flight: sentinel (fail-closed) → paused → config.toml → lockfile.
+// preTickChecks runs the read-only sentinel + paused + config stats at the
+// start of every Tick. Spec §3.7 step 4 / R10-F1. Order: sentinel
+// (fail-closed) → paused → config.toml.
 //
 // Returns:
 //   - config.ErrUninstallInProgress: .uninstalling present (or stat failed)

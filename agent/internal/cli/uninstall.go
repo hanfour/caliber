@@ -245,11 +245,10 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 		return &ExitError{Code: 1, Err: err}
 	}
 
-	// STEP 7: final listing. Intentionally bland — the output names only the
-	// categories of artifact that were touched (remote / keychain / local
-	// fs) without leaking secrets like the cda_* token or full audit chain.
-	// The "anti-forensics-friendly" phrasing in the spec just means we do
-	// not print extraneous diagnostics in the success path.
+	// STEP 7: final listing. Names the categories of artifact that were touched
+	// (remote / keychain / local fs) for operator audit. DeviceID is included on
+	// the remote-success line because it's the same value the web UI shows; it
+	// is NOT a secret (the cda_* token is, and that is never printed).
 	fmt.Fprintln(cmd.OutOrStdout(), "Removed:")
 	switch remoteState {
 	case remoteRevoked:

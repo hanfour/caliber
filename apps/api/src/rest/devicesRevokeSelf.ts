@@ -37,6 +37,13 @@ export function devicesRevokeSelfRoutes(env: ServerEnv): FastifyPluginAsync {
       );
       if (!auth.ok) {
         if (auth.error === "server_misconfigured") {
+          // Surface the underlying config gap to ops via the request log,
+          // without leaking the env-var name (or anything else) to the
+          // client — which only sees the generic 500 "internal".
+          fastify.log.error(
+            { missing_env: "API_KEY_HASH_PEPPER" },
+            "DELETE /v1/devices/me: server_misconfigured (cannot resolve cda_* token)",
+          );
           reply.code(500);
           return { error: "internal" };
         }
