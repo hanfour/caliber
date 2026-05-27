@@ -12,12 +12,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/internal/keychain"
+	"github.com/hanfour/ai-dev-eval/agent/internal/lockfile"
 )
 
 // setupRoot creates a fresh temp dir and points CALIBER_AGENT_HOME at it.
@@ -472,4 +474,60 @@ func TestRun_PreflightConfigMissing_NoLockCreated(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".lock")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("run pre-flight must NOT create .lock when config.toml missing, stat err=%v", err)
 	}
+}
+
+// --- Phase 7 Task 7.2: lockfile acquire + post-lock sentinel re-check -----
+
+func TestRun_AcquireLock_FailsIfAlreadyHeld_Exit1(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	// Need empty source roots so `run --once` reaches the lockfile step quickly.
+	t.Setenv("CALIBER_CLAUDE_PROJECTS", filepath.Join(root, "claude-empty"))
+	t.Setenv("CALIBER_CODEX_SESSIONS", filepath.Join(root, "codex-empty"))
+	_ = os.MkdirAll(filepath.Join(root, "claude-empty"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "codex-empty"), 0o755)
+
+	// Pre-acquire .lock by another in-process surrogate.
+	lk, err := lockfile.Acquire(filepath.Join(root, ".lock"))
+	if err != nil {
+		t.Fatalf("test setup: pre-acquire lock: %v", err)
+	}
+	defer lk.Release()
+
+	code := executeRunOnce(t, []string{"run", "--once"})
+	if code != 1 {
+		t.Fatalf("want exit 1 concurrent run, got %d", code)
+	}
+}
+
+func TestRun_LockfileContainsPID(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	t.Setenv("CALIBER_CLAUDE_PROJECTS", filepath.Join(root, "claude-empty"))
+	t.Setenv("CALIBER_CODEX_SESSIONS", filepath.Join(root, "codex-empty"))
+	_ = os.MkdirAll(filepath.Join(root, "claude-empty"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "codex-empty"), 0o755)
+
+	if code := executeRunOnce(t, []string{"run", "--once"}); code != 0 {
+		t.Fatalf("run --once: code = %d", code)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".lock"))
+	if err != nil {
+		t.Fatalf("read .lock: %v", err)
+	}
+	s := strings.TrimSpace(string(b))
+	pid, perr := strconv.Atoi(s)
+	if perr != nil {
+		t.Fatalf(".lock must contain a numeric PID, got %q (err=%v)", string(b), perr)
+	}
+	if pid <= 0 {
+		t.Fatalf(".lock PID must be > 0, got %d", pid)
+	}
+}
+
+func TestRun_PostLockSentinelAppearedMidStartup_Exit0(t *testing.T) {
+	// Simulates the pre-flight → Acquire race where sentinel is written by
+	// uninstall after pre-flight has cleared but before/right-after Acquire
+	// returns. Injecting a real-time race requires a test hook in runRun
+	// (e.g. a between-pre-flight-and-Acquire callback). Task 7.2 in the plan
+	// explicitly notes t.Skip is acceptable here.
+	t.Skip("requires test hook in runRun to inject mid-startup sentinel write — plan §7.2 allows skip")
 }

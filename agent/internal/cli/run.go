@@ -15,6 +15,7 @@ import (
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/internal/keychain"
+	"github.com/hanfour/ai-dev-eval/agent/internal/lockfile"
 	"github.com/hanfour/ai-dev-eval/agent/internal/version"
 	"github.com/hanfour/ai-dev-eval/agent/redact"
 	"github.com/hanfour/ai-dev-eval/agent/redact/parser"
@@ -74,6 +75,29 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
 			return &ExitError{Code: 1, Err: errors.New("not enrolled (config.toml missing — partial cleanup?); re-enroll or remove ~/.caliber-agent/")}
 		}
 		return &ExitError{Code: 1, Err: fmt.Errorf("stat config.toml: %w", err)}
+	}
+
+	// STEP 2: acquire lockfile + write PID. Spec §3.7 step 2 / R4-F1 / R7-F2.
+	// The lock fd MUST be held until process exit — defer Release closes the
+	// fd which the kernel uses to drop the flock.
+	lk, err := lockfile.Acquire(config.LockPath())
+	if err != nil {
+		if errors.Is(err, lockfile.ErrLocked) {
+			return &ExitError{Code: 1, Err: errors.New("another caliber-agent run is already active")}
+		}
+		return &ExitError{Code: 1, Err: fmt.Errorf("acquire lock: %w", err)}
+	}
+	defer lk.Release()
+
+	// STEP 3: post-lock sentinel re-check. Spec §3.7 step 3 / R9-F1.
+	// Catches the pre-flight → Acquire window where uninstall wrote the
+	// sentinel between our stat and our flock. Fail-closed on non-ErrNotExist
+	// stat errors. The lockfile we just acquired is harmless to leave behind:
+	// uninstall's ordered_delete will sweep it during step (g).
+	if _, err := os.Stat(config.UninstallSentinelPath()); err == nil {
+		return &ExitError{Code: 0, Err: errors.New("uninstall in progress (detected post-lock); aborting startup")}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return &ExitError{Code: 0, Err: fmt.Errorf("uninstall in progress (post-lock sentinel stat: %v; fail-closed)", err)}
 	}
 
 	cfg, err := config.Load()
