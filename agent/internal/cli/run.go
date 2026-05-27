@@ -130,6 +130,14 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
 				TTLSeconds: fresh.TTLSeconds,
 			}
 			if err := set.Compile(); err != nil {
+				// ErrTooManyPatterns is a hard rejection — discard the
+				// fetched set and keep the currently-installed one so
+				// scrubbing keeps working. Do NOT persist the rejected
+				// set to disk.
+				if errors.Is(err, redact.ErrTooManyPatterns) {
+					logger.Printf("[error] refresh rejected: %v; keeping current set", err)
+					continue
+				}
 				logger.Printf("[warn] %v", err)
 			}
 			setProvider.Set(set)
