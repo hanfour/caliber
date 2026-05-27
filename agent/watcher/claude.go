@@ -51,6 +51,13 @@ func (s *ClaudeSource) List(ctx context.Context) ([]FileRef, error) {
 			if filepath.Ext(m.Name()) != ".jsonl" {
 				continue
 			}
+			// Symlink guard: reject anything not a regular file to prevent
+			// attacker-controlled symlinks (e.g. evil.jsonl → /etc/passwd)
+			// from escaping the allow-listed project directory.
+			info, lerr := os.Lstat(filepath.Join(projDir, m.Name()))
+			if lerr != nil || info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
 			sessionID := strings.TrimSuffix(m.Name(), ".jsonl")
 			refs = append(refs, FileRef{
 				Path:      filepath.Join(projDir, m.Name()),
@@ -73,6 +80,13 @@ func (s *ClaudeSource) List(ctx context.Context) ([]FileRef, error) {
 				}
 				name := s.Name()
 				if !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".jsonl") {
+					continue
+				}
+				// Symlink guard: same rationale as the main-session branch
+				// above. Reject any non-regular file before exposing it to
+				// the watcher pipeline.
+				info, lerr := os.Lstat(filepath.Join(subDir, name))
+				if lerr != nil || info.Mode()&os.ModeSymlink != 0 {
 					continue
 				}
 				agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
