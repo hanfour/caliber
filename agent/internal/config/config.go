@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -15,12 +16,13 @@ var ErrNotEnrolled = errors.New("config: device not enrolled")
 
 // Config is the on-disk shape of ~/.caliber-agent/config.toml. Spec §4.3.
 type Config struct {
-	DeviceID     string   `toml:"device_id"`
-	Hostname     string   `toml:"hostname"`
-	OS           string   `toml:"os"`
-	APIBaseURL   string   `toml:"api_base_url"`
-	Mode         string   `toml:"mode"`
-	IncludePaths []string `toml:"include_paths"`
+	DeviceID          string   `toml:"device_id"`
+	Hostname          string   `toml:"hostname"`
+	OS                string   `toml:"os"`
+	APIBaseURL        string   `toml:"api_base_url"`
+	Mode              string   `toml:"mode"`
+	IncludePaths      []string `toml:"include_paths"`
+	InsecureTransport bool     `toml:"insecure_transport"`
 }
 
 // Load reads and parses the config file. Returns ErrNotEnrolled if no file.
@@ -128,3 +130,25 @@ func writeConfigAtomically(c *Config, root string) error {
 //
 // Deprecated: use SaveConfig for runtime updates or SaveConfigInitial for enroll first write.
 func Save(c *Config) error { return SaveConfig(c) }
+
+// ValidateAPIBaseURL enforces a strict scheme whitelist:
+//   - https://   always allowed
+//   - http://    allowed iff allowInsecure
+//   - everything else (ftp/file/gopher/...) always rejected
+func ValidateAPIBaseURL(raw string, allowInsecure bool) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("invalid api_base_url: %q", raw)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if allowInsecure {
+			return nil
+		}
+		return fmt.Errorf("api_base_url uses http://; pass --insecure to allow (dev/local only)")
+	default:
+		return fmt.Errorf("api_base_url must be https:// (got scheme %q)", u.Scheme)
+	}
+}

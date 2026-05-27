@@ -175,3 +175,73 @@ func TestSaveConfig_Runtime_RefusesWhenRootMissing(t *testing.T) {
 		t.Fatalf("want ErrRootRemoved, got %v", err)
 	}
 }
+
+func TestValidateAPIBaseURL_AcceptsHTTPS(t *testing.T) {
+	if err := ValidateAPIBaseURL("https://caliber.example/", false); err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+}
+
+func TestValidateAPIBaseURL_RejectsHTTPWithoutInsecure(t *testing.T) {
+	if err := ValidateAPIBaseURL("http://localhost:3001/", false); err == nil {
+		t.Fatalf("want error, got nil")
+	}
+}
+
+func TestValidateAPIBaseURL_AcceptsHTTPWithInsecure(t *testing.T) {
+	if err := ValidateAPIBaseURL("http://localhost:3001/", true); err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+}
+
+func TestValidateAPIBaseURL_RejectsOtherSchemes(t *testing.T) {
+	for _, raw := range []string{"ftp://x/", "file:///etc/passwd", "gopher://x"} {
+		if err := ValidateAPIBaseURL(raw, true); err == nil {
+			t.Errorf("scheme in %q must be rejected even with --insecure", raw)
+		}
+	}
+}
+
+func TestValidateAPIBaseURL_RejectsMalformed(t *testing.T) {
+	for _, raw := range []string{"", "://no-scheme", "https://", "not a url"} {
+		if err := ValidateAPIBaseURL(raw, false); err == nil {
+			t.Errorf("malformed %q must be rejected", raw)
+		}
+	}
+}
+
+func TestConfig_InsecureTransport_RoundTrip(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+	in := &Config{DeviceID: "d_x", APIBaseURL: "http://x", InsecureTransport: true}
+	if err := SaveConfigInitial(in); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !out.InsecureTransport {
+		t.Fatalf("InsecureTransport must round-trip as true, got %+v", out)
+	}
+}
+
+func TestConfig_LoadOldFormat_DefaultsInsecureFalse(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Synthesise pre-PR4 config.toml (no insecure_transport key).
+	payload := "device_id = \"d_x\"\napi_base_url = \"https://x\"\nhostname = \"h\"\nos = \"darwin arm64\"\nmode = \"metadata-only\"\ninclude_paths = []\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if out.InsecureTransport {
+		t.Fatalf("missing field must default to false, got %+v", out)
+	}
+}
