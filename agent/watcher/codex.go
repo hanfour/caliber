@@ -88,6 +88,14 @@ func (s *CodexSource) List(ctx context.Context) ([]FileRef, error) {
 					if !strings.HasPrefix(fe.Name(), "rollout-") {
 						continue
 					}
+					// Symlink guard: reject any rollout-*.jsonl that is not
+					// a regular file. Without this, an attacker who can
+					// write inside ~/.codex/sessions/ could symlink a
+					// rollout to /etc/passwd and trigger an unintended read.
+					info, lerr := os.Lstat(filepath.Join(dayDir, fe.Name()))
+					if lerr != nil || info.Mode()&os.ModeSymlink != 0 {
+						continue
+					}
 					m := uuidSuffixRE.FindStringSubmatch(fe.Name())
 					var sessID string
 					if len(m) == 2 {
@@ -109,8 +117,14 @@ func (s *CodexSource) List(ctx context.Context) ([]FileRef, error) {
 
 // readCWD opens the file via the injectable opener, reads up to 64 KiB,
 // parses as session_meta JSON, and returns payload.cwd. On any error
-// (missing field, malformed, oversize), returns "".
+// (missing field, malformed, oversize), returns "". Symlinks are
+// rejected up front so attacker-supplied targets cannot bypass the
+// allow-list check upstream.
 func (s *CodexSource) readCWD(path string) string {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
 	rc, err := s.open(path)
 	if err != nil {
 		return ""

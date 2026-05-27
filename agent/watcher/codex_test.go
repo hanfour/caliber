@@ -111,6 +111,63 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 func (c *countingReader) Close() error { return c.r.Close() }
 
+func TestCodexSource_List_SkipsSymlinkedJsonl(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "2026", "05", "27")
+	if err := os.MkdirAll(deep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// real
+	uuid := "11111111-2222-3333-4444-555555555555"
+	real := filepath.Join(deep, "rollout-"+uuid+".jsonl")
+	if err := os.WriteFile(real, []byte(`{"payload":{"cwd":"/home/u"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink
+	uuid2 := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	sym := filepath.Join(deep, "rollout-"+uuid2+".jsonl")
+	if err := os.Symlink("/etc/passwd", sym); err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewCodexSource(root, nil)
+	refs, err := src.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, r := range refs {
+		if filepath.Base(r.Path) == filepath.Base(sym) {
+			t.Fatalf("symlink must be skipped, found %s", r.Path)
+		}
+	}
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 real ref, got %d", len(refs))
+	}
+}
+
+func TestCodexSource_ReadCWD_SymlinkReturnsEmpty(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "2026", "05", "27")
+	if err := os.MkdirAll(deep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink target is a real file with a parseable cwd; without the
+	// Lstat guard readCWD would happily follow the link and return the
+	// attacker-supplied cwd.
+	target := filepath.Join(root, "target.jsonl")
+	if err := os.WriteFile(target, []byte(`{"payload":{"cwd":"/etc"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sym := filepath.Join(deep, "rollout-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl")
+	if err := os.Symlink(target, sym); err != nil {
+		t.Fatal(err)
+	}
+	src := NewCodexSource(root, nil)
+	if cwd := src.readCWD(sym); cwd != "" {
+		t.Fatalf("readCWD on symlink must return empty, got %q", cwd)
+	}
+}
+
 func TestCodexSource_64KiBBound_OnUnboundedMalformedFirstLine(t *testing.T) {
 	root := t.TempDir()
 	uuidX := "019ddead-0000-0000-0000-000000000002"
