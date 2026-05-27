@@ -37,6 +37,23 @@ func executeCLI(t *testing.T, args []string) int {
 	return 1
 }
 
+// executeCLIStdout runs the cobra root with the given args, redirects BOTH
+// stdout and stderr into the same buffer (cobra writes errors to stderr by
+// default) and returns the captured text. Used by status_test for assertions
+// on human/JSON output. Errors from Execute are intentionally ignored — the
+// caller only cares about what the command printed; exit-code assertions use
+// executeCLI.
+func executeCLIStdout(t *testing.T, args []string) string {
+	t.Helper()
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs(args)
+	_ = cmd.ExecuteContext(context.Background())
+	return buf.String()
+}
+
 // executeCLIWithStdin temporarily replaces os.Stdin with a pipe carrying the
 // given input bytes, then runs the CLI. Used by add-path/uninstall consent
 // prompts that read from os.Stdin (bufio.NewReader(os.Stdin)).
