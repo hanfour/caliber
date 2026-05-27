@@ -43,17 +43,58 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
-// Save writes the config atomically via tmp + rename. Permission is 0600
-// because the file references the device identity. Parent dir created if
-// missing.
-func Save(c *Config) error {
+// SaveConfigInitial writes config.toml during enroll. It is the only save
+// function permitted to MkdirAll the root, but it still performs first-
+// write-aware safety checks (R19/R20) when root already exists, to catch
+// the enroll preflight → SaveConfigInitial TOCTOU window:
+//
+//   - root exists + sentinel present → ErrUninstallInProgress
+//   - root exists + config.toml missing (no sentinel) → ErrPartialUninstall
+//   - root absent (clean first enroll) or root + config.toml present (re-enroll)
+//     → MkdirAll + atomic write
+func SaveConfigInitial(c *Config) error {
 	if c.IncludePaths == nil {
 		c.IncludePaths = []string{}
 	}
 	root := RootDir()
+	if info, err := os.Stat(root); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("config: %s exists but is not a directory", root)
+		}
+		// root exists — re-run both enroll preflight checks
+		if _, sErr := os.Stat(filepath.Join(root, ".uninstalling")); sErr == nil {
+			return ErrUninstallInProgress
+		} else if !errors.Is(sErr, fs.ErrNotExist) {
+			return fmt.Errorf("%w (sentinel stat: %v; fail-closed)", ErrUninstallInProgress, sErr)
+		}
+		if _, cErr := os.Stat(filepath.Join(root, "config.toml")); errors.Is(cErr, fs.ErrNotExist) {
+			return ErrPartialUninstall
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("config: stat root: %w", err)
+	}
+	// root absent (first enroll) or root + config.toml present (re-enroll) — safe to MkdirAll + write.
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("config: mkdir %s: %w", root, err)
 	}
+	return writeConfigAtomically(c, root)
+}
+
+// SaveConfig writes config.toml during runtime mutations (add-path / remove-path).
+// It enforces precheckRuntime and never MkdirAlls.
+func SaveConfig(c *Config) error {
+	if c.IncludePaths == nil {
+		c.IncludePaths = []string{}
+	}
+	if err := precheckRuntime(); err != nil {
+		return err
+	}
+	return writeConfigAtomically(c, RootDir())
+}
+
+// writeConfigAtomically is the shared tmp+rename body. Pulled out so both
+// SaveConfig and SaveConfigInitial share the same encoder/chmod/fsync logic.
+func writeConfigAtomically(c *Config, root string) error {
 	final := ConfigPath()
 	tmp, err := os.CreateTemp(root, ".config.toml.*")
 	if err != nil {
@@ -80,3 +121,10 @@ func Save(c *Config) error {
 	}
 	return nil
 }
+
+// Save is kept as a thin alias for backwards compat inside this package, but
+// callers SHOULD use SaveConfig / SaveConfigInitial explicitly. Delete this in
+// a follow-up once all callers are migrated.
+//
+// Deprecated: use SaveConfig for runtime updates or SaveConfigInitial for enroll first write.
+func Save(c *Config) error { return SaveConfig(c) }
