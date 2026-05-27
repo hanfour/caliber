@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,7 +24,10 @@ func TestLoadStateMissingReturnsEmpty(t *testing.T) {
 }
 
 func TestStateRoundTrip(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	root := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	s := &State{Files: map[string]FileWatermark{
 		"/path/to/a.jsonl": {Offset: 42, LastSync: now},
@@ -52,7 +57,10 @@ func TestLoadStateMalformedJSON(t *testing.T) {
 }
 
 func TestSaveStateNilFiles(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	root := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := SaveState(&State{Files: nil}); err != nil {
 		t.Fatalf("SaveState nil: %v", err)
 	}
@@ -62,5 +70,56 @@ func TestSaveStateNilFiles(t *testing.T) {
 	}
 	if loaded.Files == nil {
 		t.Error("Files should be non-nil after SaveState+LoadState of nil")
+	}
+}
+
+func TestSaveState_RefusesWriteWhenRootRemoved(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", "/tmp/does-not-exist-savestate")
+	if err := SaveState(&State{Files: map[string]FileWatermark{}}); !errors.Is(err, ErrRootRemoved) {
+		t.Fatalf("want ErrRootRemoved, got %v", err)
+	}
+}
+
+func TestSaveState_RefusesWriteWhenSentinelExists(t *testing.T) {
+	root := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".uninstalling"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveState(&State{Files: map[string]FileWatermark{}}); !errors.Is(err, ErrUninstallInProgress) {
+		t.Fatalf("want ErrUninstallInProgress, got %v", err)
+	}
+}
+
+func TestSaveState_RefusesWriteWhenConfigTomlMissing(t *testing.T) {
+	setupRoot(t) // root exists, no config.toml
+	if err := SaveState(&State{Files: map[string]FileWatermark{}}); !errors.Is(err, ErrConfigRemoved) {
+		t.Fatalf("want ErrConfigRemoved, got %v", err)
+	}
+}
+
+func TestSaveState_DoesNotMkdirAll(t *testing.T) {
+	root := setupRoot(t)
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	_ = SaveState(&State{Files: map[string]FileWatermark{}})
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("SaveState must NOT recreate root, got stat err=%v", err)
+	}
+}
+
+func TestSaveState_HappyPath_AllPrechecksMet(t *testing.T) {
+	root := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveState(&State{Files: map[string]FileWatermark{}}); err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "state.json")); err != nil {
+		t.Fatalf("state.json must exist, got %v", err)
 	}
 }
