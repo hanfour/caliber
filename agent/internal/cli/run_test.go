@@ -436,6 +436,27 @@ func TestRun_OnceEndToEnd_FetchAndIngest(t *testing.T) {
 	}
 }
 
+// TestRun_OncePaused_Exit0 covers the post-PR4 review fix: `caliber-agent run
+// --once` against a paused daemon root is a deliberate no-op, not a failure.
+// Previously runRun's --once branch had no case for watcher.ErrPausedSkip and
+// fell through to `return loopErr` → exit 1. Spec §3.3.
+func TestRun_OncePaused_Exit0(t *testing.T) {
+	home := setupEnrolledHome(t)
+	// Touch the paused sentinel
+	if err := os.WriteFile(filepath.Join(home, "paused"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CALIBER_CLAUDE_PROJECTS", filepath.Join(home, "c-empty"))
+	t.Setenv("CALIBER_CODEX_SESSIONS", filepath.Join(home, "cx-empty"))
+	os.MkdirAll(filepath.Join(home, "c-empty"), 0o755)
+	os.MkdirAll(filepath.Join(home, "cx-empty"), 0o755)
+
+	code := executeRunOnce(t, []string{"run", "--once"})
+	if code != 0 {
+		t.Fatalf("paused + --once must exit 0, got %d", code)
+	}
+}
+
 // --- Phase 7 Task 7.1: pre-flight read-only checks ------------------------
 
 func TestRun_NoConfigDir_Exit1(t *testing.T) {

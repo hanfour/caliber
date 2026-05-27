@@ -15,11 +15,11 @@ import (
 	"github.com/hanfour/ai-dev-eval/agent/sink"
 )
 
-// errPausedSkip is returned by preTickChecks when the `paused` sentinel is
+// ErrPausedSkip is returned by preTickChecks when the `paused` sentinel is
 // present. Loop.Run catches it and continues to the next interval instead of
 // treating it as a fatal return — paused is a user-requested suspension, not
 // an uninstall or config-removal condition.
-var errPausedSkip = errors.New("watcher: paused sentinel present; skipping tick")
+var ErrPausedSkip = errors.New("watcher: paused sentinel present; skipping tick")
 
 // Logger is the contract Loop needs. config.RFCLogger satisfies it.
 type Logger interface {
@@ -85,14 +85,14 @@ func NewLoop(opts LoopOpts) *Loop {
 
 // Run drives the loop until ctx is cancelled, sleeping interval between ticks.
 //
-// errPausedSkip from Tick is NOT a fatal return — the paused sentinel is a
+// ErrPausedSkip from Tick is NOT a fatal return — the paused sentinel is a
 // user-requested suspension and Run continues to the next interval. The three
 // config sentinels (ErrUninstallInProgress / ErrConfigRemoved / ErrRootRemoved)
 // ARE fatal and propagate up to runRun where they map to ExitError{Code:0}.
 func (l *Loop) Run(ctx context.Context) error {
 	for {
 		err := l.Tick(ctx)
-		if err != nil && !errors.Is(err, errPausedSkip) {
+		if err != nil && !errors.Is(err, ErrPausedSkip) {
 			return err
 		}
 		select {
@@ -106,11 +106,11 @@ func (l *Loop) Run(ctx context.Context) error {
 // Tick runs one poll cycle over all sources. Per-ref and per-chunk errors are
 // caught, logged, and the loop continues. Tick returns ctx.Err() on
 // cancellation, or one of the config sentinels (ErrUninstallInProgress /
-// ErrConfigRemoved / ErrRootRemoved) or errPausedSkip when preTickChecks /
+// ErrConfigRemoved / ErrRootRemoved) or ErrPausedSkip when preTickChecks /
 // per-chunk re-checks fire. Run() and runRun decide how to react.
 func (l *Loop) Tick(ctx context.Context) error {
 	if err := l.preTickChecks(); err != nil {
-		if errors.Is(err, errPausedSkip) {
+		if errors.Is(err, ErrPausedSkip) {
 			// User-requested suspension. Loop.Run() will continue.
 			return err
 		}
@@ -242,7 +242,7 @@ SOURCELOOP:
 //
 // Returns:
 //   - config.ErrUninstallInProgress: .uninstalling present (or stat failed)
-//   - errPausedSkip: paused sentinel present (Run loop treats as skip, not fatal)
+//   - ErrPausedSkip: paused sentinel present (Run loop treats as skip, not fatal)
 //   - config.ErrConfigRemoved: config.toml gone
 //   - nil: safe to proceed
 //
@@ -259,7 +259,7 @@ func (l *Loop) preTickChecks() error {
 	}
 	if _, err := os.Stat(config.PausedPath()); err == nil {
 		l.log.Printf("[paused] skipping tick")
-		return errPausedSkip
+		return ErrPausedSkip
 	}
 	if _, err := os.Stat(config.ConfigPath()); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

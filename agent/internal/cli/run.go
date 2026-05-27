@@ -236,6 +236,10 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
 
 	if once {
 		if loopErr := loop.Tick(cmd.Context()); loopErr != nil {
+			if errors.Is(loopErr, watcher.ErrPausedSkip) {
+				// --once on a paused daemon is a deliberate no-op, not a failure.
+				return nil
+			}
 			if ee := configSentinelExit(loopErr); ee != nil {
 				return ee
 			}

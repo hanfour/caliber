@@ -656,9 +656,9 @@ func TestTick_PausedSentinel_SkipsAndReturnsErrPausedSkip(t *testing.T) {
 	log := &fakeLogger{}
 	loop := buildLoopForTest(t, log)
 	err := loop.Tick(context.Background())
-	// errPausedSkip is package-private; assert via errors.Is on the value.
-	if !errors.Is(err, errPausedSkip) {
-		t.Fatalf("want errPausedSkip, got %v", err)
+	// ErrPausedSkip is package-private; assert via errors.Is on the value.
+	if !errors.Is(err, ErrPausedSkip) {
+		t.Fatalf("want ErrPausedSkip, got %v", err)
 	}
 	if !containsLog(log, "[paused]") {
 		t.Errorf("expected [paused] log line, got %v", log.lines)
@@ -667,7 +667,7 @@ func TestTick_PausedSentinel_SkipsAndReturnsErrPausedSkip(t *testing.T) {
 
 func TestRun_PausedSentinel_TickSkipsButLoopContinues(t *testing.T) {
 	// End-to-end: paused sentinel should be a tick-skip, not a fatal exit.
-	// Loop.Run catches errPausedSkip, sleeps interval, and loops again.
+	// Loop.Run catches ErrPausedSkip, sleeps interval, and loops again.
 	root := setupEnrolledRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "paused"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)
