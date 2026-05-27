@@ -215,3 +215,130 @@ func TestUninstall_KeychainDeleteFails_Exit1_SentinelRestored(t *testing.T) {
 		t.Fatalf("sentinel must be restored to absent on keychain failure, got stat=%v", err)
 	}
 }
+
+// ----- Phase 11.4: ordered_delete (a)-(i) -----
+
+// traceRemovesDuring swaps the package-level osRemove hook to record every
+// path uninstall removes. The trace order is the sequence of os.Remove calls
+// uninstall performs; the test asserts step ordering against that.
+func traceRemovesDuring(t *testing.T, fn func()) []string {
+	t.Helper()
+	var trace []string
+	origRemove := osRemove
+	osRemove = func(name string) error {
+		err := origRemove(name)
+		if err == nil || errors.Is(err, fs.ErrNotExist) {
+			// We log even ErrNotExist removals because the order of attempts
+			// (not just successes) is what the invariant tests assert.
+			trace = append(trace, name)
+		}
+		return err
+	}
+	t.Cleanup(func() { osRemove = origRemove })
+	fn()
+	return trace
+}
+
+// indexOf returns the first index of item in slice, or -1 if absent.
+func indexOf(slice []string, item string) int {
+	for i, s := range slice {
+		if s == item {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestUninstall_OrderedCleanup_SentinelDeletedLastBeforeRmdir asserts the
+// (h) → (i) ordering: .uninstalling is the LAST file removed before rmdir.
+func TestUninstall_OrderedCleanup_SentinelDeletedLastBeforeRmdir(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	// Pre-create paused so step (d) hits a real file too.
+	if err := os.WriteFile(filepath.Join(root, "paused"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trace := traceRemovesDuring(t, func() {
+		_ = executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	})
+	// Find the last file removed before root.
+	rootIdx := indexOf(trace, root)
+	if rootIdx < 0 {
+		t.Fatalf("rmdir(root) absent from trace: %v", trace)
+	}
+	if rootIdx == 0 {
+		t.Fatalf("rmdir was first — no files removed before it: %v", trace)
+	}
+	lastFile := trace[rootIdx-1]
+	if filepath.Base(lastFile) != ".uninstalling" {
+		t.Fatalf("expected .uninstalling to be last before rmdir, got %s; full trace=%v", lastFile, trace)
+	}
+}
+
+// TestUninstall_OrderedCleanup_ConfigTomlDeletedBeforeSentinel covers the
+// (g) → (h) ordering: config.toml must precede .uninstalling.
+func TestUninstall_OrderedCleanup_ConfigTomlDeletedBeforeSentinel(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	trace := traceRemovesDuring(t, func() {
+		_ = executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	})
+	cfgIdx := indexOf(trace, filepath.Join(root, "config.toml"))
+	sentIdx := indexOf(trace, filepath.Join(root, ".uninstalling"))
+	if cfgIdx < 0 || sentIdx < 0 || cfgIdx >= sentIdx {
+		t.Fatalf("config.toml must precede .uninstalling: cfg=%d sentinel=%d trace=%v", cfgIdx, sentIdx, trace)
+	}
+}
+
+// TestUninstall_OrderedCleanup_TmpGlobsCleared_RmdirSucceeds seeds tmp files
+// matching the atomic-writer patterns and asserts that step (f) clears them
+// so step (i) rmdir succeeds.
+func TestUninstall_OrderedCleanup_TmpGlobsCleared_RmdirSucceeds(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	for _, n := range []string{".config.toml.abc123", ".state.json.xyz789", ".redaction-set.json.42"} {
+		if err := os.WriteFile(filepath.Join(root, n), []byte{}, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	if code != 0 {
+		t.Fatalf("want 0, got %d", code)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("rmdir must succeed; root still exists: %v", err)
+	}
+}
+
+// TestUninstall_OrderedCleanup_RmdirFailsAfterSentinelRemoved_NoSentinelRestore
+// covers R13-F2: once (h) has removed the sentinel, a subsequent rmdir
+// failure must NOT restore it.
+func TestUninstall_OrderedCleanup_RmdirFailsAfterSentinelRemoved_NoSentinelRestore(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	stray := filepath.Join(root, "user-dropped-file.txt")
+	if err := os.WriteFile(stray, []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	if code != 1 {
+		t.Fatalf("want 1, got %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".uninstalling")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("sentinel must remain absent after (h); got stat=%v", err)
+	}
+}
+
+// TestUninstall_InvariantSentinelOutlivesConfigToml asserts the spec's
+// load-bearing invariant: while config.toml exists, .uninstalling must
+// also exist. Equivalent to "remove(config.toml) < remove(.uninstalling)".
+func TestUninstall_InvariantSentinelOutlivesConfigToml(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	trace := traceRemovesDuring(t, func() {
+		_ = executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	})
+	cfgIdx := indexOf(trace, filepath.Join(root, "config.toml"))
+	sentIdx := indexOf(trace, filepath.Join(root, ".uninstalling"))
+	if cfgIdx < 0 || sentIdx < 0 {
+		t.Fatalf("both paths must appear in trace; trace=%v", trace)
+	}
+	if sentIdx < cfgIdx {
+		t.Fatalf("invariant violated: .uninstalling removed before config.toml; trace=%v", trace)
+	}
+}

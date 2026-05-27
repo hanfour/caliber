@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,6 +112,11 @@ const (
 // the real `security` binary. Production callers never touch this var.
 var keychainDelete = keychain.Delete
 
+// osRemove is the package-level seam over os.Remove. Tests use the
+// traceRemovesDuring helper to wrap this and record the exact order of
+// remove calls uninstall makes. Production leaves it pointing at os.Remove.
+var osRemove = os.Remove
+
 // runUninstallCleanup performs steps 3-7 (sentinel → remote → keychain →
 // ordered_delete → listing). The sentinel is written FIRST so any in-flight
 // daemon writes that pass the per-tick / per-chunk check after we begin will
@@ -153,6 +159,12 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 			cfg.APIBaseURL)
 	}
 
+	// restoreSentinel removes the sentinel so the daemon can recover if the
+	// uninstall aborts mid-flight (R13-F1). It is called from any failure
+	// path BEFORE step (h) removes the sentinel itself — see ordered_delete
+	// comments below for the explicit no-restore boundary.
+	restoreSentinel := func() { _ = osRemove(sentinelPath) }
+
 	// STEP 5: keychain delete.
 	//   - ErrNotFound is a soft failure: print a note and continue.
 	//   - Any other error is hard: restore the absent state of .uninstalling
@@ -162,14 +174,78 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 			fmt.Fprintln(cmd.OutOrStdout(), "[ok] keychain entry already absent")
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), "[error] keychain delete failed: %v\n", kerr)
-			_ = os.Remove(sentinelPath) // restore so daemon can recover
+			restoreSentinel()
 			return &ExitError{Code: 1, Err: kerr}
 		}
 	}
 
-	// STEP 6 (ordered_delete) and STEP 7 (listing) land in subsequent
-	// phase 11 tasks. For now consume locals.
-	_ = sentinelPath
+	// STEP 6: ordered_delete (a)-(i). Spec §3.6 step 6 + R13/R14/R15.
+	//
+	// Invariant (R15): while config.toml exists on disk, .uninstalling must
+	// also exist. The ordered_delete protects this by removing config.toml
+	// (step g) BEFORE the sentinel (step h). Restoring the sentinel is
+	// permitted on any failure in (a)-(g); once (h) deletes it, the invariant
+	// no longer requires restoration — a retry of uninstall will simply
+	// re-write a fresh sentinel.
+	//
+	// Steps (a)-(e) (optional artifacts): ErrNotExist is benign, any other
+	// IO error is hard-fail with sentinel restore.
+	optional := []string{"state.json", "redaction-set.json", "agent.log", "paused", ".lock"}
+	for _, name := range optional {
+		p := filepath.Join(root, name)
+		if err := osRemove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(cmd.OutOrStdout(), "[error] remove %s: %v\n", p, err)
+			restoreSentinel()
+			return &ExitError{Code: 1, Err: err}
+		}
+	}
+
+	// (f) tmp glob cleanup — leftover CreateTemp suffixes from atomic writes
+	// in config.SaveConfig / state.Save / redactionset.Save. R13-F2 says any
+	// failure here is hard-fail with restore so the operator can retry.
+	for _, pattern := range []string{".config.toml.*", ".state.json.*", ".redaction-set.json.*"} {
+		matches, _ := filepath.Glob(filepath.Join(root, pattern))
+		for _, m := range matches {
+			if err := osRemove(m); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				fmt.Fprintf(cmd.OutOrStdout(), "[error] remove tmp %s: %v\n", m, err)
+				restoreSentinel()
+				return &ExitError{Code: 1, Err: err}
+			}
+		}
+	}
+
+	// (g) config.toml — must exist by construction (we Load()ed it at entry).
+	// A failure here is hard-fail with sentinel restore.
+	configPath := filepath.Join(root, "config.toml")
+	if err := osRemove(configPath); err != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "[error] remove config.toml: %v\n", err)
+		restoreSentinel()
+		return &ExitError{Code: 1, Err: err}
+	}
+
+	// (h) .uninstalling — last file removed inside the dir. From this point
+	// on, failures DO NOT restore the sentinel (R13-F2): config.toml is gone
+	// and re-creating .uninstalling without re-creating config.toml would
+	// permanently confuse the enroll preflight.
+	if err := osRemove(sentinelPath); err != nil {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"[error] failed to remove sentinel; .uninstalling may persist — manual cleanup: rm %s && rmdir %s\n",
+			sentinelPath, root)
+		return &ExitError{Code: 1, Err: err}
+	}
+
+	// (i) rmdir — the directory should now be empty. A non-empty dir means
+	// the operator dropped extra files in ~/.caliber-agent/ that the
+	// explicit cleanup steps did not anticipate; surface a friendly error
+	// and let them inspect manually. R13-F2: do NOT restore the sentinel.
+	if err := osRemove(root); err != nil {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"[error] rmdir failed: %v; inspect %s for leftover files and manually 'rm -rf' if confirmed safe\n",
+			err, root)
+		return &ExitError{Code: 1, Err: err}
+	}
+
+	// STEP 7: final listing lands in phase 11.5.
 	_ = remoteState
 	return nil
 }
