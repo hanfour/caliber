@@ -28,7 +28,7 @@ func newRunCmd() *cobra.Command {
 	var interval time.Duration
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Run the daemon main loop (foreground; launchd-managed in production)",
+		Short: "Run the daemon main loop (foreground; you start and stop it manually)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRun(cmd, once, interval)
 		},
@@ -236,6 +236,9 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
 
 	if once {
 		if loopErr := loop.Tick(cmd.Context()); loopErr != nil {
+			if ee := configSentinelExit(loopErr); ee != nil {
+				return ee
+			}
 			if ee := fatalExitFor(loopErr); ee != nil {
 				logger.Printf("[fatal] %v", loopErr)
 				return ee
@@ -245,11 +248,30 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
 		return nil
 	}
 	if loopErr := loop.Run(cmd.Context()); loopErr != nil {
+		if ee := configSentinelExit(loopErr); ee != nil {
+			return ee
+		}
 		if ee := fatalExitFor(loopErr); ee != nil {
 			logger.Printf("[fatal] %v", loopErr)
 			return ee
 		}
 		return loopErr
+	}
+	return nil
+}
+
+// configSentinelExit maps the three "uninstall-related" config sentinels
+// (ErrUninstallInProgress / ErrConfigRemoved / ErrRootRemoved) to a clean
+// exit 0. These sentinels mean uninstall is in progress or has cleaned the
+// filesystem out from under the daemon — the correct response is to exit
+// quietly so launchd / the operator's manual `caliber-agent run` invocation
+// doesn't loop with non-zero exits. Spec §3.7 / R14-F1.
+func configSentinelExit(err error) *ExitError {
+	switch {
+	case errors.Is(err, config.ErrUninstallInProgress),
+		errors.Is(err, config.ErrConfigRemoved),
+		errors.Is(err, config.ErrRootRemoved):
+		return &ExitError{Code: 0, Err: err}
 	}
 	return nil
 }
