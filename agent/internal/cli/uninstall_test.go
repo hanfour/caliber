@@ -360,3 +360,45 @@ func TestUninstall_FinalListing_AllSuccess(t *testing.T) {
 		}
 	}
 }
+
+// ----- Phase 14.2: privacy isolation — uninstall scoped to root only -----
+
+// TestUninstall_DoesNotTouchHomeOutsideCaliberAgent: plan §14.2. The
+// uninstall sequence walks osRemove a fixed allow-list of children under
+// `~/.caliber-agent/` (R7-D1). To guard against a future regression that
+// widens the scope — e.g. an accidental filepath.Walk of the parent dir —
+// pre-create a sibling directory + sentinel file outside the agent root
+// and assert they survive.
+//
+// The sibling lives under filepath.Dir(root). For CALIBER_AGENT_HOME this
+// is the t.TempDir() returned by setupEnrolledRoot, which is itself a
+// fresh per-test directory — so the test is hermetic without t.Cleanup
+// rmtree leaking into siblings of unrelated tests.
+func TestUninstall_DoesNotTouchHomeOutsideCaliberAgent(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	parent := filepath.Dir(root)
+	sibling := filepath.Join(parent, "should-survive")
+	if err := os.MkdirAll(sibling, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sibling) })
+	siblingFile := filepath.Join(sibling, "sentinel")
+	if err := os.WriteFile(siblingFile, []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	if code != 0 {
+		t.Fatalf("want 0, got %d", code)
+	}
+	if _, err := os.Stat(sibling); err != nil {
+		t.Fatalf("sibling dir must survive uninstall, got %v", err)
+	}
+	b, err := os.ReadFile(siblingFile)
+	if err != nil {
+		t.Fatalf("sibling file must survive intact, got err=%v", err)
+	}
+	if string(b) != "ok" {
+		t.Fatalf("sibling file content corrupted, got %q want %q", string(b), "ok")
+	}
+}
