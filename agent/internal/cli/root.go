@@ -42,7 +42,6 @@ func New() *cobra.Command {
 	cmd.AddCommand(newRemovePathCmd())
 	cmd.AddCommand(newPauseCmd())
 	cmd.AddCommand(newResumeCmd())
-	cmd.AddCommand(newSetModeCmd())
 	cmd.AddCommand(newUninstallCmd())
 	return cmd
 }

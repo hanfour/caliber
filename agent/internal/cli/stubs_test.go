@@ -3,35 +3,29 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
+	"strings"
 	"testing"
 )
 
-func runCmd(t *testing.T, args ...string) error {
-	t.Helper()
+// TestSetMode_Removed guards against accidental re-introduction of the
+// `set-mode` subcommand. Mode changes are now done by editing config.toml
+// directly + restarting `run` (PR3 OBS-2 startup allowlist still enforces
+// valid modes). See spec §3.6 / plan Phase 12.
+func TestSetMode_Removed(t *testing.T) {
 	cmd := New()
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "set-mode" {
+			t.Fatalf("set-mode subcommand must not be registered")
+		}
+	}
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs(args)
-	return cmd.ExecuteContext(context.Background())
-}
-
-func TestEachStubReturnsExit64(t *testing.T) {
-	commands := []string{"set-mode"}
-	for _, name := range commands {
-		t.Run(name, func(t *testing.T) {
-			err := runCmd(t, name)
-			if err == nil {
-				t.Fatalf("%s: expected error", name)
-			}
-			var ee *ExitError
-			if !errors.As(err, &ee) {
-				t.Fatalf("%s: expected *ExitError, got %T", name, err)
-			}
-			if ee.Code != 64 {
-				t.Errorf("%s: code = %d, want 64", name, ee.Code)
-			}
-		})
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if strings.Contains(buf.String(), "set-mode") {
+		t.Fatalf("help output still contains 'set-mode':\n%s", buf.String())
 	}
 }
