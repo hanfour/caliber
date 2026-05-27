@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,6 +52,30 @@ func fatalExitFor(err error) *ExitError {
 }
 
 func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
+	// STEP 1: pre-flight read-only checks. Spec §3.7 / R8-F1 / R9-F1 / R16-F1.
+	// Order is reverse-aligned with ordered_delete (root → sentinel → config)
+	// so the most-recently-occurred uninstall state is detected first. NO write
+	// IO is permitted in this block — not even an O_CREATE on .lock.
+	root := config.RootDir()
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return &ExitError{Code: 1, Err: errors.New("not enrolled (config directory missing); run `caliber-agent enroll <token>` first")}
+		}
+		return &ExitError{Code: 1, Err: fmt.Errorf("stat root: %w", err)}
+	}
+	if _, err := os.Stat(config.UninstallSentinelPath()); err == nil {
+		return &ExitError{Code: 0, Err: errors.New("uninstall in progress; aborting startup")}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		// fail-closed on non-ErrNotExist stat errors (spec §7).
+		return &ExitError{Code: 0, Err: fmt.Errorf("uninstall in progress (sentinel stat: %v; fail-closed)", err)}
+	}
+	if _, err := os.Stat(config.ConfigPath()); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return &ExitError{Code: 1, Err: errors.New("not enrolled (config.toml missing — partial cleanup?); re-enroll or remove ~/.caliber-agent/")}
+		}
+		return &ExitError{Code: 1, Err: fmt.Errorf("stat config.toml: %w", err)}
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return &ExitError{Code: 1, Err: fmt.Errorf("device not enrolled; run `caliber-agent enroll` first: %w", err)}

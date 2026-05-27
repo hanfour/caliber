@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,72 @@ import (
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/internal/keychain"
 )
+
+// setupRoot creates a fresh temp dir and points CALIBER_AGENT_HOME at it.
+// Mirrors config.setupRoot so cli-package tests can assemble runtime roots
+// without dragging the config test helpers in.
+func setupRoot(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+	return dir
+}
+
+// setupEnrolledRoot creates a CALIBER_AGENT_HOME with a minimal config.toml
+// and an in-test keychain shim that returns a dummy token. It is used by the
+// run-command pre-flight / lockfile tests that need runRun to reach the
+// post-pre-flight code paths.
+func setupEnrolledRoot(t *testing.T) string {
+	t.Helper()
+	home := setupRoot(t)
+
+	scriptDir := t.TempDir()
+	script := "#!/bin/sh\necho cda_dummy\n"
+	scriptPath := filepath.Join(scriptDir, "security")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := keychain.SecurityBin
+	keychain.SecurityBin = scriptPath
+	t.Cleanup(func() { keychain.SecurityBin = orig })
+
+	if err := config.Save(&config.Config{
+		DeviceID:     "dev-abc",
+		Hostname:     "h4",
+		OS:           "darwin",
+		APIBaseURL:   "http://localhost:3001",
+		Mode:         "metadata-only",
+		IncludePaths: []string{home + "/projects/allowed"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// executeRunOnce invokes `caliber-agent run` (with whatever args are passed)
+// under a background context and returns the exit code that root.Execute
+// would have produced. It is the cobra-thin equivalent of running the
+// binary in-process.
+func executeRunOnce(t *testing.T, args []string) int {
+	t.Helper()
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs(args)
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		return 0
+	}
+	var ee *ExitError
+	if errors.As(err, &ee) {
+		return ee.Code
+	}
+	if errors.Is(err, context.Canceled) {
+		return 130
+	}
+	return 1
+}
 
 // fakeAPIServer spins up a test server that handles /v1/redaction-set and
 // /v1/ingest, returning minimal valid responses. Tests that need a real
@@ -357,5 +424,52 @@ func TestRun_OnceEndToEnd_FetchAndIngest(t *testing.T) {
 	}
 	if rs.Version != "v-1" {
 		t.Errorf("redaction-set version = %q", rs.Version)
+	}
+}
+
+// --- Phase 7 Task 7.1: pre-flight read-only checks ------------------------
+
+func TestRun_NoConfigDir_Exit1(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
+	code := executeRunOnce(t, []string{"run"})
+	if code != 1 {
+		t.Fatalf("want exit 1 not-enrolled, got %d", code)
+	}
+}
+
+func TestRun_DoesNotMkdirAllOnStartup(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+	_ = executeRunOnce(t, []string{"run"})
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("run must NOT create root when not enrolled, stat err=%v", err)
+	}
+}
+
+func TestRun_PreflightSentinelExists_NoLockCreated(t *testing.T) {
+	root := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".uninstalling"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := executeRunOnce(t, []string{"run"})
+	if code != 0 {
+		t.Fatalf("want exit 0 (uninstall in progress), got %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lock")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("run pre-flight must NOT create .lock when sentinel present, stat err=%v", err)
+	}
+}
+
+func TestRun_PreflightConfigMissing_NoLockCreated(t *testing.T) {
+	root := setupRoot(t) // root exists, no config.toml
+	code := executeRunOnce(t, []string{"run"})
+	if code != 1 {
+		t.Fatalf("want exit 1 not enrolled, got %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lock")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("run pre-flight must NOT create .lock when config.toml missing, stat err=%v", err)
 	}
 }
