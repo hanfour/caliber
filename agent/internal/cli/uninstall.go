@@ -245,7 +245,22 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 		return &ExitError{Code: 1, Err: err}
 	}
 
-	// STEP 7: final listing lands in phase 11.5.
-	_ = remoteState
+	// STEP 7: final listing. Intentionally bland — the output names only the
+	// categories of artifact that were touched (remote / keychain / local
+	// fs) without leaking secrets like the cda_* token or full audit chain.
+	// The "anti-forensics-friendly" phrasing in the spec just means we do
+	// not print extraneous diagnostics in the success path.
+	fmt.Fprintln(cmd.OutOrStdout(), "Removed:")
+	switch remoteState {
+	case remoteRevoked:
+		fmt.Fprintf(cmd.OutOrStdout(), "  ✓ remote device %s (server: revoked)\n", cfg.DeviceID)
+	case remoteFailed, remoteNoToken:
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"  ✗ remote (failed; revoke manually at %s/dashboard/devices)\n", cfg.APIBaseURL)
+	case remoteSkipped:
+		fmt.Fprintln(cmd.OutOrStdout(), "  - remote (skipped via --keep-remote)")
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "  ✓ keychain entry %s / %s\n", keychain.ServiceName, cfg.DeviceID)
+	fmt.Fprintln(cmd.OutOrStdout(), "  ✓ ~/.caliber-agent/")
 	return nil
 }

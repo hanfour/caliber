@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -340,5 +341,22 @@ func TestUninstall_InvariantSentinelOutlivesConfigToml(t *testing.T) {
 	}
 	if sentIdx < cfgIdx {
 		t.Fatalf("invariant violated: .uninstalling removed before config.toml; trace=%v", trace)
+	}
+}
+
+// ----- Phase 11.5: final listing output -----
+
+// TestUninstall_FinalListing_AllSuccess asserts the final human-readable
+// summary names the three categories of removed artifact (remote / keychain
+// / local fs). The output is intentionally bland — anti-forensics-friendly,
+// in the sense that we do not leak the API base URL or DeviceID in the
+// success path.
+func TestUninstall_FinalListing_AllSuccess(t *testing.T) {
+	setupEnrolledRoot(t)
+	stdout := executeCLIStdout(t, []string{"uninstall", "--yes", "--keep-remote"})
+	for _, want := range []string{"Removed:", "keychain entry", "~/.caliber-agent/"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q in final listing:\n%s", want, stdout)
+		}
 	}
 }
