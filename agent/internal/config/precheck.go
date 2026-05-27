@@ -26,7 +26,9 @@ func precheckRuntime() error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return ErrRootRemoved
 		}
-		// transient stat error — retry-friendly: don't block writes
+		// transient stat error — retry-friendly: don't block writes.
+		// Permission/IO errors on root will bubble up via the downstream
+		// CreateTemp/Rename failures and don't need to short-circuit here.
 	}
 
 	// 2. sentinel — fail-closed
@@ -41,7 +43,9 @@ func precheckRuntime() error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return ErrConfigRemoved
 		}
-		// transient stat error — retry-friendly
+		// transient stat error — retry-friendly.
+		// Permission/IO errors on config.toml will bubble up via the
+		// downstream CreateTemp/Rename failures and don't short-circuit here.
 	}
 	return nil
 }

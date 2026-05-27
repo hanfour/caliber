@@ -55,11 +55,13 @@ func TestPrecheckRuntime_ConfigMissing_ReturnsErrConfigRemoved(t *testing.T) {
 	}
 }
 
-func TestPrecheckRuntime_SentinelStatNonNotExist_FailsClosed(t *testing.T) {
-	// Hard to provoke EACCES portably in unit test; assert documented behaviour via wrapped sentinel.
-	// On platforms where Permission errors are possible, integration coverage handles this.
+func TestPrecheckRuntime_SentinelExistsAsDirectory_ReturnsErrUninstallInProgress(t *testing.T) {
+	// When the sentinel exists as a directory (or as any path os.Stat can read),
+	// the "err == nil" branch of precheckRuntime fires and returns ErrUninstallInProgress
+	// directly — we are NOT exercising the wrapped fail-closed branch here.
+	// Provoking the wrapped branch (e.g. EACCES on sentinel stat) is not portable across
+	// macOS/Linux/Windows; integration tests can cover that path if needed.
 	root := setupRoot(t)
-	// Make sentinel a directory (Stat returns nil err, but treat as "exists").
 	if err := os.Mkdir(filepath.Join(root, ".uninstalling"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +69,9 @@ func TestPrecheckRuntime_SentinelStatNonNotExist_FailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := precheckRuntime(); !errors.Is(err, ErrUninstallInProgress) {
-		t.Fatalf("want ErrUninstallInProgress for non-ErrNotExist sentinel stat, got %v", err)
+		t.Fatalf("want ErrUninstallInProgress, got %v", err)
 	}
-	// Sanity: fs.ErrNotExist isn't being shadowed.
+	// Sanity: fs.ErrNotExist isn't being shadowed by the test platform.
 	_, sErr := os.Stat(filepath.Join(root, "does-not-exist"))
 	if !errors.Is(sErr, fs.ErrNotExist) {
 		t.Fatalf("test helper assumption broken")

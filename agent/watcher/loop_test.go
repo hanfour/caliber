@@ -78,6 +78,12 @@ func TestLoop_HappyPath_AdvancesWatermark(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("CALIBER_AGENT_HOME", tmp)
 
+	// SaveState (called from Tick) precheckRuntime requires config.toml
+	// to exist; write a stub so the in-loop persistence path succeeds.
+	if err := os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	proj := filepath.Join(tmp, "claude-projects", "-Users-h-proj")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)

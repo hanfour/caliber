@@ -80,7 +80,7 @@ func TestRedactionSetPath_HonoursOverride(t *testing.T) {
 }
 
 func TestSaveRedactionSet_RefusesWhenRootRemoved(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", "/tmp/does-not-exist-saveredact")
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	if err := SaveRedactionSet(&redact.RedactionSet{}); !errors.Is(err, ErrRootRemoved) {
 		t.Fatalf("want ErrRootRemoved, got %v", err)
 	}

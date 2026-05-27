@@ -124,12 +124,29 @@ func writeConfigAtomically(c *Config, root string) error {
 	return nil
 }
 
-// Save is kept as a thin alias for backwards compat inside this package, but
-// callers SHOULD use SaveConfig / SaveConfigInitial explicitly. Delete this in
-// a follow-up once all callers are migrated.
+// Save is a backwards-compat alias preserved for wizard/CLI callsites that
+// still call config.Save(). PR4 phases 7 and 9 will migrate those callsites
+// to either SaveConfigInitial (first-write paths) or SaveConfig (runtime).
+// Delete this alias after both phases land.
 //
-// Deprecated: use SaveConfig for runtime updates or SaveConfigInitial for enroll first write.
-func Save(c *Config) error { return SaveConfig(c) }
+// Behaviour: matches the pre-PR4 contract (MkdirAll(root) + atomic tmp+rename
+// write, no preconditions). This is intentionally permissive so that legacy
+// fixtures whose tempdir root pre-exists (the common `t.TempDir()` pattern) do
+// not trip the first-write-aware partial-uninstall guard in SaveConfigInitial.
+// Once phases 7 and 9 migrate every caller to the explicit variant, delete
+// this alias and its plumbing.
+//
+// Deprecated: use SaveConfig for runtime updates or SaveConfigInitial for first writes.
+func Save(c *Config) error {
+	if c.IncludePaths == nil {
+		c.IncludePaths = []string{}
+	}
+	root := RootDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return fmt.Errorf("config: mkdir %s: %w", root, err)
+	}
+	return writeConfigAtomically(c, root)
+}
 
 // ValidateAPIBaseURL enforces a strict scheme whitelist:
 //   - https://   always allowed

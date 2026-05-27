@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,7 +20,12 @@ type captureLogger struct{ lines []string }
 func (l *captureLogger) Printf(format string, args ...any) { l.lines = append(l.lines, format) }
 
 func TestBootstrapRedactionSet_NoCache_FetchSucceeds(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", home)
+	// SaveRedactionSet's precheckRuntime requires config.toml; stub it.
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
 		w.Write([]byte(`{"patterns":[{"name":"n","regex":"[0-9]+","replacement":"#"}],"version":"v-1","ttl_seconds":3600}`))
@@ -61,7 +68,12 @@ func TestBootstrapRedactionSet_NoCache_FetchFails_FallsBackToDefault(t *testing.
 }
 
 func TestBootstrapRedactionSet_CacheExists_NotExpired_NoFetch(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("CALIBER_AGENT_HOME", home)
+	// SaveRedactionSet's precheckRuntime requires config.toml; stub it.
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cached := &redact.RedactionSet{
 		Patterns:   redact.DefaultPatterns,
 		Version:    "v-cached",

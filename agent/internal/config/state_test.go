@@ -74,7 +74,7 @@ func TestSaveStateNilFiles(t *testing.T) {
 }
 
 func TestSaveState_RefusesWriteWhenRootRemoved(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", "/tmp/does-not-exist-savestate")
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	if err := SaveState(&State{Files: map[string]FileWatermark{}}); !errors.Is(err, ErrRootRemoved) {
 		t.Fatalf("want ErrRootRemoved, got %v", err)
 	}
