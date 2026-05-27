@@ -30,7 +30,11 @@ const nextConfig = {
         : (process.env.API_INTERNAL_URL ?? 'http://localhost:3001')
     return [
       { source: '/trpc/:path*', destination: `${apiInternal}/trpc/:path*` },
-      { source: '/api/v1/:path*', destination: `${apiInternal}/api/v1/:path*` }
+      // Strip the /api segment when forwarding: fastify routes are registered
+      // at /v1/... (see apps/api/src/rest/*.ts), so the web rewrite must drop
+      // the /api prefix that exists only to keep the public surface namespaced
+      // under the same path Next.js reserves for its own /api/ handlers.
+      { source: '/api/v1/:path*', destination: `${apiInternal}/v1/:path*` }
     ]
   },
   webpack: (config) => {
