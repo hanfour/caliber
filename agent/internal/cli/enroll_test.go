@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
@@ -41,7 +42,10 @@ func withFakeSecurity(t *testing.T, exitCode int, stdoutLine string) string {
 }
 
 func TestEnrollHappyPath_WritesConfigAndKeychain(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	// Use absent path so first-enroll preflight passes (R18-F1 partial-cleanup
+	// preflight rejects root-exists-without-config.toml; new tests must point
+	// at a not-yet-created path).
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	argvLog := withFakeSecurity(t, 0, "")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +66,8 @@ func TestEnrollHappyPath_WritesConfigAndKeychain(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"enroll", "some-enroll-token"})
+	// httptest serves http:// so pass --insecure to satisfy ValidateAPIBaseURL.
+	cmd.SetArgs([]string{"enroll", "some-enroll-token", "--insecure"})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("enroll: %v\noutput: %s", err, buf.String())
@@ -116,7 +121,9 @@ func TestEnrollAlreadyEnrolled_ReturnsExit1(t *testing.T) {
 }
 
 func TestEnrollMissingBaseURL_ReturnsExit1(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	// Point at an absent path so the partial-cleanup preflight does not fire
+	// before the API base URL check.
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	t.Setenv("CALIBER_API_BASE_URL", "")
 
 	cmd := New()
@@ -192,7 +199,7 @@ func TestRunEnroll_HostnameFailureIsNotFatal(t *testing.T) {
 	// to assert non-empty in the normal case; the empty-hostname case is
 	// not directly inducible from a test, but the warn-only branch is
 	// proven by inspection of the runEnroll implementation.
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	withFakeSecurity(t, 0, "")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -214,14 +221,14 @@ func TestRunEnroll_HostnameFailureIsNotFatal(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"enroll", "t"})
+	cmd.SetArgs([]string{"enroll", "t", "--insecure"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 }
 
 func TestEnrollServerReturns401_ReturnsExit1_NoLocalState(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	withFakeSecurity(t, 0, "")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -237,7 +244,7 @@ func TestEnrollServerReturns401_ReturnsExit1_NoLocalState(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"enroll", "bad-token"})
+	cmd.SetArgs([]string{"enroll", "bad-token", "--insecure"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
@@ -258,7 +265,7 @@ func TestEnrollServerReturns401_ReturnsExit1_NoLocalState(t *testing.T) {
 }
 
 func TestEnrollHuhAbort_ReturnsExit130(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	withFakeSecurity(t, 0, "")
 
 	// The server never gets hit because the wizard cancels at first Confirm.
@@ -278,7 +285,7 @@ func TestEnrollHuhAbort_ReturnsExit130(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"enroll", "any-token"})
+	cmd.SetArgs([]string{"enroll", "any-token", "--insecure"})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
@@ -291,4 +298,162 @@ func TestEnrollHuhAbort_ReturnsExit130(t *testing.T) {
 	if ee.Code != 130 {
 		t.Errorf("Code = %d, want 130 (SIGINT/huh-abort contract)", ee.Code)
 	}
+}
+
+// enrollCountingServer returns an httptest.Server that always replies 201 to
+// /v1/devices/enroll and increments *calls. Used by Phase 8 preflight tests
+// to assert the API is (or isn't) contacted.
+func enrollCountingServer(t *testing.T, calls *int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/devices/enroll" {
+			atomic.AddInt32(calls, 1)
+		}
+		w.WriteHeader(201)
+		w.Write([]byte(`{"deviceId":"d-phase8","key":"cda_phase8","keyPrefix":"cda_"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestEnroll_SentinelPresent_Exit1_NoAPICall(t *testing.T) {
+	root := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(root, ".uninstalling"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int32
+	srv := enrollCountingServer(t, &calls)
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"enroll", "tok", "--api-base-url=" + srv.URL})
+	err := cmd.ExecuteContext(context.Background())
+
+	var ee *ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("err = %v, want *ExitError", err)
+	}
+	if ee.Code != 1 {
+		t.Errorf("Code = %d, want 1", ee.Code)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Errorf("API must NOT be called when sentinel present; calls=%d", got)
+	}
+	if !strings.Contains(err.Error(), "uninstall in progress") {
+		t.Errorf("error should mention uninstall in progress, got: %v", err)
+	}
+}
+
+func TestEnroll_PartialCleanup_RootExistsConfigMissing_Exit1(t *testing.T) {
+	// root exists; no config.toml, no sentinel — simulates ordered_delete (h)
+	setupRoot(t)
+	var calls int32
+	srv := enrollCountingServer(t, &calls)
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"enroll", "tok", "--api-base-url=" + srv.URL})
+	err := cmd.ExecuteContext(context.Background())
+
+	var ee *ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("err = %v, want *ExitError", err)
+	}
+	if ee.Code != 1 {
+		t.Errorf("Code = %d, want 1 partial uninstall, got %d", ee.Code, ee.Code)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Errorf("API must NOT be called on partial cleanup; calls=%d", got)
+	}
+	if !strings.Contains(err.Error(), "partial uninstall") {
+		t.Errorf("error should mention partial uninstall, got: %v", err)
+	}
+}
+
+func TestEnroll_RootMissing_FirstEnrollHappyPath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+	withFakeSecurity(t, 0, "")
+
+	var calls int32
+	srv := enrollCountingServer(t, &calls)
+
+	useFakePrompter(t, []bool{true, true}, [][]int{{0}})
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	// httptest serves http:// so pass --insecure; the goal of this test is to
+	// confirm root-missing IS a first-enroll happy path (no preflight reject).
+	cmd.SetArgs([]string{"enroll", "tok", "--api-base-url=" + srv.URL, "--insecure"})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("want nil, got %v\noutput: %s", err, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "config.toml")); err != nil {
+		t.Fatalf("config.toml expected, %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("expected 1 API call, got %d", got)
+	}
+}
+
+func TestEnroll_HTTPWithoutInsecure_Rejected(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
+	var calls int32
+	srv := enrollCountingServer(t, &calls)
+	// srv.URL is http:// — confirm validator rejects without --insecure.
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"enroll", "tok", "--api-base-url=" + srv.URL})
+	err := cmd.ExecuteContext(context.Background())
+
+	var ee *ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("err = %v, want *ExitError", err)
+	}
+	if ee.Code != 1 {
+		t.Errorf("Code = %d, want 1", ee.Code)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Errorf("API must NOT be called when http rejected; calls=%d", got)
+	}
+	if !strings.Contains(err.Error(), "insecure") && !strings.Contains(err.Error(), "http") {
+		t.Errorf("error should mention http/--insecure, got: %v", err)
+	}
+}
+
+func TestEnroll_HTTPWithInsecure_Allowed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+	withFakeSecurity(t, 0, "")
+
+	var calls int32
+	srv := enrollCountingServer(t, &calls)
+	useFakePrompter(t, []bool{true, true}, [][]int{{0}})
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"enroll", "tok", "--api-base-url=" + srv.URL, "--insecure"})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("want nil, got %v\noutput: %s", err, buf.String())
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("expected 1 API call, got %d", got)
+	}
+	// InsecureTransport persistence to config.toml is verified by the wizard
+	// test TestRunEnrollWizard_InsecureTransportPersisted (Task 8.2). Here we
+	// only confirm --insecure unblocks the http:// reject gate end-to-end.
 }

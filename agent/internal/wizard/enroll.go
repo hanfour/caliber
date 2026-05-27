@@ -24,6 +24,7 @@ type Deps struct {
 
 	// Persisted into the new config.toml.
 	APIBaseURL         string
+	InsecureTransport  bool
 	ClaudeProjectsRoot string // typically ~/.claude/projects
 }
 

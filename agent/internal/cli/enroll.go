@@ -3,7 +3,9 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -22,20 +24,44 @@ import (
 var testPrompterHook wizard.Prompter
 
 func newEnrollCmd() *cobra.Command {
+	var apiBaseURL string
+	var insecure bool
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "enroll <token>",
 		Short: "Enrol this device with caliber using a one-shot enrollment token",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnroll(cmd, args[0], force)
+			return runEnroll(cmd, args[0], force, apiBaseURL, insecure)
 		},
 	}
+	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "caliber API URL (or set CALIBER_API_BASE_URL)")
+	cmd.Flags().BoolVar(&insecure, "insecure", false, "allow http:// in api-base-url (dev/local only)")
 	cmd.Flags().BoolVar(&force, "force", false, "re-enroll over an existing device")
 	return cmd
 }
 
-func runEnroll(cmd *cobra.Command, token string, force bool) error {
+func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool) error {
+	// Early preflight — R17-F1 / R18-F1 (spec §3.8).
+	// Both checks run BEFORE config.Load / API call / keychain write so that
+	// a partially-uninstalled state can never be "healed" by re-enrolling.
+	root := config.RootDir()
+
+	// (1) sentinel preflight — fail-closed on any stat error other than ErrNotExist.
+	if _, err := os.Stat(filepath.Join(root, ".uninstalling")); err == nil {
+		return &ExitError{Code: 1, Err: errors.New("[fatal] uninstall in progress; refusing to enroll")}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return &ExitError{Code: 1, Err: fmt.Errorf("[fatal] cannot stat uninstall sentinel (%v); failing closed", err)}
+	}
+
+	// (2) partial-cleanup preflight — root exists but config.toml missing means
+	// ordered_delete (h) ran but (i) hasn't completed; manually remove root.
+	if rootInfo, rErr := os.Stat(root); rErr == nil && rootInfo.IsDir() {
+		if _, cErr := os.Stat(filepath.Join(root, "config.toml")); errors.Is(cErr, fs.ErrNotExist) {
+			return &ExitError{Code: 1, Err: errors.New("[fatal] partial uninstall detected (root exists, config.toml missing); manually 'rm -rf ~/.caliber-agent/' then retry enroll")}
+		}
+	}
+
 	// Already enrolled?
 	if existing, err := config.Load(); err == nil && !force {
 		return &ExitError{Code: 1, Err: fmt.Errorf("device already enrolled as %q; use --force to re-enroll", existing.DeviceID)}
@@ -44,12 +70,15 @@ func runEnroll(cmd *cobra.Command, token string, force bool) error {
 	}
 
 	// Resolve API base URL: flag > env > (config — N/A during enroll).
-	baseURL := flags.APIBaseURL
+	baseURL := apiBaseURL
 	if baseURL == "" {
 		baseURL = os.Getenv("CALIBER_API_BASE_URL")
 	}
 	if baseURL == "" {
 		return &ExitError{Code: 1, Err: fmt.Errorf("API base URL not configured: pass --api-base-url or set CALIBER_API_BASE_URL")}
+	}
+	if err := config.ValidateAPIBaseURL(baseURL, insecure); err != nil {
+		return &ExitError{Code: 1, Err: fmt.Errorf("invalid api_base_url: %w", err)}
 	}
 
 	prompter := wizard.Prompter(wizard.NewStdinPrompter())
@@ -72,6 +101,7 @@ func runEnroll(cmd *cobra.Command, token string, force bool) error {
 		OS:                 osName,
 		AgentVersion:       version.Version,
 		APIBaseURL:         baseURL,
+		InsecureTransport:  insecure,
 		ClaudeProjectsRoot: claudeProjectsRoot(),
 	}
 	if err := wizard.RunEnrollWizard(cmd.Context(), deps, token); err != nil {
