@@ -237,10 +237,21 @@ var (
 	_ Logger        = (*config.RFCLogger)(nil)
 )
 
-// allowed reports whether cwd is within any of the include paths.
+// allowed reports whether cwd is within any of the include paths. cwd is
+// resolved via filepath.EvalSymlinks first so attacker-supplied symlinks
+// cannot trick the prefix match (spec §6.1). On EvalSymlinks failure the
+// raw cwd is used as a best-effort fallback — the caller path elsewhere
+// already rejects symlinks at file-listing time, and we prefer not to
+// silently drop traffic just because a directory was just renamed.
+// IncludePaths are expected to be pre-canonicalised at enrol/add-path
+// write-time (spec §4.2).
 func allowed(cwd string, includes []string) bool {
+	resolved, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		resolved = cwd
+	}
 	for _, inc := range includes {
-		if cwd == inc || strings.HasPrefix(cwd, inc+"/") {
+		if resolved == inc || strings.HasPrefix(resolved, inc+"/") {
 			return true
 		}
 	}

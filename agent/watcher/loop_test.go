@@ -542,4 +542,23 @@ func TestLoop_Tick_PropagatesInvalidTokenFromSink(t *testing.T) {
 	}
 }
 
+func TestAllowed_EvalSymlinksOnCWD(t *testing.T) {
+	realDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(linkParent, "code")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	// includePaths is the *real* path; cwd presented is the symlinked alias.
+	if !allowed(link, []string{realDir}) {
+		t.Fatalf("cwd via symlink should match includePaths=[real] after EvalSymlinks")
+	}
+}
+
 var _ io.ReadCloser // suppress unused import
