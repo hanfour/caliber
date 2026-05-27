@@ -18,7 +18,7 @@ func runCmd(t *testing.T, args ...string) error {
 }
 
 func TestEachStubReturnsExit64(t *testing.T) {
-	commands := []string{"status", "add-path", "remove-path", "pause", "resume", "set-mode", "uninstall"}
+	commands := []string{"status", "pause", "resume", "set-mode", "uninstall"}
 	for _, name := range commands {
 		t.Run(name, func(t *testing.T) {
 			err := runCmd(t, name)
