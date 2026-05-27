@@ -149,8 +149,14 @@ func TestRun_OnceWithMatchingFile_ProducesIngestLine(t *testing.T) {
 
 	srv := fakeAPIServer(t)
 
-	allowed := filepath.Join(home, "projects", "allowed")
-	os.MkdirAll(allowed, 0o755)
+	allowedRaw := filepath.Join(home, "projects", "allowed")
+	os.MkdirAll(allowedRaw, 0o755)
+	// cwdresolve now canonicalises via EvalSymlinks (PR4 §6); IncludePaths
+	// must therefore be the canonical form for the allow-list to match.
+	allowed, err := filepath.EvalSymlinks(allowedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := config.Save(&config.Config{
 		DeviceID:     "dev-abc",
 		APIBaseURL:   srv.URL,
@@ -292,8 +298,12 @@ func TestRun_OnceEndToEnd_FetchAndIngest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	allowed := filepath.Join(home, "projects", "allowed")
-	os.MkdirAll(allowed, 0o755)
+	allowedRaw := filepath.Join(home, "projects", "allowed")
+	os.MkdirAll(allowedRaw, 0o755)
+	allowed, err := filepath.EvalSymlinks(allowedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := config.Save(&config.Config{
 		DeviceID:     "dev-abc",
 		APIBaseURL:   srv.URL,

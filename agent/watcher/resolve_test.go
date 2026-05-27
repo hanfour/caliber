@@ -15,6 +15,11 @@ func TestCWDResolver_PassesThroughToPackage(t *testing.T) {
 	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// cwdresolve canonicalises via EvalSymlinks.
+	wantCWD, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Claude-encoded dir name: leading "-" + dashes for slashes.
 	encoded := "-" + strings.TrimPrefix(strings.ReplaceAll(realDir, "/", "-"), "-")
@@ -30,8 +35,8 @@ func TestCWDResolver_PassesThroughToPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveClaude: %v", err)
 	}
-	if got != realDir {
-		t.Errorf("got %q, want %q", got, realDir)
+	if got != wantCWD {
+		t.Errorf("got %q, want %q", got, wantCWD)
 	}
 }
 

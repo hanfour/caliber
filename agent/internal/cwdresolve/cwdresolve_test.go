@@ -71,12 +71,19 @@ func TestResolveOneClaudeDir_JSONLHasCWD(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// tryExtractCWD now canonicalises via EvalSymlinks; on macOS that
+	// resolves /var/folders/... → /private/var/folders/...
+	wantDir, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	cwd, err := ResolveOneClaudeDir(tmp, DefaultOpener)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if cwd != realDir {
-		t.Errorf("got %q, want %q", cwd, realDir)
+	if cwd != wantDir {
+		t.Errorf("got %q, want %q", cwd, wantDir)
 	}
 }
 
@@ -130,18 +137,29 @@ func TestResolveOneClaudeDir_DirnameFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// dirnameFallback now EvalSymlinks the decoded candidate; on macOS
+	// /var/folders/... is itself a symlink to /private/var/folders/...
+	wantDir, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Empty dir → no JSONL → dirname fallback should resolve back to realDir
 	cwd, err := ResolveOneClaudeDir(claudeDir, DefaultOpener)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if cwd != realDir {
-		t.Errorf("got %q, want %q", cwd, realDir)
+	if cwd != wantDir {
+		t.Errorf("got %q, want %q", cwd, wantDir)
 	}
 }
 
 func TestScanJSONLForCWD_MultipleFiles(t *testing.T) {
 	realDir := t.TempDir()
+	wantDir, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Second file has valid CWD, first has invalid
 	file1Content := `{"cwd":"/nonexistent/path"}` + "\n"
@@ -160,8 +178,8 @@ func TestScanJSONLForCWD_MultipleFiles(t *testing.T) {
 	}
 
 	result := scanJSONLForCWD(paths, opener)
-	if result != realDir {
-		t.Errorf("got %q, want %q", result, realDir)
+	if result != wantDir {
+		t.Errorf("got %q, want %q", result, wantDir)
 	}
 }
 
@@ -188,10 +206,14 @@ func TestTryExtractCWD_NoCWDField(t *testing.T) {
 
 func TestTryExtractCWD_ValidDir(t *testing.T) {
 	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	line := fmt.Sprintf(`{"cwd":%q}`, dir)
 	got := tryExtractCWD(line)
-	if got != dir {
-		t.Errorf("got %q, want %q", got, dir)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -261,5 +283,51 @@ func TestListJSONL_MissingDir(t *testing.T) {
 	}
 	if len(paths) != 0 {
 		t.Errorf("got %v, want empty", paths)
+	}
+}
+
+func TestTryExtractCWD_SymlinkResolved(t *testing.T) {
+	target, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkParent := t.TempDir()
+	link := filepath.Join(linkParent, "via-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	line := fmt.Sprintf(`{"cwd":%q}`, link)
+	got := tryExtractCWD(line)
+	if got != target {
+		t.Fatalf("cwd via symlink should resolve to target.\nwant %q\ngot  %q", target, got)
+	}
+}
+
+func TestTryExtractCWD_BrokenSymlinkReturnsEmpty(t *testing.T) {
+	link := filepath.Join(t.TempDir(), "broken")
+	_ = os.Symlink("/no/such/path", link)
+	line := fmt.Sprintf(`{"cwd":%q}`, link)
+	if got := tryExtractCWD(line); got != "" {
+		t.Fatalf("broken symlink cwd must return empty, got %q", got)
+	}
+}
+
+func TestDirnameFallback_EvalSymlinks(t *testing.T) {
+	target, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	via := filepath.Join(parent, "via-link")
+	if err := os.Symlink(target, via); err != nil {
+		t.Fatal(err)
+	}
+	// We feed the dash-encoded form of `via-link` and expect EvalSymlinks to follow.
+	encoded := "-" + strings.ReplaceAll(strings.TrimPrefix(via, "/"), "/", "-")
+	if got := dirnameFallback(encoded); got != target {
+		t.Fatalf("dirnameFallback should EvalSymlinks the resolved candidate; want %q, got %q", target, got)
 	}
 }
