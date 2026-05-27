@@ -83,7 +83,21 @@ func BootstrapRedactionSet(ctx context.Context, client *api.Client, token string
 		TTLSeconds: fresh.TTLSeconds,
 	}
 	if err := set.Compile(); err != nil {
-		logger.Printf("[warn] %v", err)
+		// ErrTooManyPatterns is a hard rejection — the fetched set is unsafe
+		// (all Regex fields are nil so ScrubString would no-op, leaking
+		// secrets). Fall back to the stale cache if we have one, otherwise
+		// the bundled default. Do NOT persist the rejected set.
+		if errors.Is(err, redact.ErrTooManyPatterns) {
+			logger.Printf("[error] fresh redaction-set rejected: %v; falling back", err)
+			if hasCache {
+				_ = cached.Compile()
+				prov.Set(cached)
+				return prov, nil
+			}
+			prov.Set(redact.DefaultSet())
+			return prov, nil
+		}
+		logger.Printf("[warn] %v", err) // per-pattern errors — set still usable
 	}
 	prov.Set(set)
 	_ = config.SaveRedactionSet(set)
