@@ -38,11 +38,13 @@ func LoadRedactionSet() (*redact.RedactionSet, error) {
 }
 
 // SaveRedactionSet writes atomically via tmp + rename. Perm 0o600.
+// Runtime-only write: refuses to operate if precheckRuntime fails (root
+// removed / uninstall in progress / config.toml missing). Never MkdirAlls.
 func SaveRedactionSet(s *redact.RedactionSet) error {
-	root := RootDir()
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return fmt.Errorf("config: mkdir %s: %w", root, err)
+	if err := precheckRuntime(); err != nil {
+		return err
 	}
+	root := RootDir()
 	final := RedactionSetPath()
 	tmp, err := os.CreateTemp(root, ".redaction-set.json.*")
 	if err != nil {
