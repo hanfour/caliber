@@ -5,6 +5,12 @@ import (
 	"regexp"
 )
 
+// MaxRegexSrcLen is the maximum allowed byte length of an individual
+// Pattern.RegexSrc. Patterns longer than this are rejected by Compile()
+// to bound per-pattern memory / compile cost when fetching server-provided
+// regex sets.
+const MaxRegexSrcLen = 1024
+
 // Pattern is one secret-scrub regex with a replacement template. RegexSrc
 // holds the source string so the set can be serialised to JSON / fetched
 // from the server; Regex is the compiled form, rebuilt via Compile().
@@ -16,11 +22,14 @@ type Pattern struct {
 }
 
 // Compile parses RegexSrc into Regex. Returns an error with the pattern
-// name on bad regex. Callers should skip bad patterns + log; one broken
-// pattern must not break the set.
+// name on bad regex or oversized RegexSrc. Callers should skip bad
+// patterns + log; one broken pattern must not break the set.
 func (p *Pattern) Compile() error {
 	if p.Regex != nil {
 		return nil
+	}
+	if len(p.RegexSrc) > MaxRegexSrcLen {
+		return fmt.Errorf("pattern %q: regex too long (%d > %d)", p.Name, len(p.RegexSrc), MaxRegexSrcLen)
 	}
 	re, err := regexp.Compile(p.RegexSrc)
 	if err != nil {

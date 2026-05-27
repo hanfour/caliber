@@ -9,10 +9,15 @@ import (
 
 // PersistentFlags captures the root-level flags shared by every sub-command.
 // Resolution order is documented in spec §4.6.
+//
+// Note: --api-base-url is intentionally NOT a persistent flag. It only makes
+// sense on `enroll` (no config.toml yet) and is wired locally there; runtime
+// commands read api_base_url from config.toml. Promoting it back to a root
+// persistent flag would create the misleading impression that other commands
+// honor it.
 type PersistentFlags struct {
-	ConfigDir  string // --config-dir
-	APIBaseURL string // --api-base-url
-	Verbose    bool   // -v / --verbose
+	ConfigDir string // --config-dir
+	Verbose   bool   // -v / --verbose
 }
 
 var flags PersistentFlags
@@ -27,7 +32,6 @@ func New() *cobra.Command {
 		SilenceErrors: false,
 	}
 	cmd.PersistentFlags().StringVar(&flags.ConfigDir, "config-dir", "", "override CALIBER_AGENT_HOME")
-	cmd.PersistentFlags().StringVar(&flags.APIBaseURL, "api-base-url", "", "override CALIBER_API_BASE_URL / config api_base_url")
 	cmd.PersistentFlags().BoolVarP(&flags.Verbose, "verbose", "v", false, "print extra error context")
 
 	cmd.AddCommand(newVersionCmd())
@@ -38,7 +42,6 @@ func New() *cobra.Command {
 	cmd.AddCommand(newRemovePathCmd())
 	cmd.AddCommand(newPauseCmd())
 	cmd.AddCommand(newResumeCmd())
-	cmd.AddCommand(newSetModeCmd())
 	cmd.AddCommand(newUninstallCmd())
 	return cmd
 }

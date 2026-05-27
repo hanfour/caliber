@@ -3,8 +3,10 @@
 Go single-binary daemon that ships LLM coding-session telemetry from local
 Claude / Codex transcripts to a caliber instance.
 
-**Status (PR1):** scaffolding + interactive `enroll`. Watcher, ingest,
-launchd, and the remaining commands land in subsequent PRs.
+**Status (PR4):** scaffolding, interactive `enroll`, watcher, ingest,
+redaction, and all subcommands shipped. Daemon is foreground-only (no
+launchd). Manual start/stop via `caliber-agent run` + Ctrl+C; pause/resume
+via subcommands.
 
 ## Install
 
@@ -28,10 +30,44 @@ The interactive wizard prompts for which project paths to watch. The
 default is **none** — caliber-agent will not upload anything until you
 explicitly add paths. This is a deliberate privacy contract.
 
-## Environment
+## Environment Variables (full reference)
 
-- `CALIBER_AGENT_HOME` — config root, defaults to `~/.caliber-agent`
-- `CALIBER_API_BASE_URL` — caliber API URL (required during `enroll`)
+| Env | Effect | When read |
+|---|---|---|
+| `CALIBER_AGENT_HOME` | Overrides `~/.caliber-agent` config / state / log directory | Every subcommand startup |
+| `CALIBER_API_BASE_URL` | Default API base URL when `--api-base-url` is omitted | **Only `enroll`** (`run` reads from `config.toml`) |
+| `CALIBER_CLAUDE_PROJECTS` | Overrides `~/.claude/projects` watch root (advanced / dev) | `enroll` wizard scan + `run` startup |
+| `CALIBER_CODEX_SESSIONS` | Overrides `~/.codex/sessions` watch root (advanced / dev) | `run` startup |
+
+## Lifecycle
+
+`caliber-agent` runs as a **foreground** process: you start it yourself
+(`caliber-agent run`), and stop it with Ctrl+C. There is no auto-start. To
+pause without killing the daemon, use `caliber-agent pause`; resume with
+`caliber-agent resume`.
+
+## Uninstall
+
+`caliber-agent uninstall` performs three steps in order:
+
+1. **Revoke remote** — calls `DELETE /v1/devices/me` so the server marks
+   this device's API keys revoked.
+2. **Remove keychain entry** — `tw.caliber.agent` / `<device_id>`.
+3. **Delete `~/.caliber-agent/`** — config, state, redaction-set cache,
+   agent.log, lockfile, and the in-progress uninstall sentinel.
+
+Useful flags:
+
+- `--yes` — skip the consent prompt (required in non-TTY shells / CI).
+- `--keep-remote` — skip step 1 (device already revoked via web UI, or
+  server unreachable).
+- `--force` — proceed even if a `caliber-agent run` daemon is currently
+  active (the daemon will self-exit on its next sentinel/config check).
+
+If uninstall is interrupted mid-cleanup (e.g. SIGINT after step 5):
+re-running `caliber-agent uninstall` is **safe** while `config.toml`
+still exists; if it doesn't, manually `rm -rf ~/.caliber-agent/` and
+revoke the device in the caliber web UI.
 
 ## Build from source
 

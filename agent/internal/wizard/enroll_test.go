@@ -3,6 +3,8 @@ package wizard
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,7 +13,10 @@ import (
 )
 
 func TestRunEnrollWizard_HappyPathNoPaths(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	// SaveConfigInitial's first-write-aware precheck rejects root-exists +
+	// config.toml-missing (treats it as a partial uninstall). Tests that
+	// drive the first-write path must point at an absent root.
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 
 	fp := NewFakePrompter()
 	fp.Answers.Confirms = []bool{true, true} // "begin?" yes, "confirm config" yes
@@ -141,7 +146,7 @@ func TestRunEnrollWizard_UserCancelsInitialConfirm(t *testing.T) {
 }
 
 func TestRunEnrollWizard_UserCancelsFinalConfirm_KeepsKeychainAndInitialConfig(t *testing.T) {
-	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
 	fp := NewFakePrompter()
 	fp.Answers.Confirms = []bool{true, false} // begin yes, final-save no
 	fp.Answers.Selections = [][]int{{0}}      // pick "None"
@@ -178,5 +183,150 @@ func TestLostKeyErrorImplementsErrorAndUnwrap(t *testing.T) {
 	}
 	if !errors.Is(lk, cause) {
 		t.Errorf("errors.Is should find the wrapped cause")
+	}
+}
+
+// happyDeps returns a Deps wired with a success-shaped Enroll, a no-op
+// SetSecret, and a Scan stub. The caller supplies the Prompter so each test
+// can script its own answers. Used by the Phase 8.2 wizard tests.
+func happyDeps(prompter Prompter, cands []ProjectCandidate) Deps {
+	return Deps{
+		Prompter: prompter,
+		Scan:     func(string) ([]ProjectCandidate, error) { return cands, nil },
+		Enroll: func(_ context.Context, _ api.EnrollRequest) (*api.EnrollResponse, error) {
+			return &api.EnrollResponse{DeviceID: "d-8", Key: "cda_p8", KeyPrefix: "cda_"}, nil
+		},
+		SetSecret:    func(_, _ string) error { return nil },
+		Hostname:     "h",
+		OS:           "darwin",
+		AgentVersion: "dev",
+		APIBaseURL:   "https://api.example",
+	}
+}
+
+func TestRunEnrollWizard_FirstWriteUsesSaveConfigInitial(t *testing.T) {
+	// Point CALIBER_AGENT_HOME at a NOT-YET-CREATED path. SaveConfigInitial
+	// must MkdirAll the root and write config.toml in one shot — the contract
+	// the wizard relies on for first-enroll.
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{0}} // "None"
+	deps := happyDeps(fp, nil)
+
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatalf("RunEnrollWizard: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "config.toml")); err != nil {
+		t.Fatalf("config.toml expected under absent root, %v", err)
+	}
+}
+
+func TestRunEnrollWizard_IncludePathsNormalised(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+
+	// Build a symlink: linkParent/code -> target. Tests assert the wizard
+	// persists `target` (resolved) instead of `via` (symlinked path).
+	target := t.TempDir()
+	// EvalSymlinks on macOS returns the canonical path through /private/tmp;
+	// resolve the expected value the same way to keep the assertion portable.
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkParent := t.TempDir()
+	via := filepath.Join(linkParent, "code")
+	if err := os.Symlink(target, via); err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject a Scan stub that returns the symlinked path as the candidate;
+	// the prompter picks index 1 (the only non-"None" option).
+	cands := []ProjectCandidate{{CWD: via}}
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{1}}
+	deps := happyDeps(fp, cands)
+
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatalf("RunEnrollWizard: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.IncludePaths) != 1 {
+		t.Fatalf("IncludePaths len = %d, want 1; got %v", len(cfg.IncludePaths), cfg.IncludePaths)
+	}
+	if cfg.IncludePaths[0] != resolvedTarget {
+		t.Fatalf("IncludePaths[0] = %q, want EvalSymlinks-normalised %q (via %q)",
+			cfg.IncludePaths[0], resolvedTarget, via)
+	}
+}
+
+func TestRunEnrollWizard_IncludePathsBrokenSymlinkSkipped(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+
+	// Real path: kept. Broken symlink (target deleted): dropped with a stderr
+	// warning ("warning: skipping ... (cannot resolve: ...)"). We don't assert
+	// the warning text here — verifying the path is excluded from the persisted
+	// config is sufficient for behavioural coverage, and capturing os.Stderr
+	// would complicate the test for marginal benefit.
+	good := t.TempDir()
+	resolvedGood, err := filepath.EvalSymlinks(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := t.TempDir()
+	linkParent := t.TempDir()
+	brokenLink := filepath.Join(linkParent, "broken")
+	if err := os.Symlink(dead, brokenLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(dead); err != nil {
+		t.Fatal(err)
+	}
+
+	cands := []ProjectCandidate{{CWD: good}, {CWD: brokenLink}}
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{1, 2}} // pick both candidates (broken should drop)
+	deps := happyDeps(fp, cands)
+
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatalf("RunEnrollWizard: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.IncludePaths) != 1 || cfg.IncludePaths[0] != resolvedGood {
+		t.Fatalf("expected only resolved good path %q, got %v", resolvedGood, cfg.IncludePaths)
+	}
+}
+
+func TestRunEnrollWizard_InsecureTransportPersisted(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{0}}
+	deps := happyDeps(fp, nil)
+	deps.InsecureTransport = true
+
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.InsecureTransport {
+		t.Fatalf("InsecureTransport must persist (got cfg=%+v)", cfg)
 	}
 }

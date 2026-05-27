@@ -8,6 +8,7 @@ import { parseServerEnv } from "@caliber/config/env";
 import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
 import { devicesEnrollRoutes } from "./rest/devicesEnroll.js";
+import { devicesRevokeSelfRoutes } from "./rest/devicesRevokeSelf.js";
 import { ingestRoutes } from "./rest/ingest.js";
 import { redactionSetRoutes } from "./rest/redactionSet.js";
 import { startPartitionRollForwardCron } from "./services/clientEventsPartitions.js";
@@ -68,6 +69,7 @@ export async function buildServer() {
   await app.register(authPlugin, { env });
   await app.register(healthRoutes);
   await app.register(devicesEnrollRoutes(env));
+  await app.register(devicesRevokeSelfRoutes(env));
   await app.register(ingestRoutes(env));
   await app.register(redactionSetRoutes(env));
 

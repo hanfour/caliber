@@ -79,3 +79,82 @@ func TestClaudeSource_ListMainAndSubagent(t *testing.T) {
 		t.Errorf("sub ParentSessionID = %q", sub.ParentSessionID)
 	}
 }
+
+func TestClaudeSource_List_SkipsSymlinkedJsonl(t *testing.T) {
+	root := t.TempDir()
+	projDir := filepath.Join(root, "-Users-h-proj")
+	if err := os.MkdirAll(projDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// real file
+	real := filepath.Join(projDir, "real.jsonl")
+	if err := os.WriteFile(real, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink — must be skipped
+	sym := filepath.Join(projDir, "evil.jsonl")
+	if err := os.Symlink("/etc/passwd", sym); err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewClaudeSource(root)
+	refs, err := src.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, r := range refs {
+		if filepath.Base(r.Path) == "evil.jsonl" {
+			t.Fatalf("symlink must be skipped, found %s", r.Path)
+		}
+	}
+	// real must still appear
+	found := false
+	for _, r := range refs {
+		if filepath.Base(r.Path) == "real.jsonl" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("real jsonl must still be listed")
+	}
+}
+
+func TestClaudeSource_List_SkipsSymlinkedSubagentJsonl(t *testing.T) {
+	root := t.TempDir()
+	projDir := filepath.Join(root, "-Users-h-proj")
+	sessID := "00000000-0000-0000-0000-000000000001"
+	subDir := filepath.Join(projDir, sessID, "subagents")
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// real subagent file
+	realSub := filepath.Join(subDir, "agent-real.jsonl")
+	if err := os.WriteFile(realSub, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlinked subagent file
+	symSub := filepath.Join(subDir, "agent-evil.jsonl")
+	if err := os.Symlink("/etc/passwd", symSub); err != nil {
+		t.Fatal(err)
+	}
+
+	src := NewClaudeSource(root)
+	refs, err := src.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, r := range refs {
+		if filepath.Base(r.Path) == "agent-evil.jsonl" {
+			t.Fatalf("symlinked subagent must be skipped, found %s", r.Path)
+		}
+	}
+	found := false
+	for _, r := range refs {
+		if filepath.Base(r.Path) == "agent-real.jsonl" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("real subagent jsonl must still be listed")
+	}
+}

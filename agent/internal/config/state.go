@@ -43,10 +43,10 @@ func SaveState(s *State) error {
 	if s.Files == nil {
 		s.Files = map[string]FileWatermark{}
 	}
-	root := RootDir()
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return fmt.Errorf("state: mkdir %s: %w", root, err)
+	if err := precheckRuntime(); err != nil {
+		return err
 	}
+	root := RootDir()
 	final := StatePath()
 	tmp, err := os.CreateTemp(root, ".state.json.*")
 	if err != nil {

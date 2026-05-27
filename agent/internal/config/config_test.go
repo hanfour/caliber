@@ -17,7 +17,7 @@ func TestLoadMissingReturnsErrNotEnrolled(t *testing.T) {
 }
 
 func TestSaveThenLoadRoundTrip(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := filepath.Join(t.TempDir(), "fresh")
 	t.Setenv("CALIBER_AGENT_HOME", tmp)
 
 	c := &Config{
@@ -28,8 +28,8 @@ func TestSaveThenLoadRoundTrip(t *testing.T) {
 		Mode:         "metadata-only",
 		IncludePaths: []string{},
 	}
-	if err := Save(c); err != nil {
-		t.Fatalf("Save: %v", err)
+	if err := SaveConfigInitial(c); err != nil {
+		t.Fatalf("SaveConfigInitial: %v", err)
 	}
 
 	info, err := os.Stat(filepath.Join(tmp, "config.toml"))
@@ -56,9 +56,9 @@ func TestSaveThenLoadRoundTrip(t *testing.T) {
 }
 
 func TestSaveIsAtomic(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := filepath.Join(t.TempDir(), "fresh")
 	t.Setenv("CALIBER_AGENT_HOME", tmp)
-	if err := Save(&Config{DeviceID: "x"}); err != nil {
+	if err := SaveConfigInitial(&Config{DeviceID: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(tmp)
@@ -75,8 +75,8 @@ func TestSaveIsAtomic(t *testing.T) {
 func TestSaveCreatesParentDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(tmp, "nested", "deep"))
-	if err := Save(&Config{DeviceID: "x"}); err != nil {
-		t.Fatalf("Save: %v", err)
+	if err := SaveConfigInitial(&Config{DeviceID: "x"}); err != nil {
+		t.Fatalf("SaveConfigInitial: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(tmp, "nested", "deep", "config.toml")); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -100,11 +100,11 @@ func TestLoadMalformedTOML(t *testing.T) {
 }
 
 func TestSaveNilIncludePaths(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := filepath.Join(t.TempDir(), "fresh")
 	t.Setenv("CALIBER_AGENT_HOME", tmp)
 	// Save with nil IncludePaths — should be coerced to empty slice
-	if err := Save(&Config{DeviceID: "y", IncludePaths: nil}); err != nil {
-		t.Fatalf("Save: %v", err)
+	if err := SaveConfigInitial(&Config{DeviceID: "y", IncludePaths: nil}); err != nil {
+		t.Fatalf("SaveConfigInitial: %v", err)
 	}
 	got, err := Load()
 	if err != nil {
@@ -112,5 +112,136 @@ func TestSaveNilIncludePaths(t *testing.T) {
 	}
 	if got.IncludePaths == nil {
 		t.Error("IncludePaths should be non-nil after Save+Load of nil")
+	}
+}
+
+func TestSaveConfigInitial_CreatesDirWhenAbsent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fresh-root")
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+	cfg := &Config{DeviceID: "d_x", APIBaseURL: "https://x"}
+	if err := SaveConfigInitial(cfg); err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.toml")); err != nil {
+		t.Fatalf("config.toml must exist, got %v", err)
+	}
+}
+
+func TestSaveConfigInitial_SentinelPresent_Rejects(t *testing.T) {
+	root := setupRoot(t)
+	_ = os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600)
+	_ = os.WriteFile(filepath.Join(root, ".uninstalling"), []byte(""), 0o600)
+	cfg := &Config{DeviceID: "d_x", APIBaseURL: "https://x"}
+	if err := SaveConfigInitial(cfg); !errors.Is(err, ErrUninstallInProgress) {
+		t.Fatalf("want ErrUninstallInProgress, got %v", err)
+	}
+}
+
+func TestSaveConfigInitial_RootExistsConfigMissing_ErrPartialUninstall(t *testing.T) {
+	setupRoot(t) // root exists; no config.toml, no sentinel
+	cfg := &Config{DeviceID: "d_x", APIBaseURL: "https://x"}
+	if err := SaveConfigInitial(cfg); !errors.Is(err, ErrPartialUninstall) {
+		t.Fatalf("want ErrPartialUninstall, got %v", err)
+	}
+}
+
+func TestSaveConfigInitial_RootIsFileNotDir_Error(t *testing.T) {
+	dir := t.TempDir()
+	rootPath := filepath.Join(dir, "ca-as-file")
+	if err := os.WriteFile(rootPath, []byte("oops"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CALIBER_AGENT_HOME", rootPath)
+	cfg := &Config{DeviceID: "d_x", APIBaseURL: "https://x"}
+	if err := SaveConfigInitial(cfg); err == nil || errors.Is(err, ErrUninstallInProgress) {
+		t.Fatalf("want generic error, got %v", err)
+	}
+}
+
+func TestSaveConfig_Runtime_RefusesWhenSentinelPresent(t *testing.T) {
+	root := setupRoot(t)
+	_ = os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600)
+	_ = os.WriteFile(filepath.Join(root, ".uninstalling"), []byte(""), 0o600)
+	cfg := &Config{DeviceID: "d_x", APIBaseURL: "https://x"}
+	if err := SaveConfig(cfg); !errors.Is(err, ErrUninstallInProgress) {
+		t.Fatalf("want ErrUninstallInProgress, got %v", err)
+	}
+}
+
+func TestSaveConfig_Runtime_RefusesWhenRootMissing(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
+	cfg := &Config{DeviceID: "d_x", APIBaseURL: "https://x"}
+	if err := SaveConfig(cfg); !errors.Is(err, ErrRootRemoved) {
+		t.Fatalf("want ErrRootRemoved, got %v", err)
+	}
+}
+
+func TestValidateAPIBaseURL_AcceptsHTTPS(t *testing.T) {
+	if err := ValidateAPIBaseURL("https://caliber.example/", false); err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+}
+
+func TestValidateAPIBaseURL_RejectsHTTPWithoutInsecure(t *testing.T) {
+	if err := ValidateAPIBaseURL("http://localhost:3001/", false); err == nil {
+		t.Fatalf("want error, got nil")
+	}
+}
+
+func TestValidateAPIBaseURL_AcceptsHTTPWithInsecure(t *testing.T) {
+	if err := ValidateAPIBaseURL("http://localhost:3001/", true); err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+}
+
+func TestValidateAPIBaseURL_RejectsOtherSchemes(t *testing.T) {
+	for _, raw := range []string{"ftp://x/", "file:///etc/passwd", "gopher://x"} {
+		if err := ValidateAPIBaseURL(raw, true); err == nil {
+			t.Errorf("scheme in %q must be rejected even with --insecure", raw)
+		}
+	}
+}
+
+func TestValidateAPIBaseURL_RejectsMalformed(t *testing.T) {
+	for _, raw := range []string{"", "://no-scheme", "https://", "not a url"} {
+		if err := ValidateAPIBaseURL(raw, false); err == nil {
+			t.Errorf("malformed %q must be rejected", raw)
+		}
+	}
+}
+
+func TestConfig_InsecureTransport_RoundTrip(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+	in := &Config{DeviceID: "d_x", APIBaseURL: "http://x", InsecureTransport: true}
+	if err := SaveConfigInitial(in); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !out.InsecureTransport {
+		t.Fatalf("InsecureTransport must round-trip as true, got %+v", out)
+	}
+}
+
+func TestConfig_LoadOldFormat_DefaultsInsecureFalse(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Synthesise pre-PR4 config.toml (no insecure_transport key).
+	payload := "device_id = \"d_x\"\napi_base_url = \"https://x\"\nhostname = \"h\"\nos = \"darwin arm64\"\nmode = \"metadata-only\"\ninclude_paths = []\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if out.InsecureTransport {
+		t.Fatalf("missing field must default to false, got %+v", out)
 	}
 }

@@ -3,6 +3,8 @@ package wizard
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
@@ -24,6 +26,7 @@ type Deps struct {
 
 	// Persisted into the new config.toml.
 	APIBaseURL         string
+	InsecureTransport  bool
 	ClaudeProjectsRoot string // typically ~/.claude/projects
 }
 
@@ -72,15 +75,19 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 	}
 
 	// Step 4: Initial config.toml with empty IncludePaths (privacy default).
+	// SaveConfigInitial is the first-write-aware variant: it may MkdirAll the
+	// root, but re-runs sentinel + partial-uninstall checks to catch the
+	// runEnroll preflight → here TOCTOU window (R15-F2 / R16-F2).
 	cfg := &config.Config{
-		DeviceID:     resp.DeviceID,
-		Hostname:     d.Hostname,
-		OS:           d.OS,
-		APIBaseURL:   d.APIBaseURL,
-		Mode:         "metadata-only",
-		IncludePaths: []string{},
+		DeviceID:          resp.DeviceID,
+		Hostname:          d.Hostname,
+		OS:                d.OS,
+		APIBaseURL:        d.APIBaseURL,
+		Mode:              "metadata-only",
+		IncludePaths:      []string{},
+		InsecureTransport: d.InsecureTransport,
 	}
-	if err := config.Save(cfg); err != nil {
+	if err := config.SaveConfigInitial(cfg); err != nil {
 		return fmt.Errorf("config save: %w", err)
 	}
 
@@ -95,19 +102,35 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 	if err != nil {
 		return err
 	}
-	include := []string{}
+	selected := []string{}
 	for _, idx := range picks {
 		if idx == 0 {
 			// "None" picked; treat as empty regardless of other picks.
-			include = []string{}
+			selected = []string{}
 			break
 		}
 		if idx-1 < len(cands) {
-			include = append(include, cands[idx-1].CWD)
+			selected = append(selected, cands[idx-1].CWD)
 		}
 	}
 
-	// Step 6: Final confirm + write.
+	// Normalise each chosen path through EvalSymlinks + Clean so that the
+	// watcher's allow-list contains canonical absolute paths only. Paths that
+	// fail EvalSymlinks (broken symlink, race-removed dir) are skipped with a
+	// stderr warning so the user can see why their N picks produced < N entries
+	// (plan §8.2; re-prompting would be friendlier but is out of scope for PR4).
+	include := make([]string, 0, len(selected))
+	for _, p := range selected {
+		resolved, rerr := filepath.EvalSymlinks(p)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping %q (cannot resolve: %v)\n", p, rerr)
+			continue
+		}
+		include = append(include, filepath.Clean(resolved))
+	}
+
+	// Step 6: Final confirm + write. SaveConfig is the runtime-flavored
+	// writer: root must exist + precheckRuntime passes.
 	confirmed, err := d.Prompter.Confirm(fmt.Sprintf("Save config with %d include_paths?", len(include)), true)
 	if err != nil {
 		return err
@@ -116,7 +139,7 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 		return nil // wizard ends but keychain + initial config persist
 	}
 	cfg.IncludePaths = include
-	if err := config.Save(cfg); err != nil {
+	if err := config.SaveConfig(cfg); err != nil {
 		return fmt.Errorf("config save (paths): %w", err)
 	}
 	return nil

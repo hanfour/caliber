@@ -31,24 +31,8 @@ func TestScan_DashedRealCWD(t *testing.T) {
 	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	claudeRoot := filepath.Join(tmp, "claude-projects")
-	claudeDir := filepath.Join(claudeRoot, encodeClaudeDir(realDir))
-	writeFile(t, filepath.Join(claudeDir, "sess.jsonl"),
-		`{"type":"user","cwd":"`+realDir+`"}`+"\n")
-
-	cands, err := ScanClaudeProjects(claudeRoot)
+	wantCWD, err := filepath.EvalSymlinks(realDir)
 	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if len(cands) != 1 || cands[0].CWD != realDir {
-		t.Fatalf("got %+v, want CWD=%q", cands, realDir)
-	}
-}
-
-func TestScan_CleanCWD(t *testing.T) {
-	tmp := t.TempDir()
-	realDir := filepath.Join(tmp, "test", "plain")
-	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	claudeRoot := filepath.Join(tmp, "claude-projects")
@@ -60,8 +44,32 @@ func TestScan_CleanCWD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	if len(cands) != 1 || cands[0].CWD != realDir {
-		t.Fatalf("got %+v", cands)
+	if len(cands) != 1 || cands[0].CWD != wantCWD {
+		t.Fatalf("got %+v, want CWD=%q", cands, wantCWD)
+	}
+}
+
+func TestScan_CleanCWD(t *testing.T) {
+	tmp := t.TempDir()
+	realDir := filepath.Join(tmp, "test", "plain")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wantCWD, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudeRoot := filepath.Join(tmp, "claude-projects")
+	claudeDir := filepath.Join(claudeRoot, encodeClaudeDir(realDir))
+	writeFile(t, filepath.Join(claudeDir, "sess.jsonl"),
+		`{"type":"user","cwd":"`+realDir+`"}`+"\n")
+
+	cands, err := ScanClaudeProjects(claudeRoot)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(cands) != 1 || cands[0].CWD != wantCWD {
+		t.Fatalf("got %+v, want CWD=%q", cands, wantCWD)
 	}
 }
 
@@ -95,13 +103,17 @@ func TestScan_CorruptJSONLFallbackToDirname(t *testing.T) {
 	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	wantCWD, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	claudeRoot := filepath.Join(tmp, "claude-projects")
 	claudeDir := filepath.Join(claudeRoot, encodeClaudeDir(realDir))
 	writeFile(t, filepath.Join(claudeDir, "bad.jsonl"), "this is not json\n")
 
 	cands, _ := ScanClaudeProjects(claudeRoot)
-	if len(cands) != 1 || cands[0].CWD != realDir {
-		t.Fatalf("got %+v, want %q", cands, realDir)
+	if len(cands) != 1 || cands[0].CWD != wantCWD {
+		t.Fatalf("got %+v, want %q", cands, wantCWD)
 	}
 }
 
@@ -111,14 +123,18 @@ func TestScan_NoJSONLFallbackToDirname(t *testing.T) {
 	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	wantCWD, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	claudeRoot := filepath.Join(tmp, "claude-projects")
 	claudeDir := filepath.Join(claudeRoot, encodeClaudeDir(realDir))
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cands, _ := ScanClaudeProjects(claudeRoot)
-	if len(cands) != 1 || cands[0].CWD != realDir {
-		t.Fatalf("got %+v, want %q", cands, realDir)
+	if len(cands) != 1 || cands[0].CWD != wantCWD {
+		t.Fatalf("got %+v, want %q", cands, wantCWD)
 	}
 	if cands[0].SessionCt != 0 {
 		t.Errorf("SessionCt = %d, want 0", cands[0].SessionCt)
@@ -185,6 +201,10 @@ func TestScan_DeepDashedComponent(t *testing.T) {
 	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	wantCWD, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	claudeRoot := filepath.Join(tmp, "claude-projects")
 	claudeDir := filepath.Join(claudeRoot, encodeClaudeDir(realDir))
 	// Force the dirname-fallback path: directory exists but has no JSONL.
@@ -198,8 +218,8 @@ func TestScan_DeepDashedComponent(t *testing.T) {
 	if len(cands) != 1 {
 		t.Fatalf("expected 1 candidate, got %+v", cands)
 	}
-	if cands[0].CWD != realDir {
-		t.Errorf("CWD = %q, want %q", cands[0].CWD, realDir)
+	if cands[0].CWD != wantCWD {
+		t.Errorf("CWD = %q, want %q", cands[0].CWD, wantCWD)
 	}
 }
 

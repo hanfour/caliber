@@ -74,3 +74,22 @@ func mustCompileAll(t *testing.T, ps []Pattern) {
 		}
 	}
 }
+
+func TestPatternCompile_RejectsOversized_KeepsOthers(t *testing.T) {
+	big := strings.Repeat("a", MaxRegexSrcLen+1)
+	pats := []Pattern{
+		{Name: "ok", RegexSrc: `sk-[a-z]+`, Replacement: "***"},
+		{Name: "huge", RegexSrc: big, Replacement: "***"},
+	}
+	rs := &RedactionSet{Patterns: pats}
+	err := rs.Compile()
+	if err == nil {
+		t.Fatalf("oversized pattern should aggregate error")
+	}
+	if rs.Patterns[0].Regex == nil {
+		t.Fatalf("good pattern must still compile")
+	}
+	if rs.Patterns[1].Regex != nil {
+		t.Fatalf("oversized pattern must NOT compile")
+	}
+}

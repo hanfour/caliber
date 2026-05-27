@@ -19,8 +19,10 @@ func TestLoadRedactionSet_MissingReturnsErrNoRedactionSet(t *testing.T) {
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("CALIBER_AGENT_HOME", tmp)
+	tmp := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	orig := &redact.RedactionSet{
 		Patterns: []redact.Pattern{
@@ -55,8 +57,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestSaveIsAtomic_NoLeftoverTmp(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("CALIBER_AGENT_HOME", tmp)
+	tmp := setupRoot(t)
+	if err := os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := SaveRedactionSet(&redact.RedactionSet{Patterns: nil, Version: "v", TTLSeconds: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -72,5 +76,29 @@ func TestRedactionSetPath_HonoursOverride(t *testing.T) {
 	t.Setenv("CALIBER_AGENT_HOME", "/x")
 	if got := RedactionSetPath(); got != "/x/redaction-set.json" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestSaveRedactionSet_RefusesWhenRootRemoved(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
+	if err := SaveRedactionSet(&redact.RedactionSet{}); !errors.Is(err, ErrRootRemoved) {
+		t.Fatalf("want ErrRootRemoved, got %v", err)
+	}
+}
+
+func TestSaveRedactionSet_RefusesWhenSentinelPresent(t *testing.T) {
+	root := setupRoot(t)
+	_ = os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600)
+	_ = os.WriteFile(filepath.Join(root, ".uninstalling"), []byte(""), 0o600)
+	if err := SaveRedactionSet(&redact.RedactionSet{}); !errors.Is(err, ErrUninstallInProgress) {
+		t.Fatalf("want ErrUninstallInProgress, got %v", err)
+	}
+}
+
+func TestSaveRedactionSet_HappyPath(t *testing.T) {
+	root := setupRoot(t)
+	_ = os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600)
+	if err := SaveRedactionSet(&redact.RedactionSet{Version: "v"}); err != nil {
+		t.Fatalf("want nil, got %v", err)
 	}
 }

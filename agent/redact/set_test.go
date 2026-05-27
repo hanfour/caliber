@@ -2,6 +2,7 @@ package redact
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -64,6 +65,34 @@ func TestRedactionSet_JSONRoundTrip(t *testing.T) {
 	}
 	if got.Patterns[0].Regex != nil {
 		t.Errorf("Regex should not deserialise; caller calls Compile()")
+	}
+}
+
+func TestRedactionSetCompile_RejectsTooManyPatterns_ErrSentinel(t *testing.T) {
+	pats := make([]Pattern, MaxPatternCount+1)
+	for i := range pats {
+		pats[i] = Pattern{Name: "p", RegexSrc: `a`, Replacement: "*"}
+	}
+	rs := &RedactionSet{Patterns: pats}
+	err := rs.Compile()
+	if !errors.Is(err, ErrTooManyPatterns) {
+		t.Fatalf("want ErrTooManyPatterns, got %v", err)
+	}
+	for i := range pats {
+		if rs.Patterns[i].Regex != nil {
+			t.Fatalf("on ErrTooManyPatterns, no pattern must be compiled (i=%d)", i)
+		}
+	}
+}
+
+func TestRedactionSetCompile_AtBoundary(t *testing.T) {
+	pats := make([]Pattern, MaxPatternCount)
+	for i := range pats {
+		pats[i] = Pattern{Name: "p", RegexSrc: `a`, Replacement: "*"}
+	}
+	rs := &RedactionSet{Patterns: pats}
+	if err := rs.Compile(); err != nil {
+		t.Fatalf("MaxPatternCount must be allowed, got %v", err)
 	}
 }
 

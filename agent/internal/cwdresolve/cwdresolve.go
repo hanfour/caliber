@@ -117,7 +117,9 @@ func scanJSONLForCWD(jsonls []string, open Opener) string {
 }
 
 // tryExtractCWD parses one JSONL line and returns its cwd if it stats as
-// a directory. Empty string otherwise.
+// a directory. Empty string otherwise. The candidate is resolved through
+// filepath.EvalSymlinks before stat so attacker-supplied symlinks cannot
+// be used to escape the allow-list match downstream.
 func tryExtractCWD(line string) string {
 	var obj struct {
 		CWD string `json:"cwd"`
@@ -128,11 +130,15 @@ func tryExtractCWD(line string) string {
 	if obj.CWD == "" {
 		return ""
 	}
-	info, err := os.Stat(obj.CWD)
+	resolved, err := filepath.EvalSymlinks(obj.CWD)
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(resolved)
 	if err != nil || !info.IsDir() {
 		return ""
 	}
-	return obj.CWD
+	return resolved
 }
 
 // dirnameFallback decodes Claude's dash-encoded project dir name back into
@@ -152,11 +158,19 @@ func dirnameFallback(name string) string {
 	if result == "" {
 		return ""
 	}
-	info, err := os.Stat(result)
+	// Resolve symlinks on the candidate so the eventual cwd we hand to
+	// the watcher allow-list is canonical. greedyDecode performs
+	// intermediate stat checks against the encoded path components; the
+	// final EvalSymlinks here is the load-bearing one.
+	resolved, err := filepath.EvalSymlinks(result)
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(resolved)
 	if err != nil || !info.IsDir() {
 		return ""
 	}
-	return result
+	return resolved
 }
 
 // greedyDecode attempts to reconstruct an absolute path from a dash-encoded

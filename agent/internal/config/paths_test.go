@@ -40,3 +40,20 @@ func TestDerivedPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestNewPathHelpers(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", "/tmp/ca-test")
+	cases := []struct {
+		name, want string
+		fn         func() string
+	}{
+		{"sentinel", "/tmp/ca-test/.uninstalling", UninstallSentinelPath},
+		{"lock", "/tmp/ca-test/.lock", LockPath},
+		{"paused", "/tmp/ca-test/paused", PausedPath},
+	}
+	for _, c := range cases {
+		if got := c.fn(); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+}
