@@ -105,6 +105,12 @@ const (
 	remoteNoToken remoteRevokeState = "failed (no token)"
 )
 
+// keychainDelete is the package-level seam over keychain.Delete. Tests use
+// the withKeychainDelete helper (export_test.go) to swap this for a stub
+// that returns ErrNotFound or a synthetic permission error without spawning
+// the real `security` binary. Production callers never touch this var.
+var keychainDelete = keychain.Delete
+
 // runUninstallCleanup performs steps 3-7 (sentinel → remote → keychain →
 // ordered_delete → listing). The sentinel is written FIRST so any in-flight
 // daemon writes that pass the per-tick / per-chunk check after we begin will
@@ -147,9 +153,22 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 			cfg.APIBaseURL)
 	}
 
-	// STEP 5 (keychain), STEP 6 (ordered_delete) and STEP 7 (listing) land
-	// in subsequent phase 11 tasks. For now consume locals to silence the
-	// unused-variable check.
+	// STEP 5: keychain delete.
+	//   - ErrNotFound is a soft failure: print a note and continue.
+	//   - Any other error is hard: restore the absent state of .uninstalling
+	//     (so the running daemon, if any, can resume on retry) and exit 1.
+	if kerr := keychainDelete(cfg.DeviceID); kerr != nil {
+		if errors.Is(kerr, keychain.ErrNotFound) {
+			fmt.Fprintln(cmd.OutOrStdout(), "[ok] keychain entry already absent")
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "[error] keychain delete failed: %v\n", kerr)
+			_ = os.Remove(sentinelPath) // restore so daemon can recover
+			return &ExitError{Code: 1, Err: kerr}
+		}
+	}
+
+	// STEP 6 (ordered_delete) and STEP 7 (listing) land in subsequent
+	// phase 11 tasks. For now consume locals.
 	_ = sentinelPath
 	_ = remoteState
 	return nil

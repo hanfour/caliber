@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
+	"github.com/hanfour/ai-dev-eval/agent/internal/keychain"
 	"github.com/hanfour/ai-dev-eval/agent/internal/lockfile"
 )
 
@@ -173,5 +174,44 @@ func TestUninstall_KeepRemote_SkipsServer(t *testing.T) {
 	}
 	if called.Load() {
 		t.Fatalf("--keep-remote must NOT contact server")
+	}
+}
+
+// ----- Phase 11.3: keychain delete -----
+
+// withKeychainDelete swaps the package-level keychainDelete hook with the
+// supplied stub for the duration of the test. Tests that need keychain.Delete
+// to fail (or return ErrNotFound) use this helper to avoid spawning a
+// `security` binary stub script.
+func withKeychainDelete(t *testing.T, stub func(account string) error) {
+	t.Helper()
+	orig := keychainDelete
+	keychainDelete = stub
+	t.Cleanup(func() { keychainDelete = orig })
+}
+
+// TestUninstall_KeychainNotFound_Continues_Exit0: keychain.ErrNotFound is a
+// soft failure — the entry is already gone, so uninstall proceeds and exits 0.
+func TestUninstall_KeychainNotFound_Continues_Exit0(t *testing.T) {
+	setupEnrolledRoot(t)
+	withKeychainDelete(t, func(string) error { return keychain.ErrNotFound })
+	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	if code != 0 {
+		t.Fatalf("want 0 (ErrNotFound treated as already-clean), got %d", code)
+	}
+}
+
+// TestUninstall_KeychainDeleteFails_Exit1_SentinelRestored: a hard keychain
+// failure must (1) exit 1 and (2) restore the absent state of .uninstalling
+// so the daemon (if still running, e.g. under --force) can recover.
+func TestUninstall_KeychainDeleteFails_Exit1_SentinelRestored(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	withKeychainDelete(t, func(string) error { return errors.New("permission denied") })
+	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	if code != 1 {
+		t.Fatalf("want 1, got %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".uninstalling")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("sentinel must be restored to absent on keychain failure, got stat=%v", err)
 	}
 }
