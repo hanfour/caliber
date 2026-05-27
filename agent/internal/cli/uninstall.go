@@ -2,14 +2,17 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/internal/keychain"
 	"github.com/hanfour/ai-dev-eval/agent/internal/lockfile"
@@ -91,9 +94,63 @@ func runUninstall(cmd *cobra.Command, yes, keepRemote, force bool) error {
 	return runUninstallCleanup(cmd, cfg, keepRemote)
 }
 
+// remoteRevokeState records what we did with the server side so the final
+// listing in step 7 can summarise it. Mutated only inside runUninstallCleanup.
+type remoteRevokeState string
+
+const (
+	remoteSkipped remoteRevokeState = "skipped"
+	remoteRevoked remoteRevokeState = "revoked"
+	remoteFailed  remoteRevokeState = "failed"
+	remoteNoToken remoteRevokeState = "failed (no token)"
+)
+
 // runUninstallCleanup performs steps 3-7 (sentinel → remote → keychain →
-// ordered_delete → listing). Phase 11.1 ships a stub that returns nil so
-// the probe/prompt tests can pass; phases 11.2-11.5 fill in the body.
-func runUninstallCleanup(_ *cobra.Command, _ *config.Config, _ bool) error {
+// ordered_delete → listing). The sentinel is written FIRST so any in-flight
+// daemon writes that pass the per-tick / per-chunk check after we begin will
+// notice and abort. The sentinel is restored on (a)-(g) ordered_delete
+// failures and on keychain hard failures; it is NOT restored once (h) has
+// removed it (R13-F2) — a retry of uninstall will rewrite a fresh sentinel.
+func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool) error {
+	root := config.RootDir()
+	sentinelPath := filepath.Join(root, ".uninstalling")
+
+	// STEP 3: write `.uninstalling` sentinel (empty, 0o600).
+	// Root must already exist (we loaded config.toml from it). If the
+	// sentinel write fails we have not yet mutated anything irreversible;
+	// exit 1 so the operator can investigate the underlying IO error.
+	if err := os.WriteFile(sentinelPath, []byte{}, 0o600); err != nil {
+		return &ExitError{Code: 1, Err: fmt.Errorf("write sentinel: %w", err)}
+	}
+
+	// STEP 4: best-effort remote revoke (unless --keep-remote).
+	remoteState := remoteSkipped
+	if !keepRemote {
+		ctx := context.Background()
+		token, kerr := keychain.Get(cfg.DeviceID)
+		if kerr != nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "[warn] keychain Get failed: %v; cannot revoke remotely\n", kerr)
+			remoteState = remoteNoToken
+		} else {
+			apiClient := api.NewClient(cfg.APIBaseURL, "caliber-agent/uninstall")
+			if rerr := apiClient.RevokeSelf(ctx, token); rerr != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "[warn] remote revoke failed: %v; continuing local cleanup\n", rerr)
+				remoteState = remoteFailed
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "[ok] device revoked at server")
+				remoteState = remoteRevoked
+			}
+		}
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"Skipped remote revoke (--keep-remote). Manually revoke at %s/dashboard/devices.\n",
+			cfg.APIBaseURL)
+	}
+
+	// STEP 5 (keychain), STEP 6 (ordered_delete) and STEP 7 (listing) land
+	// in subsequent phase 11 tasks. For now consume locals to silence the
+	// unused-variable check.
+	_ = sentinelPath
+	_ = remoteState
 	return nil
 }
