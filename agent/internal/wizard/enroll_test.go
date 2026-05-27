@@ -272,7 +272,11 @@ func TestRunEnrollWizard_IncludePathsBrokenSymlinkSkipped(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "absent")
 	t.Setenv("CALIBER_AGENT_HOME", root)
 
-	// Real path: kept. Broken symlink (target deleted): silently dropped.
+	// Real path: kept. Broken symlink (target deleted): dropped with a stderr
+	// warning ("warning: skipping ... (cannot resolve: ...)"). We don't assert
+	// the warning text here — verifying the path is excluded from the persisted
+	// config is sufficient for behavioural coverage, and capturing os.Stderr
+	// would complicate the test for marginal benefit.
 	good := t.TempDir()
 	resolvedGood, err := filepath.EvalSymlinks(good)
 	if err != nil {

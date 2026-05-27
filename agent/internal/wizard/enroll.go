@@ -3,6 +3,7 @@ package wizard
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
@@ -115,13 +116,14 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 
 	// Normalise each chosen path through EvalSymlinks + Clean so that the
 	// watcher's allow-list contains canonical absolute paths only. Paths that
-	// fail EvalSymlinks (broken symlink, race-removed dir) are silently
-	// dropped — re-prompting would be friendlier but is out of scope for PR4.
+	// fail EvalSymlinks (broken symlink, race-removed dir) are skipped with a
+	// stderr warning so the user can see why their N picks produced < N entries
+	// (plan §8.2; re-prompting would be friendlier but is out of scope for PR4).
 	include := make([]string, 0, len(selected))
 	for _, p := range selected {
 		resolved, rerr := filepath.EvalSymlinks(p)
 		if rerr != nil {
-			// path no longer exists or unreadable; skip (plan §8.2).
+			fmt.Fprintf(os.Stderr, "warning: skipping %q (cannot resolve: %v)\n", p, rerr)
 			continue
 		}
 		include = append(include, filepath.Clean(resolved))
