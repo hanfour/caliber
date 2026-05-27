@@ -206,9 +206,8 @@ func happyDeps(prompter Prompter, cands []ProjectCandidate) Deps {
 
 func TestRunEnrollWizard_FirstWriteUsesSaveConfigInitial(t *testing.T) {
 	// Point CALIBER_AGENT_HOME at a NOT-YET-CREATED path. SaveConfigInitial
-	// must MkdirAll the root; the legacy config.Save also handles this, so
-	// this test verifies the wizard reaches a state where config.toml exists
-	// under an originally-absent root — the contract SaveConfigInitial owns.
+	// must MkdirAll the root and write config.toml in one shot — the contract
+	// the wizard relies on for first-enroll.
 	root := filepath.Join(t.TempDir(), "absent")
 	t.Setenv("CALIBER_AGENT_HOME", root)
 

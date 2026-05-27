@@ -36,9 +36,14 @@ func setupRoot(t *testing.T) string {
 // and an in-test keychain shim that returns a dummy token. It is used by the
 // run-command pre-flight / lockfile tests that need runRun to reach the
 // post-pre-flight code paths.
+//
+// CALIBER_AGENT_HOME is pointed at a fresh sub-dir of t.TempDir() so that
+// SaveConfigInitial's MkdirAll branch fires; pointing at t.TempDir() directly
+// would land in the root-exists-but-config-missing → ErrPartialUninstall path.
 func setupEnrolledRoot(t *testing.T) string {
 	t.Helper()
-	home := setupRoot(t)
+	home := filepath.Join(t.TempDir(), "ca")
+	t.Setenv("CALIBER_AGENT_HOME", home)
 
 	scriptDir := t.TempDir()
 	script := "#!/bin/sh\necho cda_dummy\n"
@@ -50,7 +55,7 @@ func setupEnrolledRoot(t *testing.T) string {
 	keychain.SecurityBin = scriptPath
 	t.Cleanup(func() { keychain.SecurityBin = orig })
 
-	if err := config.Save(&config.Config{
+	if err := config.SaveConfigInitial(&config.Config{
 		DeviceID:     "dev-abc",
 		Hostname:     "h4",
 		OS:           "darwin",
@@ -111,7 +116,7 @@ func fakeAPIServer(t *testing.T) *httptest.Server {
 
 func setupEnrolledHome(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home := filepath.Join(t.TempDir(), "ca")
 	t.Setenv("CALIBER_AGENT_HOME", home)
 
 	scriptDir := t.TempDir()
@@ -124,7 +129,7 @@ func setupEnrolledHome(t *testing.T) string {
 	keychain.SecurityBin = scriptPath
 	t.Cleanup(func() { keychain.SecurityBin = orig })
 
-	if err := config.Save(&config.Config{
+	if err := config.SaveConfigInitial(&config.Config{
 		DeviceID:     "dev-abc",
 		Hostname:     "h4",
 		OS:           "darwin",
@@ -160,9 +165,9 @@ func TestRun_NotEnrolled_ReturnsExit1(t *testing.T) {
 }
 
 func TestRun_KeychainMissing_ReturnsExit1(t *testing.T) {
-	home := t.TempDir()
+	home := filepath.Join(t.TempDir(), "ca")
 	t.Setenv("CALIBER_AGENT_HOME", home)
-	if err := config.Save(&config.Config{DeviceID: "dev-x"}); err != nil {
+	if err := config.SaveConfigInitial(&config.Config{DeviceID: "dev-x"}); err != nil {
 		t.Fatal(err)
 	}
 	scriptDir := t.TempDir()
@@ -226,7 +231,8 @@ func TestRun_OnceWithMatchingFile_ProducesIngestLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := config.Save(&config.Config{
+	// setupEnrolledHome already wrote config.toml; this is a runtime override.
+	if err := config.SaveConfig(&config.Config{
 		DeviceID:     "dev-abc",
 		APIBaseURL:   srv.URL,
 		Mode:         "metadata-only",
@@ -304,8 +310,8 @@ func TestRun_InvalidMode_ReturnsExit1(t *testing.T) {
 	home := setupEnrolledHome(t)
 	_ = home
 
-	// Write a config with a typo'd mode.
-	if err := config.Save(&config.Config{
+	// Write a config with a typo'd mode (runtime override of setupEnrolledHome's seed).
+	if err := config.SaveConfig(&config.Config{
 		DeviceID:     "dev-abc",
 		Hostname:     "h4",
 		OS:           "darwin",
@@ -373,7 +379,8 @@ func TestRun_OnceEndToEnd_FetchAndIngest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := config.Save(&config.Config{
+	// setupEnrolledHome already wrote config.toml; this is a runtime override.
+	if err := config.SaveConfig(&config.Config{
 		DeviceID:     "dev-abc",
 		APIBaseURL:   srv.URL,
 		Mode:         "metadata-only",

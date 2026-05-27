@@ -98,9 +98,9 @@ func TestEnrollHappyPath_WritesConfigAndKeychain(t *testing.T) {
 }
 
 func TestEnrollAlreadyEnrolled_ReturnsExit1(t *testing.T) {
-	home := t.TempDir()
+	home := filepath.Join(t.TempDir(), "ca")
 	t.Setenv("CALIBER_AGENT_HOME", home)
-	if err := config.Save(&config.Config{DeviceID: "existing"}); err != nil {
+	if err := config.SaveConfigInitial(&config.Config{DeviceID: "existing"}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -127,45 +127,6 @@ func TestSaveConfigInitial_CreatesDirWhenAbsent(t *testing.T) {
 	}
 }
 
-// TestSave_BackwardsCompat covers the deprecated Save() alias. It must behave
-// like the pre-PR4 Save: MkdirAll + atomic write with NO partial-uninstall
-// guard, so that legacy wizard/CLI fixtures whose t.TempDir() root pre-exists
-// can write a fresh config.toml without tripping ErrPartialUninstall. Delete
-// this test when PR4 phases 7+9 retire the alias.
-func TestSave_BackwardsCompat(t *testing.T) {
-	// Case 1: root is a pre-existing dir (t.TempDir() pattern) with no
-	// config.toml. Pre-PR4 Save() succeeded here; the alias must too.
-	root := t.TempDir()
-	t.Setenv("CALIBER_AGENT_HOME", root)
-	cfg := &Config{DeviceID: "compat", IncludePaths: nil}
-	if err := Save(cfg); err != nil {
-		t.Fatalf("Save on pre-existing empty root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "config.toml")); err != nil {
-		t.Fatalf("config.toml missing after Save: %v", err)
-	}
-	got, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got.DeviceID != "compat" {
-		t.Errorf("DeviceID = %q, want compat", got.DeviceID)
-	}
-	if got.IncludePaths == nil {
-		t.Error("IncludePaths should be coerced non-nil")
-	}
-
-	// Case 2: root is fully absent. Save must MkdirAll.
-	absent := filepath.Join(t.TempDir(), "missing-root")
-	t.Setenv("CALIBER_AGENT_HOME", absent)
-	if err := Save(&Config{DeviceID: "fresh"}); err != nil {
-		t.Fatalf("Save on absent root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(absent, "config.toml")); err != nil {
-		t.Fatalf("config.toml missing after Save on absent root: %v", err)
-	}
-}
-
 func TestSaveConfigInitial_SentinelPresent_Rejects(t *testing.T) {
 	root := setupRoot(t)
 	_ = os.WriteFile(filepath.Join(root, "config.toml"), []byte(""), 0o600)
