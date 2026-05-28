@@ -27,6 +27,7 @@ type Deps struct {
 	// Persisted into the new config.toml.
 	APIBaseURL         string
 	InsecureTransport  bool
+	KeychainPath       string // custom keychain file; "" = login keychain (#168)
 	ClaudeProjectsRoot string // typically ~/.claude/projects
 }
 
@@ -86,6 +87,7 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 		Mode:              "metadata-only",
 		IncludePaths:      []string{},
 		InsecureTransport: d.InsecureTransport,
+		KeychainPath:      d.KeychainPath,
 	}
 	if err := config.SaveConfigInitial(cfg); err != nil {
 		return fmt.Errorf("config save: %w", err)

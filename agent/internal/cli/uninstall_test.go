@@ -184,7 +184,7 @@ func TestUninstall_KeepRemote_SkipsServer(t *testing.T) {
 // supplied stub for the duration of the test. Tests that need keychain.Delete
 // to fail (or return ErrNotFound) use this helper to avoid spawning a
 // `security` binary stub script.
-func withKeychainDelete(t *testing.T, stub func(account string) error) {
+func withKeychainDelete(t *testing.T, stub func(account, keychainPath string) error) {
 	t.Helper()
 	orig := keychainDelete
 	keychainDelete = stub
@@ -195,7 +195,7 @@ func withKeychainDelete(t *testing.T, stub func(account string) error) {
 // soft failure — the entry is already gone, so uninstall proceeds and exits 0.
 func TestUninstall_KeychainNotFound_Continues_Exit0(t *testing.T) {
 	setupEnrolledRoot(t)
-	withKeychainDelete(t, func(string) error { return keychain.ErrNotFound })
+	withKeychainDelete(t, func(string, string) error { return keychain.ErrNotFound })
 	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
 	if code != 0 {
 		t.Fatalf("want 0 (ErrNotFound treated as already-clean), got %d", code)
@@ -207,7 +207,7 @@ func TestUninstall_KeychainNotFound_Continues_Exit0(t *testing.T) {
 // so the daemon (if still running, e.g. under --force) can recover.
 func TestUninstall_KeychainDeleteFails_Exit1_SentinelRestored(t *testing.T) {
 	root := setupEnrolledRoot(t)
-	withKeychainDelete(t, func(string) error { return errors.New("permission denied") })
+	withKeychainDelete(t, func(string, string) error { return errors.New("permission denied") })
 	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
 	if code != 1 {
 		t.Fatalf("want 1, got %d", code)

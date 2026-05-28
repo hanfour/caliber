@@ -65,6 +65,39 @@ func TestRunEnrollWizard_HappyPathNoPaths(t *testing.T) {
 	}
 }
 
+// #168: Deps.KeychainPath must be persisted into config.toml so that
+// `run` / `uninstall` reuse the same custom keychain the operator enrolled
+// against without re-passing --keychain.
+func TestRunEnrollWizard_PersistsKeychainPath(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{}}
+	deps := Deps{
+		Prompter: fp,
+		Scan:     func(string) ([]ProjectCandidate, error) { return nil, nil },
+		Enroll: func(_ context.Context, _ api.EnrollRequest) (*api.EnrollResponse, error) {
+			return &api.EnrollResponse{DeviceID: "d-1", Key: "cda_secret", KeyPrefix: "cda_xxxx"}, nil
+		},
+		SetSecret:    func(_, _ string) error { return nil },
+		Hostname:     "h4",
+		OS:           "darwin",
+		AgentVersion: "dev",
+		APIBaseURL:   "http://localhost:3001",
+		KeychainPath: "/Users/h/.caliber-agent/caliber.keychain-db",
+	}
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatalf("RunEnrollWizard: %v", err)
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.KeychainPath != deps.KeychainPath {
+		t.Errorf("KeychainPath = %q, want %q", got.KeychainPath, deps.KeychainPath)
+	}
+}
+
 func TestRunEnrollWizard_TokenInvalid(t *testing.T) {
 	t.Setenv("CALIBER_AGENT_HOME", t.TempDir())
 	fp := NewFakePrompter()

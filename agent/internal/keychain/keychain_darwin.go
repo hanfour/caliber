@@ -30,15 +30,32 @@ var ErrNotFound = errors.New("keychain: not found")
 // callers can switch on it without build tags.
 var ErrUnsupported = errors.New("keychain: not supported on this platform")
 
-// Set writes (or upserts via -U) a generic password to the login keychain
-// under ServiceName + account. The secret is never logged.
-func Set(account, secret string) error {
-	cmd := exec.Command(SecurityBin, "add-generic-password",
+// withKeychain appends an optional keychain-file positional arg to a
+// security(1) argv. The `security` subcommands accept the target keychain
+// as a trailing positional; when keychainPath is empty we omit it so the
+// login keychain / default search list is used (unchanged behavior). A
+// non-empty path targets a dedicated keychain the operator unlocked once
+// with `security unlock-keychain`, which is what makes SSH/headless runs
+// work (#168).
+func withKeychain(args []string, keychainPath string) []string {
+	if keychainPath != "" {
+		return append(args, keychainPath)
+	}
+	return args
+}
+
+// Set writes (or upserts via -U) a generic password under ServiceName +
+// account. keychainPath selects the target keychain file ("" = login).
+// The secret is never logged.
+func Set(account, secret, keychainPath string) error {
+	args := withKeychain([]string{
+		"add-generic-password",
 		"-U",
 		"-s", ServiceName,
 		"-a", account,
 		"-w", secret,
-	)
+	}, keychainPath)
+	cmd := exec.Command(SecurityBin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -48,12 +65,15 @@ func Set(account, secret string) error {
 }
 
 // Get returns the bare password for ServiceName + account, or ErrNotFound.
-func Get(account string) (string, error) {
-	cmd := exec.Command(SecurityBin, "find-generic-password",
+// keychainPath selects the target keychain file ("" = login).
+func Get(account, keychainPath string) (string, error) {
+	args := withKeychain([]string{
+		"find-generic-password",
 		"-s", ServiceName,
 		"-a", account,
 		"-w",
-	)
+	}, keychainPath)
+	cmd := exec.Command(SecurityBin, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -67,12 +87,15 @@ func Get(account string) (string, error) {
 	return strings.TrimRight(stdout.String(), "\n"), nil
 }
 
-// Delete removes the entry for ServiceName + account.
-func Delete(account string) error {
-	cmd := exec.Command(SecurityBin, "delete-generic-password",
+// Delete removes the entry for ServiceName + account. keychainPath selects
+// the target keychain file ("" = login).
+func Delete(account, keychainPath string) error {
+	args := withKeychain([]string{
+		"delete-generic-password",
 		"-s", ServiceName,
 		"-a", account,
-	)
+	}, keychainPath)
+	cmd := exec.Command(SecurityBin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

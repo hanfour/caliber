@@ -27,21 +27,23 @@ func newEnrollCmd() *cobra.Command {
 	var apiBaseURL string
 	var insecure bool
 	var force bool
+	var keychainPath string
 	cmd := &cobra.Command{
 		Use:   "enroll <token>",
 		Short: "Enrol this device with caliber using a one-shot enrollment token",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnroll(cmd, args[0], force, apiBaseURL, insecure)
+			return runEnroll(cmd, args[0], force, apiBaseURL, insecure, keychainPath)
 		},
 	}
 	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "caliber API URL (or set CALIBER_API_BASE_URL)")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "allow http:// in api-base-url (dev/local only)")
 	cmd.Flags().BoolVar(&force, "force", false, "re-enroll over an existing device")
+	cmd.Flags().StringVar(&keychainPath, "keychain", "", "custom keychain file (unlock once via `security unlock-keychain`) for SSH/headless use; persisted to config so run/uninstall reuse it. Empty = login keychain")
 	return cmd
 }
 
-func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool) error {
+func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool, keychainPath string) error {
 	// Early preflight — R17-F1 / R18-F1 (spec §3.8).
 	// Both checks run BEFORE config.Load / API call / keychain write so that
 	// a partially-uninstalled state can never be "healed" by re-enrolling.
@@ -93,15 +95,21 @@ func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, 
 	osName := fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
 
 	deps := wizard.Deps{
-		Prompter:           prompter,
-		Scan:               wizard.ScanClaudeProjects,
-		Enroll:             api.NewClient(baseURL, "caliber-agent/"+version.Version).Enroll,
-		SetSecret:          keychain.Set,
+		Prompter: prompter,
+		Scan:     wizard.ScanClaudeProjects,
+		Enroll:   api.NewClient(baseURL, "caliber-agent/"+version.Version).Enroll,
+		// Capture keychainPath in the closure so the wizard's SetSecret
+		// stays a plain func(account, secret) and need not know about
+		// keychain selection (#168).
+		SetSecret: func(account, secret string) error {
+			return keychain.Set(account, secret, keychainPath)
+		},
 		Hostname:           hostname,
 		OS:                 osName,
 		AgentVersion:       version.Version,
 		APIBaseURL:         baseURL,
 		InsecureTransport:  insecure,
+		KeychainPath:       keychainPath,
 		ClaudeProjectsRoot: claudeProjectsRoot(),
 	}
 	if err := wizard.RunEnrollWizard(cmd.Context(), deps, token); err != nil {

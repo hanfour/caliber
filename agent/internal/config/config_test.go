@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,6 +53,52 @@ func TestSaveThenLoadRoundTrip(t *testing.T) {
 	}
 	if len(got.IncludePaths) != 0 {
 		t.Errorf("IncludePaths = %v, want empty", got.IncludePaths)
+	}
+}
+
+func TestSaveThenLoadRoundTrip_KeychainPath(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", tmp)
+
+	c := &Config{
+		DeviceID:     "dev-abc",
+		Mode:         "metadata-only",
+		IncludePaths: []string{},
+		KeychainPath: "/Users/h/.caliber-agent/caliber.keychain-db",
+	}
+	if err := SaveConfigInitial(c); err != nil {
+		t.Fatalf("SaveConfigInitial: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.KeychainPath != c.KeychainPath {
+		t.Errorf("KeychainPath round-trip: got %q, want %q", got.KeychainPath, c.KeychainPath)
+	}
+}
+
+// Empty KeychainPath must omit the key entirely (omitempty) so existing
+// login-keychain configs round-trip unchanged.
+func TestSaveThenLoadRoundTrip_KeychainPathEmptyOmitted(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", tmp)
+	if err := SaveConfigInitial(&Config{DeviceID: "x", IncludePaths: []string{}}); err != nil {
+		t.Fatalf("SaveConfigInitial: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(tmp, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "keychain_path") {
+		t.Errorf("empty KeychainPath should be omitted; config.toml = %s", raw)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.KeychainPath != "" {
+		t.Errorf("KeychainPath = %q, want empty", got.KeychainPath)
 	}
 }
 
