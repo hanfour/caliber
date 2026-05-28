@@ -20,9 +20,9 @@ import (
 //	timestamp (top-level)                             -> Timestamp
 //	payload.id (synthesized if absent)                -> EventID
 //	payload.parent_id (null-tolerant)                 -> ParentEventID
-//	payload.type                                      -> EventType
+//	payload.type (else top-level type)                -> EventType
 //	payload.role                                      -> Role
-//	payload.content or payload.result                 -> Content
+//	payload.content / payload.result / payload body   -> Content
 //	payload.usage.{input_tokens,output_tokens,
 //	   cache_read_tokens,cache_creation_tokens,
 //	   reasoning_output_tokens}                       -> Tokens.*
@@ -36,9 +36,9 @@ import (
 // which is what server-side dedup keys on.
 func ParseCodexEvent(line string) (redact.Event, error) {
 	var raw struct {
-		Type      string        `json:"type"`
-		Timestamp string        `json:"timestamp"`
-		Payload   *codexPayload `json:"payload"`
+		Type      string          `json:"type"`
+		Timestamp string          `json:"timestamp"`
+		Payload   json.RawMessage `json:"payload"`
 	}
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return redact.Event{}, fmt.Errorf("parser: codex json: %w", err)
@@ -46,29 +46,51 @@ func ParseCodexEvent(line string) (redact.Event, error) {
 	if raw.Type == "session_meta" {
 		return redact.Event{}, ErrSkipLine
 	}
-	if raw.Payload == nil {
+	if len(raw.Payload) == 0 || string(raw.Payload) == "null" {
 		return redact.Event{}, ErrSkipLine
 	}
+	var p codexPayload
+	if err := json.Unmarshal(raw.Payload, &p); err != nil {
+		return redact.Event{}, fmt.Errorf("parser: codex payload: %w", err)
+	}
 	ts, _ := time.Parse(time.RFC3339Nano, raw.Timestamp)
-	eventID := raw.Payload.ID
+	eventID := p.ID
 	if eventID == "" {
 		eventID = synthesizeCodexEventID(line)
 	}
+	// Typeless-payload lines (turn_context, compacted) carry their kind at
+	// the top level rather than under payload.type; fall back to it so the
+	// event isn't shipped with an empty (server-rejected) event_type.
+	eventType := p.Type
+	if eventType == "" {
+		eventType = raw.Type
+	}
 	ev := redact.Event{
 		EventID:   eventID,
-		EventType: raw.Payload.Type,
+		EventType: eventType,
 		Timestamp: ts,
-		Role:      raw.Payload.Role,
+		Role:      p.Role,
 	}
-	if raw.Payload.ParentID != nil {
-		ev.ParentEventID = *raw.Payload.ParentID
+	if p.ParentID != nil {
+		ev.ParentEventID = *p.ParentID
 	}
-	if raw.Payload.Content != nil {
-		ev.Content = raw.Payload.Content
-	} else if raw.Payload.Result != nil {
-		ev.Content = raw.Payload.Result
+	switch {
+	case p.Content != nil:
+		ev.Content = p.Content
+	case p.Result != nil:
+		ev.Content = p.Result
+	case p.Type == "":
+		// Typeless-payload events hold their data in the payload body
+		// itself (turn_context: model/cwd/effort; compacted:
+		// message/replacement_history). Preserve it so the event isn't
+		// an empty shell. Scoped to p.Type == "" so typed events that
+		// legitimately lack content (e.g. token_count) stay nil.
+		var body map[string]any
+		if json.Unmarshal(raw.Payload, &body) == nil {
+			ev.Content = body
+		}
 	}
-	if u := raw.Payload.Usage; u != nil {
+	if u := p.Usage; u != nil {
 		ev.Tokens = &redact.EventTokens{
 			Input:         u.InputTokens,
 			Output:        u.OutputTokens,
