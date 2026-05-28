@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,7 +133,9 @@ func TestHTTPSink_SourceClient_MapsClaudeToClaudeCode(t *testing.T) {
 
 type nopLogger struct{ lines []string }
 
-func (l *nopLogger) Printf(format string, args ...any) { l.lines = append(l.lines, format) }
+func (l *nopLogger) Printf(format string, args ...any) {
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+}
 
 func TestHTTPSink_401InvalidToken_ReturnsErrInvalidToken(t *testing.T) {
 	h, _ := captureHandler(t, 401, `{"error":"invalid_token"}`)
@@ -277,5 +281,90 @@ func TestHTTPSink_CtxCancelMidRetryAborts(t *testing.T) {
 	err := s.SendChunk(ctx, sampleChunk("claude", "s"))
 	if err == nil {
 		t.Fatal("expected ctx.Canceled-related error")
+	}
+}
+
+// Regression for #166: server returns a valid 200 whose body is larger
+// than the old 64KB read cap. The agent must still parse counters
+// correctly and log accurate numbers instead of silently reporting zeros.
+//
+// Concrete repro: a codex transcript with ~1900 events that all fail
+// server schema validation produces a ~140KB JSON response carrying a
+// per-event error[] array. Pre-fix, io.LimitReader(resp.Body, 1<<16)
+// truncated mid-array, json.Unmarshal failed silently, and the agent
+// logged "events=N ingested=0 deduped=0 errors=0" — exactly the symptom
+// in the bug report.
+func TestHTTPSink_LargeResponseBodyParsedCorrectly(t *testing.T) {
+	const errorCount = 2000
+	var b strings.Builder
+	b.WriteString(`{"ingested":0,"deduped":0,"session_upserts":1,"errors":[`)
+	for i := 0; i < errorCount; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"session_id":"s-abc","event_id":"e-%d","error":"malformed_event"}`, i)
+	}
+	b.WriteString(`]}`)
+	respBody := b.String()
+	if len(respBody) <= 1<<16 {
+		t.Fatalf("test setup: response too small (%d bytes); want >64KB to exercise old LimitReader cap", len(respBody))
+	}
+
+	h, _ := captureHandler(t, 200, respBody)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	logger := &nopLogger{}
+	s := NewHTTPSink(HTTPSinkOpts{
+		BaseURL: srv.URL, Token: "cda_t", DeviceID: "d", Version: "v",
+		Mode: redact.ModeMetadataOnly, HTTP: &http.Client{Timeout: 5 * time.Second},
+		Retry: RetryPolicy{MaxAttempts: 1}, Now: time.Now, Logger: logger,
+	})
+	if err := s.SendChunk(context.Background(), sampleChunk("claude", "s-abc")); err != nil {
+		t.Fatalf("SendChunk = %v", err)
+	}
+
+	var ingestLine string
+	for _, line := range logger.lines {
+		if strings.HasPrefix(line, "[ingest] ") {
+			ingestLine = line
+			break
+		}
+	}
+	if ingestLine == "" {
+		t.Fatalf("missing [ingest] log line; lines = %v", logger.lines)
+	}
+	want := fmt.Sprintf("errors=%d", errorCount)
+	if !strings.Contains(ingestLine, want) {
+		t.Errorf("log line should reflect actual error count %d; got: %s", errorCount, ingestLine)
+	}
+}
+
+// When the response body is unparseable (truncated, non-JSON, or future
+// schema mismatch), the agent must NOT silently log zeros. It should
+// emit a [warn] line so the operator can see something went wrong, then
+// still log the [ingest] line so watermark progress is visible. Send is
+// not failed — the request did succeed at the HTTP layer.
+func TestHTTPSink_UnparseableResponseBodySurfacesWarning(t *testing.T) {
+	h, _ := captureHandler(t, 200, `{ this is not json`)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	logger := &nopLogger{}
+	s := NewHTTPSink(HTTPSinkOpts{
+		BaseURL: srv.URL, Token: "cda_t", DeviceID: "d", Version: "v",
+		Mode: redact.ModeMetadataOnly, HTTP: &http.Client{Timeout: 5 * time.Second},
+		Retry: RetryPolicy{MaxAttempts: 1}, Now: time.Now, Logger: logger,
+	})
+	if err := s.SendChunk(context.Background(), sampleChunk("claude", "s")); err != nil {
+		t.Fatalf("SendChunk = %v; want nil (200 still advances watermark)", err)
+	}
+	sawWarn := false
+	for _, line := range logger.lines {
+		if strings.Contains(line, "[warn]") && strings.Contains(line, "response") {
+			sawWarn = true
+			break
+		}
+	}
+	if !sawWarn {
+		t.Errorf("expected a [warn] log about response parse; got: %v", logger.lines)
 	}
 }

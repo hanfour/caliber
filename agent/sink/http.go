@@ -194,12 +194,22 @@ func (h *HTTPSink) SendChunk(ctx context.Context, c Chunk) error {
 			}
 			continue
 		}
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		// Response cap of 4 MiB. The success body grows with errors[]
+		// (one entry per malformed event). #166 was caused by the old
+		// 64 KiB cap: a 1929-event codex chunk with missing event_ids
+		// produced a ~140 KiB error array, the reader truncated
+		// mid-array, json.Unmarshal failed silently, and the agent
+		// logged ingested=0/deduped=0/errors=0 while the server had
+		// inserted the session row and recorded the validation errors.
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<22))
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			var ir ingestResponse
-			_ = json.Unmarshal(respBody, &ir)
+			if uerr := json.Unmarshal(respBody, &ir); uerr != nil && h.Logger != nil {
+				h.Logger.Printf("[warn] sink: parse ingest response (sess=%s bytes=%d): %v",
+					c.SessionID, len(respBody), uerr)
+			}
 			h.logIngest(c, &ir, wireBytes, h.Now().Sub(start))
 			return nil
 		}
