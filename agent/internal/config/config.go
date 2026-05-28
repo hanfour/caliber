@@ -23,6 +23,12 @@ type Config struct {
 	Mode              string   `toml:"mode"`
 	IncludePaths      []string `toml:"include_paths"`
 	InsecureTransport bool     `toml:"insecure_transport"`
+	// KeychainPath, when set, points the macOS `security` CLI at a custom
+	// keychain file instead of the login keychain. Enables SSH/headless
+	// daemon operation: the login keychain can't be unlocked from a
+	// non-GUI session, but a dedicated keychain unlocked once via
+	// `security unlock-keychain` works (#168). Empty = login keychain.
+	KeychainPath string `toml:"keychain_path,omitempty"`
 }
 
 // Load reads and parses the config file. Returns ErrNotEnrolled if no file.

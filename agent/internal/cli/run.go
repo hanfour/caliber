@@ -26,16 +26,29 @@ import (
 func newRunCmd() *cobra.Command {
 	var once bool
 	var interval time.Duration
+	var keychainPath string
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the daemon main loop (foreground; you start and stop it manually)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runRun(cmd, once, interval)
+			return runRun(cmd, once, interval, keychainPath)
 		},
 	}
 	cmd.Flags().BoolVar(&once, "once", false, "run a single tick then exit (smoke-test affordance)")
 	cmd.Flags().DurationVar(&interval, "interval", 60*time.Second, "polling interval (advanced; default 60s)")
+	cmd.Flags().StringVar(&keychainPath, "keychain", "", "override the config's keychain file (unlock it first via `security unlock-keychain`); empty = use config / login keychain")
 	return cmd
+}
+
+// resolveKeychainPath picks the keychain file the `security` CLI should
+// target: an explicit --keychain flag wins, otherwise the value persisted
+// in config at enroll time, otherwise "" (login keychain). Shared by run
+// and uninstall (#168).
+func resolveKeychainPath(flagVal string, cfg *config.Config) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	return cfg.KeychainPath
 }
 
 // fatalExitFor maps auth-fatal sentinels to the correct ExitError. Returns nil
@@ -52,7 +65,7 @@ func fatalExitFor(err error) *ExitError {
 	return nil
 }
 
-func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
+func runRun(cmd *cobra.Command, once bool, interval time.Duration, keychainPath string) error {
 	// STEP 1: pre-flight read-only checks. Spec §3.7 / R8-F1 / R9-F1 / R16-F1.
 	// Order is reverse-aligned with ordered_delete (root → sentinel → config)
 	// so the most-recently-occurred uninstall state is detected first. NO write
@@ -104,7 +117,7 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration) error {
 	if err != nil {
 		return &ExitError{Code: 1, Err: fmt.Errorf("device not enrolled; run `caliber-agent enroll` first: %w", err)}
 	}
-	key, err := keychain.Get(cfg.DeviceID)
+	key, err := keychain.Get(cfg.DeviceID, resolveKeychainPath(keychainPath, cfg))
 	if err != nil {
 		return &ExitError{Code: 1, Err: fmt.Errorf("device key missing from keychain; re-run `caliber-agent enroll`: %w", err)}
 	}

@@ -35,20 +35,22 @@ import (
 //     untouched.
 func newUninstallCmd() *cobra.Command {
 	var yes, keepRemote, force bool
+	var keychainPath string
 	cmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Uninstall the daemon (revoke remote + remove keychain + delete local files)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runUninstall(cmd, yes, keepRemote, force)
+			return runUninstall(cmd, yes, keepRemote, force, keychainPath)
 		},
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip interactive consent prompt")
 	cmd.Flags().BoolVar(&keepRemote, "keep-remote", false, "skip server-side revoke")
 	cmd.Flags().BoolVar(&force, "force", false, "uninstall even if daemon is running")
+	cmd.Flags().StringVar(&keychainPath, "keychain", "", "override the config's keychain file (unlock it first via `security unlock-keychain`); empty = use config / login keychain")
 	return cmd
 }
 
-func runUninstall(cmd *cobra.Command, yes, keepRemote, force bool) error {
+func runUninstall(cmd *cobra.Command, yes, keepRemote, force bool, keychainPath string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		if errors.Is(err, config.ErrNotEnrolled) {
@@ -56,6 +58,7 @@ func runUninstall(cmd *cobra.Command, yes, keepRemote, force bool) error {
 		}
 		return &ExitError{Code: 1, Err: err}
 	}
+	kcPath := resolveKeychainPath(keychainPath, cfg)
 
 	// STEP 1: no-create, no-acquire probe of .lock (R7-F1).
 	// --force skips the probe entirely (R7-F2); the sentinel + per-chunk
@@ -92,7 +95,7 @@ func runUninstall(cmd *cobra.Command, yes, keepRemote, force bool) error {
 
 	// Phase 11.1 ends here; phase 11.2 adds the sentinel write + remote
 	// revoke + keychain + ordered_delete + listing in runUninstallCleanup.
-	return runUninstallCleanup(cmd, cfg, keepRemote)
+	return runUninstallCleanup(cmd, cfg, keepRemote, kcPath)
 }
 
 // remoteRevokeState records what we did with the server side so the final
@@ -123,7 +126,7 @@ var osRemove = os.Remove
 // notice and abort. The sentinel is restored on (a)-(g) ordered_delete
 // failures and on keychain hard failures; it is NOT restored once (h) has
 // removed it (R13-F2) — a retry of uninstall will rewrite a fresh sentinel.
-func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool) error {
+func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool, keychainPath string) error {
 	root := config.RootDir()
 	sentinelPath := filepath.Join(root, ".uninstalling")
 
@@ -139,7 +142,7 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 	remoteState := remoteSkipped
 	if !keepRemote {
 		ctx := context.Background()
-		token, kerr := keychain.Get(cfg.DeviceID)
+		token, kerr := keychain.Get(cfg.DeviceID, keychainPath)
 		if kerr != nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "[warn] keychain Get failed: %v; cannot revoke remotely\n", kerr)
 			remoteState = remoteNoToken
@@ -169,7 +172,7 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 	//   - ErrNotFound is a soft failure: print a note and continue.
 	//   - Any other error is hard: restore the absent state of .uninstalling
 	//     (so the running daemon, if any, can resume on retry) and exit 1.
-	if kerr := keychainDelete(cfg.DeviceID); kerr != nil {
+	if kerr := keychainDelete(cfg.DeviceID, keychainPath); kerr != nil {
 		if errors.Is(kerr, keychain.ErrNotFound) {
 			fmt.Fprintln(cmd.OutOrStdout(), "[ok] keychain entry already absent")
 		} else {
