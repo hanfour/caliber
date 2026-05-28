@@ -21,6 +21,14 @@ type Logger interface {
 	Printf(format string, args ...any)
 }
 
+// maxIngestResponseBytes caps how much of the ingest response we read.
+// The success body grows with errors[] (one entry per rejected event),
+// so the cap must comfortably exceed a full-chunk failure. #166 was the
+// old 64 KiB cap truncating a ~140 KiB error array mid-JSON. 4 MiB is a
+// soft bound: anything larger truncates and surfaces a [warn] from the
+// parse-failure path rather than corrupting counters silently.
+const maxIngestResponseBytes = 1 << 22
+
 // HTTPSink POSTs gzipped Chunks to /v1/ingest with Bearer cda_* auth.
 // Replaces LogSink as the production Sink at PR3.
 type HTTPSink struct {
@@ -194,14 +202,7 @@ func (h *HTTPSink) SendChunk(ctx context.Context, c Chunk) error {
 			}
 			continue
 		}
-		// Response cap of 4 MiB. The success body grows with errors[]
-		// (one entry per malformed event). #166 was caused by the old
-		// 64 KiB cap: a 1929-event codex chunk with missing event_ids
-		// produced a ~140 KiB error array, the reader truncated
-		// mid-array, json.Unmarshal failed silently, and the agent
-		// logged ingested=0/deduped=0/errors=0 while the server had
-		// inserted the session row and recorded the validation errors.
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<22))
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxIngestResponseBytes))
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {

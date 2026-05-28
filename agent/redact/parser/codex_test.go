@@ -81,6 +81,9 @@ func TestParseCodexEvent_SyntheticIDIsStableAcrossCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err b = %v", err)
 	}
+	if a.EventID == "" {
+		t.Fatal("EventID empty — synthesis not applied")
+	}
 	if a.EventID != b.EventID {
 		t.Errorf("non-deterministic: %q vs %q", a.EventID, b.EventID)
 	}

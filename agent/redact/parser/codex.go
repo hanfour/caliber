@@ -98,7 +98,19 @@ type codexUsage struct {
 	ReasoningOutputTokens *int64 `json:"reasoning_output_tokens"`
 }
 
+// syntheticIDBytes is how many leading sha256 bytes go into a synthetic
+// codex event_id. 12 bytes (96 bits, 24 hex chars) keeps collisions
+// negligible across a session's events while staying well under the
+// server's 200-char event_id limit.
+const syntheticIDBytes = 12
+
+// synthesizeCodexEventID derives a deterministic event_id from the raw
+// JSONL line. Assumption: codex rollout logs are append-only and never
+// rewrite a line, so byte-identical lines are the same logical event —
+// hashing the line is therefore a safe dedup key. The only collision
+// path is two truly byte-identical lines (same timestamp + payload),
+// which an append-only writer does not produce.
 func synthesizeCodexEventID(line string) string {
 	sum := sha256.Sum256([]byte(line))
-	return "codex_" + hex.EncodeToString(sum[:12])
+	return "codex_" + hex.EncodeToString(sum[:syntheticIDBytes])
 }
