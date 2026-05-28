@@ -21,6 +21,14 @@ type Logger interface {
 	Printf(format string, args ...any)
 }
 
+// maxIngestResponseBytes caps how much of the ingest response we read.
+// The success body grows with errors[] (one entry per rejected event),
+// so the cap must comfortably exceed a full-chunk failure. #166 was the
+// old 64 KiB cap truncating a ~140 KiB error array mid-JSON. 4 MiB is a
+// soft bound: anything larger truncates and surfaces a [warn] from the
+// parse-failure path rather than corrupting counters silently.
+const maxIngestResponseBytes = 1 << 22
+
 // HTTPSink POSTs gzipped Chunks to /v1/ingest with Bearer cda_* auth.
 // Replaces LogSink as the production Sink at PR3.
 type HTTPSink struct {
@@ -194,12 +202,15 @@ func (h *HTTPSink) SendChunk(ctx context.Context, c Chunk) error {
 			}
 			continue
 		}
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxIngestResponseBytes))
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			var ir ingestResponse
-			_ = json.Unmarshal(respBody, &ir)
+			if uerr := json.Unmarshal(respBody, &ir); uerr != nil && h.Logger != nil {
+				h.Logger.Printf("[warn] sink: parse ingest response (sess=%s bytes=%d): %v",
+					c.SessionID, len(respBody), uerr)
+			}
 			h.logIngest(c, &ir, wireBytes, h.Now().Sub(start))
 			return nil
 		}

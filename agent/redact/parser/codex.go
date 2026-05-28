@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -16,7 +18,7 @@ import (
 // Field mapping (verified 2026-05-23 against real transcripts):
 //
 //	timestamp (top-level)                             -> Timestamp
-//	payload.id                                        -> EventID
+//	payload.id (synthesized if absent)                -> EventID
 //	payload.parent_id (null-tolerant)                 -> ParentEventID
 //	payload.type                                      -> EventType
 //	payload.role                                      -> Role
@@ -24,6 +26,14 @@ import (
 //	payload.usage.{input_tokens,output_tokens,
 //	   cache_read_tokens,cache_creation_tokens,
 //	   reasoning_output_tokens}                       -> Tokens.*
+//
+// Synthetic event_id: real codex transcripts only carry payload.id on
+// session_meta; message / function_call / function_call_output /
+// reasoning / token_count / task_started / ... all omit it. Server
+// validation requires non-empty event_id, so when missing we emit
+// "codex_<sha256(line)[:24]>". Hashing the raw line keeps the id stable
+// across daemon retries of the same byte-identical transcript line,
+// which is what server-side dedup keys on.
 func ParseCodexEvent(line string) (redact.Event, error) {
 	var raw struct {
 		Type      string        `json:"type"`
@@ -40,8 +50,12 @@ func ParseCodexEvent(line string) (redact.Event, error) {
 		return redact.Event{}, ErrSkipLine
 	}
 	ts, _ := time.Parse(time.RFC3339Nano, raw.Timestamp)
+	eventID := raw.Payload.ID
+	if eventID == "" {
+		eventID = synthesizeCodexEventID(line)
+	}
 	ev := redact.Event{
-		EventID:   raw.Payload.ID,
+		EventID:   eventID,
 		EventType: raw.Payload.Type,
 		Timestamp: ts,
 		Role:      raw.Payload.Role,
@@ -82,4 +96,21 @@ type codexUsage struct {
 	CacheReadTokens       *int64 `json:"cache_read_tokens"`
 	CacheCreationTokens   *int64 `json:"cache_creation_tokens"`
 	ReasoningOutputTokens *int64 `json:"reasoning_output_tokens"`
+}
+
+// syntheticIDBytes is how many leading sha256 bytes go into a synthetic
+// codex event_id. 12 bytes (96 bits, 24 hex chars) keeps collisions
+// negligible across a session's events while staying well under the
+// server's 200-char event_id limit.
+const syntheticIDBytes = 12
+
+// synthesizeCodexEventID derives a deterministic event_id from the raw
+// JSONL line. Assumption: codex rollout logs are append-only and never
+// rewrite a line, so byte-identical lines are the same logical event —
+// hashing the line is therefore a safe dedup key. The only collision
+// path is two truly byte-identical lines (same timestamp + payload),
+// which an append-only writer does not produce.
+func synthesizeCodexEventID(line string) string {
+	sum := sha256.Sum256([]byte(line))
+	return "codex_" + hex.EncodeToString(sum[:syntheticIDBytes])
 }

@@ -131,6 +131,45 @@ func TestChunker_EmptyTailResult_ZeroChunks(t *testing.T) {
 	}
 }
 
+// Belt-and-braces for #166: a parser that emits an event with empty
+// id/type would cause server-side validation failure on the wire. The
+// chunker drops these before send and emits a warn log so the leak is
+// visible if a future parser regresses.
+func TestChunker_DropsEventsWithEmptyIDOrType(t *testing.T) {
+	emptyIDParser := func(_ string, line string) (redact.Event, error) {
+		switch line {
+		case "empty-id":
+			return redact.Event{EventID: "", EventType: "test", Content: line}, nil
+		case "empty-type":
+			return redact.Event{EventID: "ok", EventType: "", Content: line}, nil
+		}
+		return redact.Event{EventID: line, EventType: "test", Content: line}, nil
+	}
+	log := &capturedLogger{}
+	c := &Chunker{
+		Parser:          emptyIDParser,
+		Mode:            redact.ModeRedactedBody,
+		SetProv:         &staticProvider{s: redact.DefaultSet()},
+		GzipTargetBytes: 1 << 20,
+		Log:             log,
+	}
+	tr := TailResult{Events: []string{"a", "empty-id", "b", "empty-type", "c"}, ToOffset: 20}
+	chunks := c.Split(FileRef{Path: "/x.jsonl", Source: "claude", SessionID: "s"}, tr, "/Users/h/proj")
+	if len(chunks) != 1 || len(chunks[0].Events) != 3 {
+		t.Fatalf("expected 1 chunk with 3 events (dropped 2), got chunks=%d events=%d", len(chunks), len(chunks[0].Events))
+	}
+	found := false
+	for _, ln := range log.lines {
+		if strings.Contains(ln, "dropped events with empty id/type") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected dropped-events warn log; got %v", log.lines)
+	}
+}
+
 func TestChunker_LargeBodySplitsAtEventBoundary(t *testing.T) {
 	// Force the bisect path with a tiny gzip budget.
 	c := &Chunker{

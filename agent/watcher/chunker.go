@@ -55,6 +55,7 @@ func (c *Chunker) Split(ref FileRef, tr TailResult, cwd string) []sink.Chunk {
 
 	rs := c.currentSet()
 	events := make([]redact.Event, 0, len(tr.Events))
+	dropped := 0
 	for _, line := range tr.Events {
 		ev, err := c.Parser(ref.Source, line)
 		if err != nil {
@@ -65,7 +66,18 @@ func (c *Chunker) Split(ref FileRef, tr TailResult, cwd string) []sink.Chunk {
 			}
 			continue
 		}
+		// Defense in depth against #166-style server validation
+		// failures: a parser must emit non-empty event_id/event_type
+		// or the server returns malformed_event and the row never
+		// lands. Skip rather than ship known-bad events.
+		if ev.EventID == "" || ev.EventType == "" {
+			dropped++
+			continue
+		}
 		events = append(events, redact.ApplyMode(ev, c.Mode, rs.Patterns))
+	}
+	if dropped > 0 && c.Log != nil {
+		c.Log.Printf("[warn] dropped events with empty id/type (ref=%s count=%d)", ref.Path, dropped)
 	}
 	if len(events) == 0 {
 		return nil
