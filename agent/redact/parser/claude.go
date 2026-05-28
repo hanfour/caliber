@@ -9,8 +9,14 @@ import (
 )
 
 // ParseClaudeEvent maps one JSONL line from ~/.claude/projects/.../*.jsonl
-// to a wire-shape redact.Event. Non-event shapes (queue-operation, summary)
-// return ErrSkipLine.
+// to a wire-shape redact.Event. Non-event shapes return ErrSkipLine: the
+// explicit queue-operation/summary types, plus any line without a `uuid`.
+// Claude Code interleaves sidecar records (last-prompt, permission-mode,
+// ai-title, pr-link, file-history-snapshot, worktree-state, mode,
+// agent-name, ...) that carry no uuid; real conversation events always do.
+// Skipping on missing uuid silences them at the source instead of letting
+// the chunker drop empty-event_id rows with a [warn] (#171), and is
+// future-proof against new sidecar types.
 //
 // Field mapping (verified 2026-05-23 against real transcripts):
 //
@@ -36,6 +42,12 @@ func ParseClaudeEvent(line string) (redact.Event, error) {
 	}
 	switch raw.Type {
 	case "queue-operation", "summary", "":
+		return redact.Event{}, ErrSkipLine
+	}
+	// Sidecar/session-state records carry no uuid. Real conversation events
+	// (attachment/assistant/user/progress/system) always do; skipping the
+	// rest keeps non-events off the wire silently (#171).
+	if raw.UUID == "" {
 		return redact.Event{}, ErrSkipLine
 	}
 
