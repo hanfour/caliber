@@ -64,3 +64,48 @@ func TestParseClaudeEvent_MalformedJSONIsNonSkipError(t *testing.T) {
 		t.Errorf("malformed JSON should NOT be ErrSkipLine; got %v", err)
 	}
 }
+
+// #171: Claude Code transcripts interleave non-event sidecar records that
+// carry no `uuid` (UI/session state). They previously fell through, got an
+// empty EventID, and were dropped by the chunker with a noisy [warn]. They
+// must be a silent ErrSkipLine instead. Real events always carry a uuid;
+// sidecar records never do — so skip-on-missing-uuid is the invariant.
+func TestParseClaudeEvent_SidecarTypesAreSkipLine(t *testing.T) {
+	sidecar := []string{
+		"last-prompt", "permission-mode", "ai-title", "pr-link",
+		"file-history-snapshot", "worktree-state", "mode", "agent-name",
+	}
+	for _, typ := range sidecar {
+		line := `{"type":"` + typ + `","timestamp":"2026-05-23T10:00:00Z"}`
+		_, err := ParseClaudeEvent(line)
+		if !errors.Is(err, ErrSkipLine) {
+			t.Errorf("type %q: err = %v, want ErrSkipLine", typ, err)
+		}
+	}
+}
+
+// Any line lacking a uuid is skipped, even an unknown/future type — the
+// server rejects empty event_id anyway, so silently skipping is correct
+// and future-proof against new sidecar types.
+func TestParseClaudeEvent_MissingUUIDIsSkipLine(t *testing.T) {
+	line := `{"type":"some-future-sidecar","timestamp":"2026-05-23T10:00:00Z","data":{"x":1}}`
+	_, err := ParseClaudeEvent(line)
+	if !errors.Is(err, ErrSkipLine) {
+		t.Errorf("no-uuid line: err = %v, want ErrSkipLine", err)
+	}
+}
+
+// Regression: real event types all carry a uuid and must still parse.
+func TestParseClaudeEvent_RealEventTypesWithUUIDStillParse(t *testing.T) {
+	for _, typ := range []string{"attachment", "progress", "system"} {
+		line := `{"type":"` + typ + `","uuid":"x-1","timestamp":"2026-05-23T10:00:00Z","message":{"role":"user","content":"c"}}`
+		got, err := ParseClaudeEvent(line)
+		if err != nil {
+			t.Errorf("type %q: unexpected err %v", typ, err)
+			continue
+		}
+		if got.EventID != "x-1" || got.EventType != typ {
+			t.Errorf("type %q: got = %+v", typ, got)
+		}
+	}
+}
