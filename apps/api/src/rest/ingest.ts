@@ -19,6 +19,12 @@ import { resolveDeviceFromAuth, type ResolvedDevice } from "./ingestAuth.js";
 
 const INGEST_BODY_LIMIT = 50 * 1024 * 1024; // 50 MB raw (compressed wire bytes)
 
+// Postgres caps a single statement at 65535 bind parameters. client_events
+// binds 16 columns/row, so inserting >4095 rows in one statement overflows
+// (pg error 54000) and used to drop the entire session's events (#174).
+// 1000 rows/batch = 16000 params — comfortably under the cap.
+const EVENT_INSERT_BATCH_SIZE = 1000;
+
 const tokensSchema = z
   .object({
     input: z.number().int().nullable().optional(),
@@ -384,15 +390,24 @@ export function ingestRoutes(env: ServerEnv): FastifyPluginAsync {
           if (eventRows.length === 0) continue;
 
           try {
-            const inserted = await fastify.db
-              .insert(clientEvents)
-              .values(eventRows)
-              .onConflictDoNothing()
-              .returning({ id: clientEvents.id });
-            ingested += inserted.length;
-            // The remainder (eventRows.length - inserted.length) lost the
+            // Batch the INSERT to stay under Postgres's 65535 bind-param
+            // cap (#174). A single .values(eventRows) with >4095 rows
+            // overflows and fails the whole session; chunking inserts
+            // each slice independently and sums the actually-inserted rows.
+            let insertedCount = 0;
+            for (let i = 0; i < eventRows.length; i += EVENT_INSERT_BATCH_SIZE) {
+              const batch = eventRows.slice(i, i + EVENT_INSERT_BATCH_SIZE);
+              const inserted = await fastify.db
+                .insert(clientEvents)
+                .values(batch)
+                .onConflictDoNothing()
+                .returning({ id: clientEvents.id });
+              insertedCount += inserted.length;
+            }
+            ingested += insertedCount;
+            // The remainder (eventRows.length - insertedCount) lost the
             // millisecond race and counts as deduped too.
-            deduped += eventRows.length - inserted.length;
+            deduped += eventRows.length - insertedCount;
           } catch (err) {
             fastify.log.warn(
               { err, sessionId: session.session_id, count: eventRows.length },
