@@ -157,7 +157,7 @@ project-scoped `sk-` keys with different priorities + spend caps.
 
 **Credentials** live in a separate `credential_vault` table and are encrypted
 with AES-256-GCM, sub-key derived via HKDF-SHA256 from
-`CREDENTIAL_ENCRYPTION_KEY` with `salt=account_id` and `info="aide-gateway-credential-v1"` (v1, will become `caliber-gateway-credential-v2` in #121).
+`CREDENTIAL_ENCRYPTION_KEY` with `salt=account_id` and `info="caliber-gateway-credential-v2"`.
 The gateway decrypts on each failover attempt (cache: none in 4A).
 
 **Adding an account.**
@@ -643,7 +643,7 @@ is controlled at the organization level via a settings page toggle.
 
 **Encryption.** Captured bodies are encrypted with AES-256-GCM using a
 sub-key derived via HKDF-SHA256 from `CREDENTIAL_ENCRYPTION_KEY` with
-`salt=capture_id` and `info="aide-gateway-body-v1"` (v1, will become `caliber-gateway-body-v2` in #121). This provides domain
+`salt=capture_id` and `info="caliber-gateway-body-v2"`. This provides domain
 separation from account credentials and allows rotation at the org level
 without breaking decryption of older captures.
 

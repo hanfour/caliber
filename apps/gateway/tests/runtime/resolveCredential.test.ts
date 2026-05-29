@@ -9,9 +9,9 @@ import {
 const masterKey = "a".repeat(64);
 const accountId = "00000000-0000-0000-0000-000000000001";
 
-function sealed(plaintext: string, cipherVersion: 1 | 2 = 2) {
+function sealed(plaintext: string) {
   const s = encryptCredential({ masterKeyHex: masterKey, accountId, plaintext });
-  return { nonce: s.nonce, ciphertext: s.ciphertext, authTag: s.authTag, cipherVersion };
+  return { nonce: s.nonce, ciphertext: s.ciphertext, authTag: s.authTag };
 }
 
 function makeMockDb(rows: unknown[]) {
@@ -138,21 +138,5 @@ describe("resolveCredential", () => {
     await expect(
       resolveCredential(db, accountId, { masterKeyHex: masterKey }),
     ).rejects.toThrow(CredentialFormatError);
-  });
-
-  it("dispatches v1 row through decrypt path with version=1", async () => {
-    // Encrypt with the current cipher (v2 internals), then claim the row
-    // is v1. This won't decrypt because the ciphertext was made with
-    // v2 info — we expect decryptCredential to throw, proving
-    // resolveCredential actually reads row.cipherVersion and forwards
-    // it to the cipher dispatch.
-    const row = sealed(
-      JSON.stringify({ type: "api_key", api_key: "sk-test" }),
-      1,
-    );
-    const db = makeMockDb([row]);
-    await expect(
-      resolveCredential(db, accountId, { masterKeyHex: masterKey }),
-    ).rejects.toThrow();
   });
 });

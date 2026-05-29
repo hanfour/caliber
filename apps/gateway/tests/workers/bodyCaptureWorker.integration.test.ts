@@ -285,13 +285,11 @@ describe("bodyCaptureWorker — end-to-end + idempotency", () => {
       masterKeyHex: TEST_MASTER_KEY,
       requestId,
       sealed: row.requestBodySealed,
-      version: 2,
     });
     const decryptedResponse = decryptBody({
       masterKeyHex: TEST_MASTER_KEY,
       requestId,
       sealed: row.responseBodySealed,
-      version: 2,
     });
 
     expect(decryptedRequest).toContain("claude-sonnet-4-5");
@@ -486,7 +484,6 @@ describe("bodyCaptureWorker — end-to-end + idempotency", () => {
       masterKeyHex: TEST_MASTER_KEY,
       requestId,
       sealed: row.requestBodySealed,
-      version: 2,
     });
 
     const parsed = JSON.parse(decryptedRequest);

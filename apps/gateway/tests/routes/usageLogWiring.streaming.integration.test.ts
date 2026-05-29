@@ -221,7 +221,6 @@ async function seedAccount(orgId: string): Promise<string> {
     nonce: sealed.nonce,
     ciphertext: sealed.ciphertext,
     authTag: sealed.authTag,
-    cipherVersion: sealed.version,
   });
   return acct!.id;
 }

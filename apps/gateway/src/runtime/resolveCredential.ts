@@ -44,12 +44,11 @@ export async function resolveCredential(
       nonce: credentialVault.nonce,
       ciphertext: credentialVault.ciphertext,
       authTag: credentialVault.authTag,
-      cipherVersion: credentialVault.cipherVersion,
     })
     .from(credentialVault)
     .where(eq(credentialVault.accountId, accountId))
     .limit(1)
-    .then((r: Array<{ nonce: Buffer; ciphertext: Buffer; authTag: Buffer; cipherVersion: number }>) => r[0]);
+    .then((r: Array<{ nonce: Buffer; ciphertext: Buffer; authTag: Buffer }>) => r[0]);
 
   if (!row) {
     throw new CredentialNotFoundError(accountId);
@@ -59,7 +58,6 @@ export async function resolveCredential(
     masterKeyHex: opts.masterKeyHex,
     accountId,
     sealed: { nonce: row.nonce, ciphertext: row.ciphertext, authTag: row.authTag },
-    version: row.cipherVersion as 1 | 2,
   });
 
   let parsed: unknown;

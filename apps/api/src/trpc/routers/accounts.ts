@@ -247,7 +247,6 @@ export const accountsRouter = router({
         nonce: sealed.nonce,
         ciphertext: sealed.ciphertext,
         authTag: sealed.authTag,
-        cipherVersion: sealed.version,
         oauthExpiresAt,
       });
 
@@ -398,7 +397,6 @@ export const accountsRouter = router({
           nonce: sealed.nonce,
           ciphertext: sealed.ciphertext,
           authTag: sealed.authTag,
-          cipherVersion: sealed.version,
           oauthExpiresAt,
           rotatedAt,
         })
@@ -495,7 +493,6 @@ export const accountsRouter = router({
           nonce: sealed.nonce,
           ciphertext: sealed.ciphertext,
           authTag: sealed.authTag,
-          cipherVersion: sealed.version,
           oauthExpiresAt,
           rotatedAt,
         })
