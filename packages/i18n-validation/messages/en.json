@@ -7,7 +7,7 @@
       "invalid_union": "Invalid input",
       "invalid_union_discriminator": "Invalid discriminator value. Expected one of {options}",
       "invalid_enum_value": "Expected one of {options}, received '{received}'",
-      "unrecognized_keys": "Unrecognised key(s) in object: {keys}",
+      "unrecognized_keys": "Unrecognized key(s) in object: {keys}",
       "invalid_arguments": "Invalid function arguments",
       "invalid_return_type": "Invalid function return type",
       "invalid_date": "Invalid date",

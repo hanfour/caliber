@@ -7,7 +7,7 @@
       "invalid_union": "入力形式が正しくありません",
       "invalid_union_discriminator": "識別値が正しくありません。{options} のいずれかを指定してください",
       "invalid_enum_value": "{options} のいずれかが必要ですが、「{received}」を受け取りました",
-      "unrecognized_keys": "未定義のキーが含まれています: {keys}",
+      "unrecognized_keys": "未定義のキーが含まれています：{keys}",
       "invalid_arguments": "関数の引数が正しくありません",
       "invalid_return_type": "関数の戻り値が正しくありません",
       "invalid_date": "日付の形式が正しくありません",
