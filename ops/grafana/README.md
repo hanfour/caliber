@@ -12,10 +12,6 @@ Caliber gateway 的 Prometheus + Grafana 儀表板。放到 Grafana provisioning
 | Caliber — Evaluator | `caliber-evaluator` | Rule-based + facet evaluation, DLQ depth, LLM cost per org / 規則評核與面向擷取、DLQ 深度、各組織 LLM 成本 |
 | Caliber — GDPR | `caliber-gdpr` | Delete executions, auto-rejections, failure rate / 刪除執行、自動拒絕、失敗率 |
 
-The three `aide-*.json` files are deprecation stubs from the aide → Caliber rebrand — see the "Migration" section below.
-
-`aide-*.json` 是 aide → Caliber 改名遺留的 deprecation stub，見下方 Migration 段。
-
 ## Prerequisites / 前置需求
 
 - Prometheus scraping the Caliber gateway `/metrics` endpoint. Sample scrape config in [`monitoring/prometheus/scrape.example.yml`](../../monitoring/prometheus/scrape.example.yml).
@@ -48,9 +44,9 @@ Restart Grafana:
 docker compose restart grafana
 ```
 
-A `Caliber` folder appears containing all 6 dashboards (3 caliber-* + 3 aide-* stubs).
+A `Caliber` folder appears containing all 3 dashboards.
 
-會出現 `Caliber` 資料夾，內含 6 個 dashboard（3 個 caliber-* + 3 個 aide-* stub）。
+會出現 `Caliber` 資料夾，內含 3 個 dashboard。
 
 ## Install — Option B: UI import / 安裝—方法 B：UI 匯入
 
@@ -143,16 +139,6 @@ The `org_id` label is only present on the evaluator's facet + cost metrics. Body
 - **Data source**：每個 dashboard 頂端下拉切換。預設用 Grafana 的 `default` alias。
 - **Org ID**（僅 `caliber-evaluator`）：選單一或多個 org，或 `All` 跨組織彙整。
 - **時間區間**：標準 Grafana 時間選擇器。
-
-## Migration: aide → Caliber
-
-The three `aide-*.json` files preserve the old UIDs (`aide-body-capture`, `aide-evaluator`, `aide-gdpr`) as one-panel deprecation stubs. Opening one shows a "moved to" message linking to the new dashboard, so existing operator bookmarks pointing at `/d/aide-*` do not 404.
-
-The stubs will be removed in a future cleanup PR once operators have migrated their bookmarks.
-
-`aide-*.json` 三個檔案保留舊 UID（`aide-body-capture` / `aide-evaluator` / `aide-gdpr`），為單面板的 deprecation stub。書籤連到舊 URL 不會 404，會看到「已遷移」提示與新 dashboard 連結。
-
-待 operator 遷移完書籤後，會於後續清理 PR 移除這些 stub。
 
 ## Versioning / 版本
 
