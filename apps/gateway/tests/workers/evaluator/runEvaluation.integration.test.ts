@@ -255,7 +255,6 @@ async function seedRequestBody(requestId: string): Promise<void> {
     orgId,
     requestBodySealed: requestBodyEnc.sealed,
     responseBodySealed: responseBodyEnc.sealed,
-    cipherVersion: requestBodyEnc.version,
     stopReason: "end_turn",
     clientUserAgent: "test-agent/1.0",
     clientSessionId: null,

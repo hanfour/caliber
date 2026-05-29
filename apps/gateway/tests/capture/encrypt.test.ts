@@ -11,12 +11,10 @@ describe("encryptBody / decryptBody", () => {
       requestId: "req-1",
       plaintext,
     });
-    expect(enc.version).toBe(2);
     const decrypted = decryptBody({
       masterKeyHex: MASTER_KEY,
       requestId: "req-1",
       sealed: enc.sealed,
-      version: enc.version,
     });
     expect(decrypted).toBe(plaintext);
   });
@@ -47,7 +45,6 @@ describe("encryptBody / decryptBody", () => {
         masterKeyHex: MASTER_KEY,
         requestId: "wrong",
         sealed: enc.sealed,
-        version: 2,
       }),
     ).toThrow();
   });
@@ -64,7 +61,6 @@ describe("encryptBody / decryptBody", () => {
         masterKeyHex: WRONG,
         requestId: "r",
         sealed: enc.sealed,
-        version: 2,
       }),
     ).toThrow();
   });
@@ -75,7 +71,6 @@ describe("encryptBody / decryptBody", () => {
         masterKeyHex: MASTER_KEY,
         requestId: "r",
         sealed: Buffer.from("x"),
-        version: 2,
       }),
     ).toThrow(/too small/);
   });
@@ -100,7 +95,6 @@ describe("encryptBody / decryptBody", () => {
       masterKeyHex: MASTER_KEY,
       requestId: "r",
       sealed: enc.sealed,
-      version: 2,
     });
     expect(r).toBe("p");
   });

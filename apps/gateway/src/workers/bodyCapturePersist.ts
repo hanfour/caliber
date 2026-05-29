@@ -78,10 +78,6 @@ export async function persistBody(input: PersistBodyInput): Promise<void> {
         })
       : null;
 
-  // All four sealed columns share the same cipher_version because they
-  // are written together. Take it from any one of the encrypt calls.
-  const cipherVersion = requestBodyEnc.version;
-
   const retentionUntil = new Date(
     now.getTime() + payload.retentionDays * 24 * 60 * 60 * 1000,
   );
@@ -96,7 +92,6 @@ export async function persistBody(input: PersistBodyInput): Promise<void> {
       responseBodySealed: responseBodyEnc.sealed,
       thinkingBodySealed: thinkingBodyEnc?.sealed ?? null,
       attemptErrorsSealed: attemptErrorsEnc?.sealed ?? null,
-      cipherVersion,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       requestParams: payload.requestParams as any,
       stopReason: payload.stopReason,

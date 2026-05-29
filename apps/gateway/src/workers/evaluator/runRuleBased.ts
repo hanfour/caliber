@@ -155,13 +155,11 @@ export async function runRuleBased(
       masterKeyHex,
       b.requestId,
       b.requestBodySealed,
-      b.cipherVersion as 1 | 2,
     );
     const responseBodyStr = safeDecrypt(
       masterKeyHex,
       b.requestId,
       b.responseBodySealed,
-      b.cipherVersion as 1 | 2,
     );
 
     return {
@@ -294,10 +292,9 @@ function safeDecrypt(
   masterKeyHex: string,
   requestId: string,
   sealed: Buffer,
-  version: 1 | 2,
 ): string {
   try {
-    return decryptBody({ masterKeyHex, requestId, sealed, version });
+    return decryptBody({ masterKeyHex, requestId, sealed });
   } catch {
     return "";
   }
