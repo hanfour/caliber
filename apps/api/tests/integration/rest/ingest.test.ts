@@ -169,6 +169,42 @@ describe("POST /v1/ingest", () => {
     }
   });
 
+  // #174: a single chunk with >4095 events used to overflow Postgres's
+  // 65535 bind-param cap (client_events binds 16 cols/row, 16*N > 65535),
+  // failing the whole INSERT with pg 54000 → events_insert_failed → the
+  // entire session's events silently dropped. The INSERT must be batched.
+  it("large batch: >4095 events in one session ingest fully (bind-param batching)", async () => {
+    const fx = await seedDevice();
+    const N = 5000; // 16 * 5000 = 80000 > 65535 → overflows a single INSERT
+    const events = Array.from({ length: N }, (_, i) =>
+      makeEvent({ event_id: `ev-large-${i}` }),
+    );
+    const session = makeSession({ events });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/ingest",
+      headers: { authorization: `Bearer ${fx.rawKey}` },
+      payload: {
+        agent_version: "0.1.0",
+        redaction_mode: "metadata-only",
+        sessions: [session],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.errors).toEqual([]);
+    expect(body.ingested).toBe(N);
+    expect(body.deduped).toBe(0);
+
+    const rows = await testDb.db
+      .select()
+      .from(clientEvents)
+      .where(eq(clientEvents.sessionId, session.session_id));
+    expect(rows).toHaveLength(N);
+  });
+
   it("retry dedup: same payload twice → second call returns deduped:N, ingested:0", async () => {
     const fx = await seedDevice();
     const session = makeSession();
