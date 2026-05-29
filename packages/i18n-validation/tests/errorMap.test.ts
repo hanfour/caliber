@@ -144,7 +144,7 @@ describe("createErrorMap", () => {
         },
         { defaultError: "x", data: undefined },
       );
-      expect(out.message).toBe("Unrecognised key(s) in object: foo, bar");
+      expect(out.message).toBe("Unrecognized key(s) in object: foo, bar");
     });
   });
 
