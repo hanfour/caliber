@@ -6,7 +6,7 @@
       "invalid_literal": "{expected} 이(가) 필요합니다",
       "invalid_union": "입력 형식이 올바르지 않습니다",
       "invalid_union_discriminator": "식별 값이 올바르지 않습니다. {options} 중 하나여야 합니다",
-      "invalid_enum_value": "{options} 중 하나여야 하지만 '{received}' 을(를) 받았습니다",
+      "invalid_enum_value": "{options} 중 하나여야 하지만 「{received}」 을(를) 받았습니다",
       "unrecognized_keys": "객체에 알 수 없는 키가 포함되어 있습니다: {keys}",
       "invalid_arguments": "함수 인수가 올바르지 않습니다",
       "invalid_return_type": "함수 반환값이 올바르지 않습니다",
