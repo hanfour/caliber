@@ -1437,4 +1437,178 @@ describe("/v1/responses", () => {
     expect(upstreamBody.system).toBe("you are a terse assistant");
     await app.close();
   });
+
+  // ── Idempotency cache (design §4.5) — client-opt-in via X-Request-Id ───────
+
+  it("idempotency: anthropic-translator branch replays a 200 on a repeated X-Request-Id", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_idem_resp_anth_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test" }),
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: JSON.stringify(defaultAnthropicResponse),
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+    const reqId = `rid-resp-anth-${Math.random().toString(36).slice(2)}`;
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}`, "x-request-id": reqId },
+      payload: validResponsesPayload,
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ object: "response" });
+    expect(first.headers["x-idempotent-replay"]).toBeUndefined();
+    const firstBody = first.body;
+
+    await new Promise((r) => setTimeout(r, 20));
+    nextUpstreamResponse = { status: 500, body: "SHOULD_NOT_BE_CALLED" };
+    lastUpstreamRequest = null;
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}`, "x-request-id": reqId },
+      payload: validResponsesPayload,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toBe(firstBody);
+    expect(second.headers["x-idempotent-replay"]).toBe("true");
+    expect(lastUpstreamRequest).toBeNull();
+    await app.close();
+  });
+
+  it("idempotency: openai-platform passthrough replays a 200 on a repeated X-Request-Id", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_idem_resp_oai_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      "openai",
+      groupId,
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: JSON.stringify({
+        id: "resp_idem_passthrough",
+        object: "response",
+        created_at: 1700000000,
+        model: "gpt-4o",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            id: "msg_idem_pt",
+            role: "assistant",
+            status: "completed",
+            content: [
+              { type: "output_text", text: "hi", annotations: [] },
+            ],
+          },
+        ],
+        usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
+        incomplete_details: null,
+      }),
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+    const reqId = `rid-resp-oai-${Math.random().toString(36).slice(2)}`;
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}`, "x-request-id": reqId },
+      payload: validResponsesPayload,
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ id: "resp_idem_passthrough" });
+    expect(first.headers["x-idempotent-replay"]).toBeUndefined();
+    const firstBody = first.body;
+
+    await new Promise((r) => setTimeout(r, 20));
+    nextUpstreamResponse = { status: 500, body: "SHOULD_NOT_BE_CALLED" };
+    lastUpstreamRequest = null;
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}`, "x-request-id": reqId },
+      payload: validResponsesPayload,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toBe(firstBody);
+    expect(second.headers["x-idempotent-replay"]).toBe("true");
+    expect(lastUpstreamRequest).toBeNull();
+    await app.close();
+  });
+
+  it("idempotency: /v1/responses/compact replays a 200 on a repeated X-Request-Id", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId, "openai");
+    const rawKey = `ak_idem_compact_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey, groupId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "sk-openai-test" }),
+      "openai",
+      groupId,
+    );
+
+    nextUpstreamResponse = {
+      status: 200,
+      body: JSON.stringify({
+        id: "resp_idem_compact",
+        object: "response.compaction",
+        created_at: 1700000000,
+        output: [],
+      }),
+    };
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+    const reqId = `rid-compact-${Math.random().toString(36).slice(2)}`;
+    const payload = { model: "gpt-5", input: "summarise this" };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/v1/responses/compact",
+      headers: { authorization: `Bearer ${rawKey}`, "x-request-id": reqId },
+      payload,
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ id: "resp_idem_compact" });
+    expect(first.headers["x-idempotent-replay"]).toBeUndefined();
+    const firstBody = first.body;
+
+    await new Promise((r) => setTimeout(r, 20));
+    nextUpstreamResponse = { status: 500, body: "SHOULD_NOT_BE_CALLED" };
+    lastUpstreamRequest = null;
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/v1/responses/compact",
+      headers: { authorization: `Bearer ${rawKey}`, "x-request-id": reqId },
+      payload,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toBe(firstBody);
+    expect(second.headers["x-idempotent-replay"]).toBe("true");
+    expect(lastUpstreamRequest).toBeNull();
+    await app.close();
+  });
 });

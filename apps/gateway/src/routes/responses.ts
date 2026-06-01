@@ -52,6 +52,8 @@ import {
   checkRouteCache,
   tryStoreOnSuccess,
 } from "../runtime/responseCache.js";
+import { storeIdempotent } from "../runtime/idempotencyCache.js";
+import { checkRequestIdempotency } from "./idempotencyEntry.js";
 import { emitUsageLog } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
 import { buildSyntheticAnthropicUsage } from "../runtime/syntheticUsageShapes.js";
@@ -150,6 +152,14 @@ export function makeResponsesRouteHandler(
       return;
     }
 
+    // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
+    // once up front for every platform/stream branch (the in-flight marker
+    // 409s a concurrent duplicate); only non-stream 200s get stored for
+    // replay (anthropic-translator branch below + the openai passthrough).
+    const idem = await checkRequestIdempotency(app, opts.env, req, reply);
+    if (idem.handled) return;
+    const idemKey = idem.idemKey;
+
     // ── Dispatch by platform ────────────────────────────────────────
     // The Anthropic translator branch needs strict Zod validation to
     // safely transform the body. The OpenAI passthrough branch does
@@ -211,6 +221,7 @@ export function makeResponsesRouteHandler(
         req.id,
         modelRaw,
         cacheKey,
+        idemKey,
       );
       return;
     }
@@ -416,6 +427,15 @@ export function makeResponsesRouteHandler(
           body: responseBuf,
         },
       );
+      storeIdempotent(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC },
+        idemKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
     } catch (err) {
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
@@ -487,6 +507,12 @@ export function makeResponsesCompactRouteHandler(
       return;
     }
 
+    // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Compact
+    // is non-stream only; a 200 gets stored for replay below.
+    const idem = await checkRequestIdempotency(app, opts.env, req, reply);
+    if (idem.handled) return;
+    const idemKey = idem.idemKey;
+
     const upstreamBodyBuf = Buffer.from(JSON.stringify(rawBody));
     const requestId = req.id;
     const ac = new AbortController();
@@ -524,14 +550,26 @@ export function makeResponsesCompactRouteHandler(
           ),
       });
 
+      const contentType =
+        (upstream.headers["content-type"] as string | undefined) ??
+        "application/json";
       reply
         .code(upstream.status)
-        .header(
-          "content-type",
-          (upstream.headers["content-type"] as string | undefined) ??
-            "application/json",
-        )
+        .header("content-type", contentType)
         .send(upstream.body);
+      // Only a 200 is replayable: storeIdempotent gates on status===200. A
+      // non-2xx upstream already threw FatalUpstreamError above and never
+      // reaches here; a 2xx-but-non-200 (e.g. 201) is forwarded to the client
+      // but not cached — its in-flight marker simply expires via TTL.
+      storeIdempotent(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC },
+        idemKey,
+        {
+          status: upstream.status,
+          headers: { "content-type": contentType },
+          body: upstream.body,
+        },
+      );
     } catch (err) {
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
@@ -784,6 +822,7 @@ async function runOpenaiResponsesPassthroughFailover(
   requestId: string,
   requestedModel: string,
   cacheKey: string | null,
+  idemKey: string | null,
 ): Promise<void> {
   const startedAtMs = Date.now();
   const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
@@ -892,6 +931,15 @@ async function runOpenaiResponsesPassthroughFailover(
     tryStoreOnSuccess(
       { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
       cacheKey,
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: responseBuf,
+      },
+    );
+    storeIdempotent(
+      { redis: app.redis, ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC },
+      idemKey,
       {
         status: 200,
         headers: { "content-type": "application/json" },

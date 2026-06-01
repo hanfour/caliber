@@ -45,10 +45,8 @@ import {
   checkRouteCache,
   tryStoreOnSuccess,
 } from "../runtime/responseCache.js";
-import {
-  checkIdempotency,
-  storeIdempotent,
-} from "../runtime/idempotencyCache.js";
+import { storeIdempotent } from "../runtime/idempotencyCache.js";
+import { checkRequestIdempotency } from "./idempotencyEntry.js";
 
 export interface MessagesRouteOptions {
   env: ServerEnv;
@@ -137,23 +135,8 @@ export function makeMessagesAnthropicHandler(
     // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
     // for stream + non-stream (the in-flight marker 409s a concurrent
     // duplicate); only non-stream 200s get cached for replay below.
-    const xReqId = req.headers["x-request-id"];
-    const idem = await checkIdempotency({
-      redis: app.redis,
-      ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC,
-      failClosed: opts.env.GATEWAY_REDIS_FAILURE_MODE === "strict",
-      requestKey: Array.isArray(xReqId) ? (xReqId[0] ?? null) : (xReqId ?? null),
-      reply,
-      onResult: () => app.gwMetrics.idempotencyHitTotal.inc(),
-      logger: app.log,
-    });
-    if (
-      idem.outcome === "replayed" ||
-      idem.outcome === "conflict" ||
-      idem.outcome === "degraded"
-    ) {
-      return;
-    }
+    const idem = await checkRequestIdempotency(app, opts.env, req, reply);
+    if (idem.handled) return;
     const idemKey = idem.idemKey;
 
     // Phase 3 #2 — response cache for non-streaming requests. Disabled
@@ -892,6 +875,12 @@ export function makeMessagesOpenaiHandler(
     const anthropicBody = body as unknown as AnthropicMessagesRequest;
     const isStream = body.stream === true;
 
+    // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
+    // for stream + non-stream; only non-stream 200s get stored for replay.
+    const idem = await checkRequestIdempotency(app, opts.env, req, reply);
+    if (idem.handled) return;
+    const idemKey = idem.idemKey;
+
     // Phase 3 #2 — share cache scope `v1/messages` with the
     // anthropic-platform handler. Both handlers see the same
     // anthropic-shape client body and emit anthropic-shape responses,
@@ -1061,6 +1050,15 @@ export function makeMessagesOpenaiHandler(
       tryStoreOnSuccess(
         { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
         cacheKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
+      storeIdempotent(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC },
+        idemKey,
         {
           status: 200,
           headers: { "content-type": "application/json" },
