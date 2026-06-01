@@ -8,7 +8,6 @@ const METRIC_NAMES = [
   'gw_slot_hold_duration_seconds',
   'gw_wait_queue_depth',
   'gw_idempotency_hit_total',
-  'gw_sticky_hit_total',
   'gw_redis_latency_seconds',
   'gw_upstream_duration_seconds',
   'gw_pricing_miss_total',
@@ -84,7 +83,6 @@ describe('metricsPlugin', () => {
     expect(m.slotHoldDurationSeconds).toBeInstanceOf(Histogram)
     expect(m.waitQueueDepth).toBeInstanceOf(Gauge)
     expect(m.idempotencyHitTotal).toBeInstanceOf(Counter)
-    expect(m.stickyHitTotal).toBeInstanceOf(Counter)
     expect(m.redisLatencySeconds).toBeInstanceOf(Histogram)
     expect(m.upstreamDurationSeconds).toBeInstanceOf(Histogram)
     expect(m.pricingMissTotal).toBeInstanceOf(Counter)

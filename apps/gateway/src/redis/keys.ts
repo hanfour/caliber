@@ -5,7 +5,6 @@ export const keys = {
   slots: (scope: "user" | "account", id: string) => `slots:${scope}:${id}`,
   wait: (userId: string) => `wait:user:${userId}`,
   idem: (requestId: string) => `idem:${requestId}`,
-  sticky: (orgId: string, sessionId: string) => `sticky:${orgId}:${sessionId}`,
   // Plan 5A §8.2 Layer 1 — `previous_response_id` sticky (TTL 1h)
   stickyResp: (groupId: string, previousResponseId: string) =>
     `sticky:resp:${groupId}:${previousResponseId}`,
