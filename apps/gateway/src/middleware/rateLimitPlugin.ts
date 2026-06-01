@@ -46,6 +46,7 @@ async function pluginBody(
       // Decorate may not be set in unit tests that build a bare fastify
       // — guard so the plugin stays test-friendly.
       fastify.gwMetrics?.gwRateLimitFailOpenTotal.inc();
+      fastify.gwMetrics?.redisErrorTotal.inc({ op: "rate_limit" });
       return;
     }
 

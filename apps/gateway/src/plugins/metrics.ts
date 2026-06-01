@@ -11,6 +11,17 @@ export interface GatewayMetrics {
   slotHoldDurationSeconds: Histogram<string>;
   waitQueueDepth: Gauge<string>;
   idempotencyHitTotal: Counter<string>;
+  // §4.9 follow-up — idempotency cache entries that failed to JSON-parse
+  // (treated as a miss by getCached + logged). Sustained non-zero = a
+  // serialization-format drift or a corrupting writer; pairs with
+  // gw_idempotency_hit_total.
+  idempotencyMalformedTotal: Counter<string>;
+  // §4.9 follow-up — cross-cutting count of raw Redis op failures caught on
+  // the hot path, by operation (`op`). Complements the per-feature behavioural
+  // counters (gw_rate_limit_fail_open_total, gw_slot_acquire_total{result=
+  // redis_error}) with a unified redis-health signal; pairs with
+  // gw_redis_latency_seconds.
+  redisErrorTotal: Counter<"op">;
   // Phase 3 #2 follow-up — cache hit/miss counter so operators can
   // observe hit-rate from Prometheus rather than only via the
   // `x-cache` response header on individual requests.
@@ -108,6 +119,19 @@ async function metricsPluginBody(
   const idempotencyHitTotal = new Counter({
     name: "gw_idempotency_hit_total",
     help: "Idempotency cache hits",
+    registers: [register],
+  });
+
+  const idempotencyMalformedTotal = new Counter({
+    name: "gw_idempotency_malformed_total",
+    help: "Idempotency cache entries that failed to parse (treated as a miss)",
+    registers: [register],
+  });
+
+  const redisErrorTotal = new Counter({
+    name: "gw_redis_error_total",
+    help: "Redis op failures caught on the hot path, by operation",
+    labelNames: ["op"] as const,
     registers: [register],
   });
 
@@ -386,6 +410,7 @@ async function metricsPluginBody(
   // Materialize zero values so unlabeled metrics appear in scrape output
   waitQueueDepth.set(0);
   idempotencyHitTotal.inc(0);
+  idempotencyMalformedTotal.inc(0);
   queueDepth.set(0);
   queueDlqCount.set(0);
   usagePersistLostTotal.inc(0);
@@ -407,12 +432,24 @@ async function metricsPluginBody(
   gwCacheTotal.inc({ result: "hit" }, 0);
   gwCacheTotal.inc({ result: "miss" }, 0);
   gwRateLimitFailOpenTotal.inc(0);
+  // Pre-init the known op label values so each series shows in scrape output.
+  for (const op of [
+    "rate_limit",
+    "wait_queue",
+    "idempotency",
+    "cache_read",
+    "cache_write",
+  ] as const) {
+    redisErrorTotal.inc({ op }, 0);
+  }
 
   fastify.decorate("gwMetrics", {
     slotAcquireTotal,
     slotHoldDurationSeconds,
     waitQueueDepth,
     idempotencyHitTotal,
+    idempotencyMalformedTotal,
+    redisErrorTotal,
     gwCacheTotal,
     gwRateLimitFailOpenTotal,
     redisLatencySeconds,

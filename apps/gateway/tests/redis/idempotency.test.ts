@@ -57,6 +57,23 @@ describe("idempotency", () => {
     await expect(getCached(redis, "bad-nolog")).resolves.toBeNull();
   });
 
+  it("malformed JSON fires onMalformed (treated as a miss)", async () => {
+    await redis.set("idem:bad-hook", "}{ not json", "EX", 60);
+    let malformed = 0;
+    const got = await getCached(redis, "bad-hook", {
+      onMalformed: () => (malformed += 1),
+    });
+    expect(got).toBeNull();
+    expect(malformed).toBe(1);
+  });
+
+  it("a well-formed entry does NOT fire onMalformed", async () => {
+    await setCached(redis, "ok-hook", { status: 200, headers: {}, body: "" }, 60);
+    let malformed = 0;
+    await getCached(redis, "ok-hook", { onMalformed: () => (malformed += 1) });
+    expect(malformed).toBe(0);
+  });
+
   it("setCached respects ttlSec", async () => {
     await setCached(redis, "req-3", { status: 200, headers: {}, body: "" }, 120);
     const ttl = await redis.ttl("idem:req-3");

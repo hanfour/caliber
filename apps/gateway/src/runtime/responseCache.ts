@@ -104,6 +104,12 @@ export function pickCacheableHeaders(
 export interface ResponseCacheDeps {
   redis: Pick<Redis, "get" | "set">;
   ttlSec: number;
+  /**
+   * Fired on a Redis op failure (the get/set is still swallowed and the
+   * request falls through to upstream). The caller supplies an op-bound
+   * emitter, e.g. `() => gwMetrics.redisErrorTotal.inc({ op: "cache_read" })`.
+   */
+  onRedisError?: () => void;
 }
 
 /**
@@ -124,6 +130,7 @@ export async function tryCacheRead(
   try {
     raw = await deps.redis.get(cacheKey);
   } catch {
+    deps.onRedisError?.();
     return null;
   }
   if (!raw) return null;
@@ -174,6 +181,7 @@ export async function maybeCacheStore(
     await deps.redis.set(cacheKey, JSON.stringify(payload), "EX", deps.ttlSec);
     return true;
   } catch {
+    deps.onRedisError?.();
     return false;
   }
 }
@@ -216,6 +224,8 @@ export interface CheckRouteCacheDeps {
    * counter.
    */
   onResult?: (result: "hit" | "miss") => void;
+  /** Forwarded to the read; e.g. `() => gwMetrics.redisErrorTotal.inc({ op: "cache_read" })`. */
+  onRedisError?: () => void;
 }
 
 export interface CheckRouteCacheResult {
@@ -231,7 +241,7 @@ export async function checkRouteCache(
   }
   const cacheKey = computeCacheKey(deps.orgId, deps.scope, deps.bodyBuf);
   const cached = await tryCacheRead(
-    { redis: deps.redis, ttlSec: deps.ttlSec },
+    { redis: deps.redis, ttlSec: deps.ttlSec, onRedisError: deps.onRedisError },
     cacheKey,
   );
   if (cached) {

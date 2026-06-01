@@ -8,6 +8,8 @@ const METRIC_NAMES = [
   'gw_slot_hold_duration_seconds',
   'gw_wait_queue_depth',
   'gw_idempotency_hit_total',
+  'gw_idempotency_malformed_total',
+  'gw_redis_error_total',
   'gw_redis_latency_seconds',
   'gw_upstream_duration_seconds',
   'gw_pricing_miss_total',
@@ -46,7 +48,7 @@ describe('metricsPlugin', () => {
     expect(res.headers['content-type']).toMatch(/^text\/plain/)
   })
 
-  it('3. response body contains all 11 metric names', async () => {
+  it('3. response body contains all expected metric names', async () => {
     const app = await buildTestApp()
     apps.push(app)
     const res = await app.inject({ method: 'GET', url: '/metrics' })
@@ -74,7 +76,7 @@ describe('metricsPlugin', () => {
     expect(body).toContain('gw_redis_latency_seconds_count 0')
   })
 
-  it('6. app.gwMetrics decoration exposes all 11 metric accessors', async () => {
+  it('6. app.gwMetrics decoration exposes the metric accessors', async () => {
     const app = await buildTestApp()
     apps.push(app)
     const m = app.gwMetrics
@@ -83,6 +85,8 @@ describe('metricsPlugin', () => {
     expect(m.slotHoldDurationSeconds).toBeInstanceOf(Histogram)
     expect(m.waitQueueDepth).toBeInstanceOf(Gauge)
     expect(m.idempotencyHitTotal).toBeInstanceOf(Counter)
+    expect(m.idempotencyMalformedTotal).toBeInstanceOf(Counter)
+    expect(m.redisErrorTotal).toBeInstanceOf(Counter)
     expect(m.redisLatencySeconds).toBeInstanceOf(Histogram)
     expect(m.upstreamDurationSeconds).toBeInstanceOf(Histogram)
     expect(m.pricingMissTotal).toBeInstanceOf(Counter)

@@ -71,21 +71,34 @@ describe("checkIdempotency", () => {
     expect(onResult).toEqual(["replayed"]);
   });
 
-  it("strict mode + Redis error → 503 service_degraded (fail-closed)", async () => {
+  it("strict mode + Redis error → 503 service_degraded (fail-closed) + onRedisError", async () => {
     const failing = { get: () => Promise.reject(new Error("down")) } as unknown as Redis;
     const reply = fakeReply();
-    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: true, requestKey: "rid-4", reply });
+    let redisErrors = 0;
+    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: true, requestKey: "rid-4", reply, onRedisError: () => (redisErrors += 1) });
     expect(res.outcome).toBe("degraded");
     expect(reply.calls.status).toBe(503);
     expect(reply.calls.body).toMatchObject({ error: "service_degraded" });
+    expect(redisErrors).toBe(1);
   });
 
-  it("lenient mode + Redis error → disabled (request proceeds without idempotency)", async () => {
+  it("lenient mode + Redis error → disabled (request proceeds without idempotency) + onRedisError", async () => {
     const failing = { get: () => Promise.reject(new Error("down")) } as unknown as Redis;
     const reply = fakeReply();
-    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: false, requestKey: "rid-5", reply });
+    let redisErrors = 0;
+    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: false, requestKey: "rid-5", reply, onRedisError: () => (redisErrors += 1) });
     expect(res.outcome).toBe("disabled");
     expect(reply.calls.status).toBe(0); // nothing sent
+    expect(redisErrors).toBe(1); // still counted as a raw redis error
+  });
+
+  it("malformed stored entry → fires onMalformed, then proceeds as a miss", async () => {
+    await redis.set("idem:rid-malformed", "not json at all", "EX", 300);
+    let malformed = 0;
+    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, requestKey: "rid-malformed", reply: fakeReply(), onMalformed: () => (malformed += 1) });
+    // getCached treats malformed as a miss → checkIdempotency claims the slot.
+    expect(res.outcome).toBe("proceed");
+    expect(malformed).toBe(1);
   });
 });
 

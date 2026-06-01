@@ -3,9 +3,9 @@ import { keys } from "./keys.js";
 
 // `gw_idempotency_hit_total` is emitted from `runtime/idempotencyCache.ts` (the
 // route-level helper) on replay/conflict. `gw_idempotency_malformed_total`
-// (design §4.9) is still deferred: `getCached` swallows a corrupt entry as a
-// miss + logs, but doesn't yet surface a malformed signal to a counter — wire an
-// `onMalformed` hook here + define the metric when that observability is wanted.
+// (design §4.9) is wired via the `onMalformed` hook below: `getCached` still
+// swallows a corrupt entry as a miss + logs, and now also fires `onMalformed`
+// so the helper can surface it to the counter.
 
 export interface CachedResponse {
   status: number;
@@ -24,6 +24,8 @@ export type IdempotencyEntry = CachedResponse | InFlightMarker;
 
 export interface IdempotencyOptions {
   logger?: { warn: (obj: unknown, msg?: string) => void };
+  /** Fired when a stored entry fails to parse (still treated as a miss). */
+  onMalformed?: () => void;
 }
 
 export async function getCached(
@@ -44,6 +46,7 @@ export async function getCached(
       },
       "idempotency cache entry malformed; treating as miss",
     );
+    opts.onMalformed?.();
     return null;
   }
 }

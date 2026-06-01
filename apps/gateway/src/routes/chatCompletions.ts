@@ -145,6 +145,8 @@ export function makeChatCompletionsAnthropicHandler(
         bodyBuf: clientBodyBuf,
         reply,
         onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
+        onRedisError: () =>
+          app.gwMetrics.redisErrorTotal.inc({ op: "cache_read" }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
@@ -314,7 +316,12 @@ export function makeChatCompletionsAnthropicHandler(
         .header("content-type", "application/json")
         .send(responseBuf);
       tryStoreOnSuccess(
-        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        {
+          redis: app.redis,
+          ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+          onRedisError: () =>
+            app.gwMetrics.redisErrorTotal.inc({ op: "cache_write" }),
+        },
         cacheKey,
         {
           status: 200,
@@ -655,6 +662,8 @@ export function makeChatCompletionsOpenaiHandler(
         bodyBuf: clientBodyBuf,
         reply,
         onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
+        onRedisError: () =>
+          app.gwMetrics.redisErrorTotal.inc({ op: "cache_read" }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
@@ -783,7 +792,12 @@ export function makeChatCompletionsOpenaiHandler(
         .header("content-type", "application/json")
         .send(responseBuf);
       tryStoreOnSuccess(
-        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        {
+          redis: app.redis,
+          ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+          onRedisError: () =>
+            app.gwMetrics.redisErrorTotal.inc({ op: "cache_write" }),
+        },
         cacheKey,
         {
           status: 200,

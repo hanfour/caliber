@@ -162,30 +162,34 @@ describe("maybeCacheStore + tryCacheRead", () => {
     expect(await tryCacheRead(deps(60), k)).toBeNull();
   });
 
-  it("read swallows Redis errors and returns null (fail-open)", async () => {
+  it("read swallows Redis errors, returns null, and fires onRedisError (fail-open)", async () => {
     const flaky: Pick<Redis, "get" | "set"> = {
       get: () => Promise.reject(new Error("redis_oom")),
       set: () => Promise.reject(new Error("redis_oom")),
     } as unknown as Pick<Redis, "get" | "set">;
+    let redisErrors = 0;
     expect(
       await tryCacheRead(
-        { redis: flaky, ttlSec: 60 },
+        { redis: flaky, ttlSec: 60, onRedisError: () => (redisErrors += 1) },
         "respcache:whatever",
       ),
     ).toBeNull();
+    expect(redisErrors).toBe(1);
   });
 
-  it("store swallows Redis errors and reports false", async () => {
+  it("store swallows Redis errors, reports false, and fires onRedisError", async () => {
     const flaky: Pick<Redis, "get" | "set"> = {
       get: () => Promise.reject(new Error("redis_oom")),
       set: () => Promise.reject(new Error("redis_oom")),
     } as unknown as Pick<Redis, "get" | "set">;
+    let redisErrors = 0;
     const stored = await maybeCacheStore(
-      { redis: flaky, ttlSec: 60 },
+      { redis: flaky, ttlSec: 60, onRedisError: () => (redisErrors += 1) },
       "respcache:whatever",
       { status: 200, headers: {}, body: Buffer.from("x") },
     );
     expect(stored).toBe(false);
+    expect(redisErrors).toBe(1);
   });
 
   it("uses the provided TTL — read after expiry returns null", async () => {
