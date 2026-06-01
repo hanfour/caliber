@@ -25,14 +25,14 @@ breaking changes below.
 
 ## Breaking changes
 
-- **Web image is `linux/amd64`-only.** The `aide-web` Docker image no
+- **Web image is `linux/amd64`-only.** The `caliber-web` Docker image no
   longer publishes an `arm64` tag (Plan 4C Phase 1 Part 12). Reason:
   Next.js production builds on arm64 emulation in CI exceed the GitHub
   Actions 6h timeout. The `gateway` and `api` images continue to ship
   multi-arch.
   - **Impact:** if you self-host on arm64 hardware (e.g. Apple Silicon
     Docker hosts, AWS Graviton), pull the `linux/amd64` image and run
-    via emulation, or build the `aide-web` image locally for your
+    via emulation, or build the `caliber-web` image locally for your
     architecture.
 - **Schema additions only.** Migrations 0004 and 0005 add new columns
   and tables. No existing columns change shape, no data is rewritten.
@@ -105,7 +105,7 @@ breaking changes below.
 
 8. **(Optional) wire alert rules.** If you run Alertmanager:
    ```bash
-   cat ops/prometheus/alerts.yml >> /etc/prometheus/rules.d/aide.yml
+   cat ops/prometheus/alerts.yml >> /etc/prometheus/rules.d/caliber.yml
    cp ops/alertmanager/alertmanager.yml.example /etc/alertmanager/alertmanager.yml
    # edit alertmanager.yml — set receivers (Slack/PagerDuty/email)
    systemctl reload prometheus alertmanager

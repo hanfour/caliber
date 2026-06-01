@@ -1,10 +1,10 @@
-# Caddy config for aide.
+# Caddy config for Caliber.
 #
 # Caddy auto-provisions Let's Encrypt certs for any hostname you
 # declare; just point DNS A/AAAA records at the Caddy host.
 #
 # Two public origins:
-#   - aide.example.com         → web (admin UI, NextAuth)
+#   - caliber.example.com         → web (admin UI, NextAuth)
 #   - gateway.example.com      → gateway (customer SDK target)
 #
 # api stays internal. The web container reverse-proxies /trpc and
@@ -13,9 +13,9 @@
 
 # Replace the hostnames before deploying.
 
-aide.example.com {
+caliber.example.com {
     # web (Next.js, internal port 3000)
-    reverse_proxy aide-web:3000
+    reverse_proxy caliber-web:3000
 
     # Aggressive timeouts for SSE / streaming admin pages.
     request_body {
@@ -37,7 +37,7 @@ aide.example.com {
 
     # Standard access logs.
     log {
-        output file /var/log/caddy/aide-web.log {
+        output file /var/log/caddy/caliber-web.log {
             roll_size 100mb
             roll_keep 14
         }
@@ -46,7 +46,7 @@ aide.example.com {
 
 gateway.example.com {
     # gateway (Fastify, internal port 3002)
-    reverse_proxy aide-gateway:3002 {
+    reverse_proxy caliber-gateway:3002 {
         # gateway emits SSE for /v1/messages stream:true and
         # /v1/chat/completions stream:true. Disable Caddy's response
         # buffering so chunks land at the client immediately.
@@ -73,7 +73,7 @@ gateway.example.com {
     }
 
     log {
-        output file /var/log/caddy/aide-gateway.log {
+        output file /var/log/caddy/caliber-gateway.log {
             roll_size 100mb
             roll_keep 14
         }
@@ -82,5 +82,5 @@ gateway.example.com {
 
 # Optional: redirect bare apex to www, or vice versa. Uncomment + edit.
 # example.com {
-#     redir https://aide.example.com{uri} permanent
+#     redir https://caliber.example.com{uri} permanent
 # }
