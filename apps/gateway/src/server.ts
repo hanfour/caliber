@@ -11,6 +11,7 @@ import { dbPlugin } from "./plugins/db.js";
 import { redisPlugin } from "./redis/client.js";
 import { apiKeyAuthPlugin } from "./middleware/apiKeyAuth.js";
 import { rateLimitPlugin } from "./middleware/rateLimitPlugin.js";
+import { waitQueuePlugin } from "./middleware/waitQueuePlugin.js";
 import { groupContextPlugin } from "./middleware/groupContext.js";
 import { messagesRoutes } from "./routes/messages.js";
 import { chatCompletionsRoutes } from "./routes/chatCompletions.js";
@@ -142,6 +143,7 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
   await app.register(schedulerPlugin);
   await app.register(apiKeyAuthPlugin, { env: opts.env });
   await app.register(rateLimitPlugin, { env: opts.env });
+  await app.register(waitQueuePlugin, { env: opts.env });
   await app.register(groupContextPlugin);
   await app.register(messagesRoutes, { env: opts.env });
   await app.register(chatCompletionsRoutes, { env: opts.env });

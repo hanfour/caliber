@@ -102,6 +102,16 @@ export const serverEnvSchema = z
     GATEWAY_MAX_ACCOUNT_SWITCHES: emptyAsUndefined(
       z.coerce.number().int().min(1).default(10),
     ),
+    /**
+     * Per-user wait-queue admission cap (design §4.3). A user may have at most
+     * this many in-flight proxy requests; the next is rejected `429
+     * wait_queue_full`. Fail-open: Redis errors admit the request. **0 disables
+     * admission entirely.** Default 10 — permissive enough that normal traffic
+     * never trips it, while still shedding a single pathological client.
+     */
+    GATEWAY_MAX_WAIT: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(10),
+    ),
     GATEWAY_MAX_BODY_BYTES: emptyAsUndefined(
       z.coerce.number().int().min(1024).default(10485760),
     ),
