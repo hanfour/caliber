@@ -1,7 +1,10 @@
 import type { Redis } from "ioredis";
 import { keys } from "./keys.js";
 
-// TODO(part-7): emit gw_sticky_hit_total counter (design 4.9)
+// TODO(part-7, blocked on part-6): emit gw_sticky_hit_total counter (design 4.9).
+// Deferred: `getSticky`/`setSticky` have no callers yet (sticky-session routing
+// isn't wired into the routes — see the part-6 TODO in messages.ts). NOTE: the
+// Plan 5A `getRespSticky` path below is separate and already live via the scheduler.
 
 export async function getSticky(
   redis: Redis,

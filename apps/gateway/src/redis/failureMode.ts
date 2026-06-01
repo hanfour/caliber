@@ -1,6 +1,9 @@
 import type { ServerEnv } from "@caliber/config";
 
-// TODO(part-7): emit gw_redis_error_total counter (design 4.9 — adjacent to gw_redis_latency_seconds)
+// TODO(part-7, blocked on part-6): emit gw_redis_error_total counter (design 4.9 —
+// adjacent to gw_redis_latency_seconds). Deferred: `withRedis` has no callers yet
+// (the strict/lenient failure wrapper isn't adopted on the hot path), so there is
+// no live emission source. Wire alongside the part-6 admission-control rollout.
 
 export class ServiceDegraded extends Error {
   constructor(message: string, cause?: Error) {

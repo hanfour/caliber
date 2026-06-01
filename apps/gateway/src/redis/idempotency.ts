@@ -1,8 +1,10 @@
 import type { Redis } from "ioredis";
 import { keys } from "./keys.js";
 
-// TODO(part-7): emit gw_idempotency_hit_total counter (design 4.9)
-// TODO(part-7): emit gw_idempotency_malformed_total counter (design 4.9)
+// TODO(part-7, blocked on part-6): emit gw_idempotency_hit_total +
+// gw_idempotency_malformed_total counters (design 4.9). Deferred: `getCached`/
+// `setCached` have no callers yet (idempotency cache isn't wired into the routes —
+// see the part-6 TODO in messages.ts), so there is no live emission source.
 
 export interface CachedResponse {
   status: number;

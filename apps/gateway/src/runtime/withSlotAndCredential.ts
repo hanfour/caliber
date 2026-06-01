@@ -57,6 +57,7 @@ export async function withSlotAndCredential<T>(
     requestId,
     account.concurrency,
     SLOT_DURATION_MS,
+    app.gwMetrics.slotAcquireTotal,
   );
   if (!acquired) {
     throw { status: 503, message: "account_at_capacity" };
@@ -79,6 +80,7 @@ export async function withSlotAndCredential<T>(
           keychainEndpoint: opts.env.GATEWAY_KEYCHAIN_HELPER_ENDPOINT,
           keychainTokenPath: opts.env.GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH,
           logger: app.log,
+          oauthRefreshDeadMetric: app.gwMetrics.oauthRefreshDeadTotal,
         },
       );
     }

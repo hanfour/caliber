@@ -182,6 +182,7 @@ export function makeChatCompletionsAnthropicHandler(
             requestId,
             account.concurrency,
             SLOT_DURATION_MS,
+            app.gwMetrics.slotAcquireTotal,
           );
           if (!acquired) {
             // Treat as a transient failure so failover loop tries another account.
@@ -204,6 +205,7 @@ export function makeChatCompletionsAnthropicHandler(
                   keychainEndpoint: opts.env.GATEWAY_KEYCHAIN_HELPER_ENDPOINT,
                   keychainTokenPath: opts.env.GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH,
                   logger: app.log,
+                  oauthRefreshDeadMetric: app.gwMetrics.oauthRefreshDeadTotal,
                 },
               );
             }
@@ -375,6 +377,7 @@ async function runChatCompletionsStreamingFailover(
           requestId,
           account.concurrency,
           SLOT_DURATION_MS,
+          app.gwMetrics.slotAcquireTotal,
         );
         if (!acquired) {
           throw { status: 503, message: "account_at_capacity" };
@@ -397,6 +400,7 @@ async function runChatCompletionsStreamingFailover(
                 keychainEndpoint: opts.env.GATEWAY_KEYCHAIN_HELPER_ENDPOINT,
                 keychainTokenPath: opts.env.GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH,
                 logger: app.log,
+                oauthRefreshDeadMetric: app.gwMetrics.oauthRefreshDeadTotal,
               },
             );
           }

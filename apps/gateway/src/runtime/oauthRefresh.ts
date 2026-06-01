@@ -180,6 +180,21 @@ export interface OAuthRefreshOptions {
   now?: () => number;
   /** Pino-style logger. Optional — used to log keychain re-read outcomes. */
   logger?: { warn: (obj: unknown, msg?: string) => void; info?: (obj: unknown, msg?: string) => void };
+  /**
+   * Optional `gw_oauth_refresh_dead_total{account_id}` counter (design 4.9).
+   * Incremented once when consecutive refresh failures reach `maxFail` and
+   * the account is auto-paused with `oauth_refresh_exhausted`.
+   * `fastify.gwMetrics.oauthRefreshDeadTotal` satisfies this shape.
+   */
+  oauthRefreshDeadMetric?: OAuthRefreshDeadMetric;
+}
+
+/**
+ * Minimal structural shape of the `gw_oauth_refresh_dead_total` counter,
+ * kept local so this runtime module stays decoupled from prom-client.
+ */
+export interface OAuthRefreshDeadMetric {
+  inc(labels: { account_id: string }): void;
 }
 
 interface TokenResponse {
@@ -308,7 +323,15 @@ export async function maybeRefreshOAuth(
 
       return fresh;
     } catch (err) {
-      await recordFailure(db, redis, accountId, err, opts.maxFail, now);
+      await recordFailure(
+        db,
+        redis,
+        accountId,
+        err,
+        opts.maxFail,
+        now,
+        opts.oauthRefreshDeadMetric,
+      );
       throw new OAuthRefreshError(
         `oauth refresh failed for account ${accountId}`,
         err,
@@ -519,6 +542,7 @@ export async function recordFailure(
   err: unknown,
   maxFail: number,
   now: () => number,
+  deadMetric?: OAuthRefreshDeadMetric,
 ): Promise<void> {
   // Strip credential-shaped substrings before persisting — upstream OAuth
   // 401/400 bodies sometimes echo back the failing token verbatim, and we
@@ -570,7 +594,9 @@ export async function recordFailure(
       update.status = "error";
       update.schedulable = false;
       update.tempUnschedulableReason = "oauth_refresh_exhausted";
-      // TODO(part-7): emit gw_oauth_refresh_dead_total{account_id}
+      // design 4.9 — high-severity alert signal: any non-zero rate means an
+      // account's OAuth bundle is unrecoverable until the operator re-onboards.
+      deadMetric?.inc({ account_id: accountId });
     }
   }
 
