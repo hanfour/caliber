@@ -1,10 +1,11 @@
 import type { Redis } from "ioredis";
 import { keys } from "./keys.js";
 
-// TODO(part-7, blocked on part-6): emit gw_idempotency_hit_total +
-// gw_idempotency_malformed_total counters (design 4.9). Deferred: `getCached`/
-// `setCached` have no callers yet (idempotency cache isn't wired into the routes —
-// see the part-6 TODO in messages.ts), so there is no live emission source.
+// `gw_idempotency_hit_total` is emitted from `runtime/idempotencyCache.ts` (the
+// route-level helper) on replay/conflict. `gw_idempotency_malformed_total`
+// (design §4.9) is still deferred: `getCached` swallows a corrupt entry as a
+// miss + logs, but doesn't yet surface a malformed signal to a counter — wire an
+// `onMalformed` hook here + define the metric when that observability is wanted.
 
 export interface CachedResponse {
   status: number;

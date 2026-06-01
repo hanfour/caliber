@@ -45,6 +45,10 @@ import {
   checkRouteCache,
   tryStoreOnSuccess,
 } from "../runtime/responseCache.js";
+import {
+  checkIdempotency,
+  storeIdempotent,
+} from "../runtime/idempotencyCache.js";
 
 export interface MessagesRouteOptions {
   env: ServerEnv;
@@ -130,6 +134,28 @@ export function makeMessagesAnthropicHandler(
     }
     const upstreamBodyBuf = Buffer.from(JSON.stringify(sanitizedBody));
 
+    // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
+    // for stream + non-stream (the in-flight marker 409s a concurrent
+    // duplicate); only non-stream 200s get cached for replay below.
+    const xReqId = req.headers["x-request-id"];
+    const idem = await checkIdempotency({
+      redis: app.redis,
+      ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC,
+      failClosed: opts.env.GATEWAY_REDIS_FAILURE_MODE === "strict",
+      requestKey: Array.isArray(xReqId) ? (xReqId[0] ?? null) : (xReqId ?? null),
+      reply,
+      onResult: () => app.gwMetrics.idempotencyHitTotal.inc(),
+      logger: app.log,
+    });
+    if (
+      idem.outcome === "replayed" ||
+      idem.outcome === "conflict" ||
+      idem.outcome === "degraded"
+    ) {
+      return;
+    }
+    const idemKey = idem.idemKey;
+
     // Phase 3 #2 — response cache for non-streaming requests. Disabled
     // when GATEWAY_CACHE_TTL_SEC=0 (default).  Scope `v1/messages`
     // identifies the public endpoint so cached entries don't collide
@@ -175,6 +201,7 @@ export function makeMessagesAnthropicHandler(
           requestId,
           ac.signal,
           cacheKey,
+          idemKey,
         );
       }
     } catch (err) {
@@ -248,6 +275,11 @@ async function runNonStreamFailover(
    * here on success so the next identical request can short-circuit.
    */
   cacheKey?: string | null,
+  /**
+   * Idempotency key (X-Request-Id, design §4.5). When present, the finished
+   * 200 response is cached under it so a retried request replays verbatim.
+   */
+  idemKey?: string | null,
 ): Promise<void> {
   // Capture start time BEFORE the failover loop so durationMs includes
   // credential resolve + slot acquire + failover switches. Sub-task B of
@@ -424,6 +456,18 @@ async function runNonStreamFailover(
   tryStoreOnSuccess(
     { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
     cacheKey ?? null,
+    {
+      status: result.status,
+      headers: result.headers,
+      body: result.body,
+    },
+  );
+
+  // Idempotency store (design §4.5) — caches this finished 200 under the
+  // X-Request-Id so a retry replays it instead of re-dispatching upstream.
+  storeIdempotent(
+    { redis: app.redis, ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC },
+    idemKey ?? null,
     {
       status: result.status,
       headers: result.headers,
