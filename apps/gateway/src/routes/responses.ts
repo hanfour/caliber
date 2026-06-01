@@ -56,6 +56,7 @@ import { emitUsageLog } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
 import { buildSyntheticAnthropicUsage } from "../runtime/syntheticUsageShapes.js";
 import { withSlotAndCredential } from "../runtime/withSlotAndCredential.js";
+import { previousResponseIdFromBody } from "../runtime/stickyKeys.js";
 import { buildUpstreamHttpError } from "../runtime/upstreamErrorMapping.js";
 import {
   serializeResponsesSseError,
@@ -329,6 +330,7 @@ export function makeResponsesRouteHandler(
         platform: req.gwGroupContext!.platform,
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
+        previousResponseId: previousResponseIdFromBody(req.body),
         attempt: async (account) =>
           withSlotAndCredential(
             app,
@@ -500,6 +502,7 @@ export function makeResponsesCompactRouteHandler(
         platform: ctx.platform,
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
+        previousResponseId: previousResponseIdFromBody(req.body),
         attempt: async (account) =>
           withSlotAndCredential(
             app,
@@ -591,6 +594,7 @@ async function runResponsesStreamingFailover(
       platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
+      previousResponseId: previousResponseIdFromBody(req.body),
       attempt: async (account) =>
         withSlotAndCredential(
           app,
@@ -801,6 +805,7 @@ async function runOpenaiResponsesPassthroughFailover(
       platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
+      previousResponseId: previousResponseIdFromBody(req.body),
       attempt: async (account) =>
         withSlotAndCredential(
           app,
@@ -958,6 +963,7 @@ async function runOpenaiResponsesStreamingPassthrough(
       platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
+      previousResponseId: previousResponseIdFromBody(req.body),
       attempt: async (account) =>
         withSlotAndCredential(
           app,
