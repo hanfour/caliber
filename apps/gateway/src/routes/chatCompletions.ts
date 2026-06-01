@@ -22,6 +22,8 @@ import {
   checkRouteCache,
   tryStoreOnSuccess,
 } from "../runtime/responseCache.js";
+import { storeIdempotent } from "../runtime/idempotencyCache.js";
+import { checkRequestIdempotency } from "./idempotencyEntry.js";
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
@@ -121,6 +123,12 @@ export function makeChatCompletionsAnthropicHandler(
       ? { ...anthropicBody, stream: true }
       : anthropicBody;
     const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
+
+    // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
+    // for stream + non-stream; only non-stream 200s get stored for replay.
+    const idem = await checkRequestIdempotency(app, opts.env, req, reply);
+    if (idem.handled) return;
+    const idemKey = idem.idemKey;
 
     // Phase 3 #2 — cache scope `v1/chat/completions` keyed on the
     // CLIENT body (openai-chat shape), shared across this handler and
@@ -308,6 +316,15 @@ export function makeChatCompletionsAnthropicHandler(
       tryStoreOnSuccess(
         { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
         cacheKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
+      storeIdempotent(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC },
+        idemKey,
         {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -619,6 +636,12 @@ export function makeChatCompletionsOpenaiHandler(
     const startedAtMs = Date.now();
     const requestedModel = body.model;
 
+    // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
+    // for stream + non-stream; only non-stream 200s get stored for replay.
+    const idem = await checkRequestIdempotency(app, opts.env, req, reply);
+    if (idem.handled) return;
+    const idemKey = idem.idemKey;
+
     // Phase 3 #2 — same scope as the anthropic-platform handler so a
     // group reconfigure doesn't invalidate.
     const clientBodyBuf = Buffer.from(JSON.stringify(body));
@@ -762,6 +785,15 @@ export function makeChatCompletionsOpenaiHandler(
       tryStoreOnSuccess(
         { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
         cacheKey,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: responseBuf,
+        },
+      );
+      storeIdempotent(
+        { redis: app.redis, ttlSec: opts.env.GATEWAY_IDEMPOTENCY_TTL_SEC },
+        idemKey,
         {
           status: 200,
           headers: { "content-type": "application/json" },
