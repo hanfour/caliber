@@ -53,12 +53,15 @@ interface BuildOpts {
   apiKey: FixtureKey | null;
   rpmLimit: number;
   redis?: Redis;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  gwMetrics?: any;
 }
 
 async function buildApp({
   apiKey,
   rpmLimit,
   redis,
+  gwMetrics,
 }: BuildOpts): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   const r =
@@ -68,6 +71,7 @@ async function buildApp({
       return mock;
     })();
   await app.register(fakeRedisPlugin(r));
+  if (gwMetrics) app.decorate("gwMetrics", gwMetrics);
   await app.register(fakeApiKeyAuth(apiKey));
   // Cast: rateLimitPlugin's options are a Partial<ServerEnv> shape; we
   // only need the rpmLimit knob to fire here.
@@ -174,19 +178,27 @@ describe("rateLimitPlugin", () => {
     await app2.close();
   });
 
-  it("fails open when Redis throws — request goes through, no 429", async () => {
+  it("fails open when Redis throws — request goes through, no 429, emits metrics", async () => {
     // Deliberately use a redis stub whose eval rejects.
     const flakyRedis = {
       eval: () => Promise.reject(new Error("redis oom")),
     } as unknown as Redis;
+    const failOpen: number[] = [];
+    const redisErrors: string[] = [];
     const app = await buildApp({
       apiKey: KEY,
       rpmLimit: 1,
       redis: flakyRedis,
+      gwMetrics: {
+        gwRateLimitFailOpenTotal: { inc: () => failOpen.push(1) },
+        redisErrorTotal: { inc: (l: { op: string }) => redisErrors.push(l.op) },
+      },
     });
     const res = await app.inject({ method: "GET", url: "/v1/test" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["x-ratelimit-limit"]).toBeUndefined();
+    expect(failOpen).toHaveLength(1);
+    expect(redisErrors).toEqual(["rate_limit"]);
     await app.close();
   });
 });

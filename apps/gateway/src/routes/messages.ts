@@ -153,6 +153,8 @@ export function makeMessagesAnthropicHandler(
         bodyBuf: upstreamBodyBuf,
         reply,
         onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
+        onRedisError: () =>
+          app.gwMetrics.redisErrorTotal.inc({ op: "cache_read" }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
@@ -437,7 +439,12 @@ async function runNonStreamFailover(
   // gates on cacheKey presence + status===200 + body size + ttl>0;
   // never throws.
   tryStoreOnSuccess(
-    { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+    {
+      redis: app.redis,
+      ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+      onRedisError: () =>
+        app.gwMetrics.redisErrorTotal.inc({ op: "cache_write" }),
+    },
     cacheKey ?? null,
     {
       status: result.status,
@@ -897,6 +904,8 @@ export function makeMessagesOpenaiHandler(
         bodyBuf: clientBodyBuf,
         reply,
         onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
+        onRedisError: () =>
+          app.gwMetrics.redisErrorTotal.inc({ op: "cache_read" }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
@@ -1048,7 +1057,12 @@ export function makeMessagesOpenaiHandler(
         .header("content-type", "application/json")
         .send(responseBuf);
       tryStoreOnSuccess(
-        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        {
+          redis: app.redis,
+          ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+          onRedisError: () =>
+            app.gwMetrics.redisErrorTotal.inc({ op: "cache_write" }),
+        },
         cacheKey,
         {
           status: 200,

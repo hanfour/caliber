@@ -49,6 +49,8 @@ export async function checkRequestIdempotency(
     requestKey: Array.isArray(xReqId) ? (xReqId[0] ?? null) : (xReqId ?? null),
     reply,
     onResult: () => app.gwMetrics.idempotencyHitTotal.inc(),
+    onMalformed: () => app.gwMetrics.idempotencyMalformedTotal.inc(),
+    onRedisError: () => app.gwMetrics.redisErrorTotal.inc({ op: "idempotency" }),
     logger: app.log,
   });
 

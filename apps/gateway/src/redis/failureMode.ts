@@ -1,9 +1,11 @@
 import type { ServerEnv } from "@caliber/config";
 
-// TODO(part-7, blocked on part-6): emit gw_redis_error_total counter (design 4.9 —
-// adjacent to gw_redis_latency_seconds). Deferred: `withRedis` has no callers yet
-// (the strict/lenient failure wrapper isn't adopted on the hot path), so there is
-// no live emission source. Wire alongside the part-6 admission-control rollout.
+// `gw_redis_error_total{op}` (design §4.9) is now emitted DIRECTLY at the
+// hot-path Redis-error catch sites that already exist (rate-limit, wait-queue,
+// idempotency, response-cache) rather than through this wrapper — `withRedis`
+// still has no callers (the strict/lenient wrapper isn't adopted on the hot
+// path). If/when it is adopted, it should `inc` the same counter so the metric
+// stays complete across both styles.
 
 export class ServiceDegraded extends Error {
   constructor(message: string, cause?: Error) {

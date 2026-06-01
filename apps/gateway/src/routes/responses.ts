@@ -195,6 +195,8 @@ export function makeResponsesRouteHandler(
           bodyBuf: clientBodyBuf,
           reply,
           onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
+          onRedisError: () =>
+            app.gwMetrics.redisErrorTotal.inc({ op: "cache_read" }),
         });
         if (result.hit) return;
         cacheKey = result.cacheKey;
@@ -283,6 +285,8 @@ export function makeResponsesRouteHandler(
         bodyBuf: clientBodyBuf,
         reply,
         onResult: (r) => app.gwMetrics.gwCacheTotal.inc({ result: r }),
+        onRedisError: () =>
+          app.gwMetrics.redisErrorTotal.inc({ op: "cache_read" }),
       });
       if (result.hit) return;
       cacheKey = result.cacheKey;
@@ -419,7 +423,12 @@ export function makeResponsesRouteHandler(
         .header("content-type", "application/json")
         .send(responseBuf);
       tryStoreOnSuccess(
-        { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+        {
+          redis: app.redis,
+          ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+          onRedisError: () =>
+            app.gwMetrics.redisErrorTotal.inc({ op: "cache_write" }),
+        },
         cacheKey,
         {
           status: 200,
@@ -929,7 +938,12 @@ async function runOpenaiResponsesPassthroughFailover(
       .header("content-type", "application/json")
       .send(responseBuf);
     tryStoreOnSuccess(
-      { redis: app.redis, ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC },
+      {
+        redis: app.redis,
+        ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
+        onRedisError: () =>
+          app.gwMetrics.redisErrorTotal.inc({ op: "cache_write" }),
+      },
       cacheKey,
       {
         status: 200,

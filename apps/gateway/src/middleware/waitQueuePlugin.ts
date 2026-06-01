@@ -53,6 +53,7 @@ async function pluginBody(
         { err: err instanceof Error ? err.message : String(err) },
         "wait_queue_enqueue_failed",
       );
+      fastify.gwMetrics?.redisErrorTotal.inc({ op: "wait_queue" });
       return;
     }
 
@@ -82,6 +83,7 @@ async function pluginBody(
       await dequeueWait(fastify.redis, enq.userId, enq.requestId);
     } catch {
       // Best-effort; the ZSET's 300s EXPIRE cleans up a leaked entry.
+      fastify.gwMetrics?.redisErrorTotal.inc({ op: "wait_queue" });
     }
   });
 }

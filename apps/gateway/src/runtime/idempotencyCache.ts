@@ -59,6 +59,10 @@ export interface CheckIdempotencyDeps {
   reply: ReplyLike;
   /** Per-check metric (`gw_idempotency_hit_total` on replay/conflict). */
   onResult?: (r: "replayed" | "conflict") => void;
+  /** Fired when a stored entry fails to parse (`gw_idempotency_malformed_total`). */
+  onMalformed?: () => void;
+  /** Fired on a Redis op failure (`gw_redis_error_total{op="idempotency"}`). */
+  onRedisError?: () => void;
   logger?: { warn: (obj: unknown, msg?: string) => void };
 }
 
@@ -89,6 +93,7 @@ export async function checkIdempotency(
       logger: deps.logger,
       // surface malformed entries to the metric; getCached still treats them
       // as a miss (returns null), so a corrupt entry degrades to a fresh run.
+      onMalformed: deps.onMalformed,
     });
   } catch (err) {
     return failure(deps, err);
@@ -125,6 +130,7 @@ function failure(
   deps: CheckIdempotencyDeps,
   err: unknown,
 ): CheckIdempotencyResult {
+  deps.onRedisError?.();
   deps.logger?.warn(
     { err: err instanceof Error ? err.message : String(err) },
     "idempotency_check_failed",

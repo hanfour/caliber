@@ -48,9 +48,12 @@ async function buildApp(opts: {
   apiKey: FixtureKey | null;
   maxWait: number;
   redis: Redis;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  gwMetrics?: any;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(fakeRedisPlugin(opts.redis));
+  if (opts.gwMetrics) app.decorate("gwMetrics", opts.gwMetrics);
   await app.register(fakeApiKeyAuth(opts.apiKey));
   await app.register(waitQueuePlugin, {
     env: {
@@ -118,16 +121,51 @@ describe("waitQueuePlugin", () => {
     await app.close();
   });
 
-  it("fails open (admits) when Redis errors on enqueue", async () => {
+  it("fails open (admits) when Redis errors on enqueue + emits redisErrorTotal", async () => {
     // Redis whose eval rejects; zcard/zrem are harmless no-ops.
     const failing = {
       eval: () => Promise.reject(new Error("redis down")),
       zcard: () => Promise.resolve(0),
       zrem: () => Promise.resolve(0),
     } as unknown as Redis;
-    const app = await buildApp({ apiKey: KEY, maxWait: 1, redis: failing });
+    const redisErrors: string[] = [];
+    const app = await buildApp({
+      apiKey: KEY,
+      maxWait: 1,
+      redis: failing,
+      gwMetrics: {
+        redisErrorTotal: { inc: (l: { op: string }) => redisErrors.push(l.op) },
+        waitQueueDepth: { set: () => {} },
+      },
+    });
     const res = await app.inject({ method: "GET", url: "/v1/test" });
     expect(res.statusCode).toBe(200);
+    expect(redisErrors).toContain("wait_queue");
+    await app.close();
+  });
+
+  it("dequeue Redis error (onResponse cleanup) emits redisErrorTotal{op:wait_queue}", async () => {
+    // Enqueue succeeds (admit), but the onResponse dequeue zrem rejects.
+    const failing = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    (failing as unknown as { zrem: () => Promise<number> }).zrem = () =>
+      Promise.reject(new Error("zrem down"));
+    const redisErrors: string[] = [];
+    const app = await buildApp({
+      apiKey: KEY,
+      maxWait: 10,
+      redis: failing,
+      gwMetrics: {
+        redisErrorTotal: { inc: (l: { op: string }) => redisErrors.push(l.op) },
+        waitQueueDepth: { set: () => {} },
+      },
+    });
+    const res = await app.inject({ method: "GET", url: "/v1/test" });
+    expect(res.statusCode).toBe(200);
+    // Give the onResponse hook a tick to run the failing dequeue.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(redisErrors).toContain("wait_queue");
     await app.close();
   });
 });
