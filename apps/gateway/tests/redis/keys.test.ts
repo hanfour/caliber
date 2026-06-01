@@ -18,9 +18,6 @@ describe("keys", () => {
     expect(keys.idem("req-abc")).toBe("idem:req-abc");
   });
 
-  it("sticky key", () => {
-    expect(keys.sticky("org-a", "sess-1")).toBe("sticky:org-a:sess-1");
-  });
 
   it("state key", () => {
     expect(keys.state("acct-x")).toBe("state:account:acct-x");

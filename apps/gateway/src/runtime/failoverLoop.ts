@@ -80,6 +80,19 @@ export interface RunFailoverInput<T> {
   groupId?: string | null;
   maxSwitches: number;
   attempt: (account: SelectedAccount) => Promise<T>;
+  /**
+   * Layer 1 sticky key (Plan 5A §8.2) — `previous_response_id` from the
+   * OpenAI Responses surface (Codex). Forwarded to `scheduler.select`; the
+   * scheduler reads/binds `sticky:resp:{groupId}:*`. Only takes effect when
+   * `groupId` is set and a Redis client is available.
+   */
+  previousResponseId?: string;
+  /**
+   * Layer 2 sticky key (Plan 5A §8.2) — a hash of the Claude Code session
+   * identifier (`X-Claude-Session-Id`). Forwarded to `scheduler.select`;
+   * the scheduler reads/binds `sticky:session:{groupId}:*`.
+   */
+  sessionHash?: string;
   /** Inject for tests so we can fast-forward backoffs. Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
   /**
@@ -121,6 +134,8 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
         teamId: input.teamId,
         groupPlatform: input.platform,
         groupId: input.groupId ?? undefined,
+        previousResponseId: input.previousResponseId,
+        sessionHash: input.sessionHash,
         excludedAccountIds: failedSet,
       });
     } catch (err) {

@@ -15,6 +15,7 @@ import {
   FatalUpstreamError,
 } from "../runtime/failoverLoop.js";
 import { resolveCredential } from "../runtime/resolveCredential.js";
+import { sessionHashFromHeaders } from "../runtime/stickyKeys.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
@@ -268,6 +269,9 @@ async function runNonStreamFailover(
     platform: req.gwGroupContext!.platform,
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
     scheduler: app.gwScheduler,
+    // Layer 2 sticky (Plan 5A §8.2 / design §4.4) — Claude Code sends a stable
+    // X-Claude-Session-Id per conversation; pin it to one account when present.
+    sessionHash: sessionHashFromHeaders(req.headers),
     attempt: async (account: SelectedAccount) => {
       const acquired = await acquireSlot(
         app.redis,
@@ -916,6 +920,7 @@ export function makeMessagesOpenaiHandler(
         platform: req.gwGroupContext!.platform,
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
+        sessionHash: sessionHashFromHeaders(req.headers),
         attempt: async (account) =>
           withSlotAndCredential(
             app,
@@ -1094,6 +1099,7 @@ async function runMessagesOpenaiStreamingFailover(
       platform: req.gwGroupContext!.platform,
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
+      sessionHash: sessionHashFromHeaders(req.headers),
       attempt: async (account) =>
         withSlotAndCredential(
           app,

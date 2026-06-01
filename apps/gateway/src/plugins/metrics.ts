@@ -11,7 +11,6 @@ export interface GatewayMetrics {
   slotHoldDurationSeconds: Histogram<string>;
   waitQueueDepth: Gauge<string>;
   idempotencyHitTotal: Counter<string>;
-  stickyHitTotal: Counter<string>;
   // Phase 3 #2 follow-up — cache hit/miss counter so operators can
   // observe hit-rate from Prometheus rather than only via the
   // `x-cache` response header on individual requests.
@@ -109,12 +108,6 @@ async function metricsPluginBody(
   const idempotencyHitTotal = new Counter({
     name: "gw_idempotency_hit_total",
     help: "Idempotency cache hits",
-    registers: [register],
-  });
-
-  const stickyHitTotal = new Counter({
-    name: "gw_sticky_hit_total",
-    help: "Sticky-session cache hits",
     registers: [register],
   });
 
@@ -393,7 +386,6 @@ async function metricsPluginBody(
   // Materialize zero values so unlabeled metrics appear in scrape output
   waitQueueDepth.set(0);
   idempotencyHitTotal.inc(0);
-  stickyHitTotal.inc(0);
   queueDepth.set(0);
   queueDlqCount.set(0);
   usagePersistLostTotal.inc(0);
@@ -421,7 +413,6 @@ async function metricsPluginBody(
     slotHoldDurationSeconds,
     waitQueueDepth,
     idempotencyHitTotal,
-    stickyHitTotal,
     gwCacheTotal,
     gwRateLimitFailOpenTotal,
     redisLatencySeconds,
