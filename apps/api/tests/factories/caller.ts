@@ -65,6 +65,7 @@ export const defaultTestEnv: ServerEnv = {
   UPSTREAM_ANTHROPIC_BASE_URL: "https://api.anthropic.com",
   UPSTREAM_OPENAI_BASE_URL: "https://api.openai.com",
   GATEWAY_MAX_ACCOUNT_SWITCHES: 10,
+  GATEWAY_MAX_WAIT: 10,
   GATEWAY_MAX_BODY_BYTES: 10485760,
   INGEST_MAX_DECOMPRESSED_BYTES: 200 * 1024 * 1024,
   METRICS_HOST: "127.0.0.1",

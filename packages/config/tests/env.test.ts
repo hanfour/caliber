@@ -71,6 +71,12 @@ describe("parseServerEnv", () => {
       expect(env.GATEWAY_MAX_ACCOUNT_SWITCHES).toBe(10);
     });
 
+    it("GATEWAY_MAX_WAIT defaults to 10 and accepts 0 to disable admission", () => {
+      expect(parseServerEnv({ ...valid }).GATEWAY_MAX_WAIT).toBe(10);
+      expect(parseServerEnv({ ...valid, GATEWAY_MAX_WAIT: "" }).GATEWAY_MAX_WAIT).toBe(10);
+      expect(parseServerEnv({ ...valid, GATEWAY_MAX_WAIT: "0" }).GATEWAY_MAX_WAIT).toBe(0);
+    });
+
     it("GATEWAY_OAUTH_MAX_FAIL='' falls back to 3 (would crash min(1) without fix)", () => {
       const env = parseServerEnv({ ...valid, GATEWAY_OAUTH_MAX_FAIL: "" });
       expect(env.GATEWAY_OAUTH_MAX_FAIL).toBe(3);
