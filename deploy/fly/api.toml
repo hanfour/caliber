@@ -1,14 +1,14 @@
-# Fly.io app config for the aide api (Fastify + tRPC, internal-only).
+# Fly.io app config for the Caliber api (Fastify + tRPC, internal-only).
 #
 # This service has NO public ingress — it's reached over Fly's
 # internal `.flycast` network from the web app. Do not assign a
 # public IP.
 
-app = "aide-api"
+app = "caliber-api"
 primary_region = "iad"
 
 [build]
-  image = "ghcr.io/hanfour/aide-api:latest"
+  image = "ghcr.io/hanfour/caliber-api:latest"
 
 [env]
   NODE_ENV = "production"
@@ -17,7 +17,7 @@ primary_region = "iad"
   BOOTSTRAP_DEFAULT_ORG_NAME = "Demo"
 
 # No `[http_service]` block — the api isn't reachable from the public
-# internet. The web app connects via `http://aide-api.flycast:3001`.
+# internet. The web app connects via `http://caliber-api.flycast:3001`.
 
 [[services]]
   internal_port = 3001

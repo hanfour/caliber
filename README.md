@@ -218,8 +218,8 @@ npm install -g @hanfour.huang/caliber@latest
 ### Development mode / 開發模式
 
 ```bash
-git clone https://github.com/hanfour/caliber.git ~/aide
-cd ~/aide
+git clone https://github.com/hanfour/caliber.git ~/caliber
+cd ~/caliber
 npm install
 npx tsx src/cli.ts --help
 ```

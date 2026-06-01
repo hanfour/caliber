@@ -10,10 +10,10 @@ This runbook walks through enabling the evaluator subsystem (Plan 4B) on a live 
 
 ## Step 1 — Pull v0.4.0
 
-Upgrade deployment to aide v0.4.0:
-- `aide-api:v0.4.0`
-- `aide-gateway:v0.4.0`
-- `aide-web:v0.4.0`
+Upgrade deployment to Caliber v0.4.0:
+- `caliber-api:v0.4.0`
+- `caliber-gateway:v0.4.0`
+- `caliber-web:v0.4.0`
 
 ## Step 2 — Set ENABLE_EVALUATOR=true
 

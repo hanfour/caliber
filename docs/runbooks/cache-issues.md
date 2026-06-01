@@ -35,14 +35,14 @@ info (low hit rate) | warning (stale-response complaints) | critical (cross-tena
 docker compose exec gateway sh -c 'echo "Cache TTL: $GATEWAY_CACHE_TTL_SEC"'
 
 # Sample the cache: count keys + average TTL remaining.
-docker compose exec redis redis-cli --scan --pattern 'aide:gw:respcache:*' | wc -l
-docker compose exec redis redis-cli --scan --pattern 'aide:gw:respcache:*' \
+docker compose exec redis redis-cli --scan --pattern 'caliber:gw:respcache:*' | wc -l
+docker compose exec redis redis-cli --scan --pattern 'caliber:gw:respcache:*' \
   | head -5 \
   | xargs -I {} sh -c 'echo "{}: $(docker compose exec redis redis-cli ttl {})"'
 
 # Sample a single payload (READ-ONLY — payload is base64'd model output,
 # do NOT share outside ops).
-docker compose exec redis redis-cli get 'aide:gw:respcache:<sha256>'
+docker compose exec redis redis-cli get 'caliber:gw:respcache:<sha256>'
 
 # Spot-check live traffic — pick a customer and watch their headers.
 # (no metric today; this is the lowest-friction sample method.)
@@ -65,7 +65,7 @@ docker compose exec redis redis-cli info memory \
 3. Manually invalidate a specific key if you can compute it (rarely
    useful — easier to just wait for TTL):
    ```sh
-   docker compose exec redis redis-cli del 'aide:gw:respcache:<sha256>'
+   docker compose exec redis redis-cli del 'caliber:gw:respcache:<sha256>'
    ```
 
 ### Tighten the TTL

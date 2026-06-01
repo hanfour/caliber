@@ -1,14 +1,14 @@
-# Fly.io app config for the aide web (Next.js admin UI).
+# Fly.io app config for the Caliber web (Next.js admin UI).
 #
 # `fly launch --copy-config --config deploy/fly/web.toml` will create
 # a new app from this template; subsequent deploys are
 # `fly deploy --config deploy/fly/web.toml`.
 
-app = "aide-web"
+app = "caliber-web"
 primary_region = "iad" # change to your preferred region
 
 [build]
-  image = "ghcr.io/hanfour/aide-web:latest"
+  image = "ghcr.io/hanfour/caliber-web:latest"
 
 [env]
   NODE_ENV = "production"

@@ -1,13 +1,13 @@
-# Fly.io app config for the aide gateway (customer-facing /v1/* proxy).
+# Fly.io app config for the Caliber gateway (customer-facing /v1/* proxy).
 #
 # Public-internet-facing — assigned its own dedicated hostname so
 # customer SDKs can hit it independently of the admin UI.
 
-app = "aide-gateway"
+app = "caliber-gateway"
 primary_region = "iad"
 
 [build]
-  image = "ghcr.io/hanfour/aide-gateway:latest"
+  image = "ghcr.io/hanfour/caliber-gateway:latest"
 
 [env]
   NODE_ENV = "production"

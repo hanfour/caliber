@@ -40,9 +40,9 @@ psql "$DATABASE_URL" -c "
 "
 
 # Inspect a specific key's bucket counter (replace <id>).
-docker compose exec redis redis-cli --scan --pattern 'aide:gw:rl:apikey:<id>:*'
-docker compose exec redis redis-cli get 'aide:gw:rl:apikey:<id>:<minute-bucket>'
-docker compose exec redis redis-cli ttl 'aide:gw:rl:apikey:<id>:<minute-bucket>'
+docker compose exec redis redis-cli --scan --pattern 'caliber:gw:rl:apikey:<id>:*'
+docker compose exec redis redis-cli get 'caliber:gw:rl:apikey:<id>:<minute-bucket>'
+docker compose exec redis redis-cli ttl 'caliber:gw:rl:apikey:<id>:<minute-bucket>'
 
 # Look for the fail-open warns (Redis side-effect) — should be 0 in normal ops.
 docker compose --profile gateway logs gateway --since 1h \

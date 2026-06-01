@@ -6,7 +6,7 @@ the gateway pool.  The supported path is a **project API key**
 
 ## Why API key, not OAuth
 
-The aide gateway routes traffic from many internal users through a
+The Caliber gateway routes traffic from many internal users through a
 shared pool of upstream accounts.  For OpenAI, that licensed pattern is
 the **OpenAI Platform API** — programmatic, post-paid by token, no
 per-user subscription.  ChatGPT consumer-subscription OAuth tokens are
@@ -31,8 +31,8 @@ Inside the org, create a **project** for this gateway deployment:
 
 1. <https://platform.openai.com/settings/organization/projects> →
    **+ Create project**.
-2. Name it after the gateway environment (e.g. `aide-prod`,
-   `aide-staging`) so spend reports map cleanly.
+2. Name it after the gateway environment (e.g. `caliber-prod`,
+   `caliber-staging`) so spend reports map cleanly.
 3. Set a per-project monthly spend cap below the org cap — first line
    of defence against runaway clients.
 4. Limit the model lineup to what the gateway actually serves
@@ -61,7 +61,7 @@ In the admin UI:
 
 1. Navigate to `Dashboard → Organizations → <your org> → Accounts → New`.
 2. Fields:
-   - **Name** — descriptive, e.g. `OpenAI prod / project aide-prod`.
+   - **Name** — descriptive, e.g. `OpenAI prod / project caliber-prod`.
    - **Platform** — `OpenAI`.
    - **Type** — `API key` (the `OAuth (JSON)` option is greyed out for
      OpenAI; that path is intentionally not exposed).

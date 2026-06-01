@@ -7,14 +7,14 @@
 > linear ~30-minute path, with workarounds inline. This doc remains
 > the deeper reference for each mode in isolation.
 
-Three escalating modes for running aide on your own machine — pick
+Three escalating modes for running Caliber on your own machine — pick
 the lowest one that fits your goal:
 
 | Mode | Goal | Time | Prerequisites |
 |---|---|---|---|
 | **1. Pure local evaluation** | See the admin UI, click around, validate the system works end-to-end against ChatGPT-OAuth-style fixtures | ~5 min | Docker Desktop, openssl, an OAuth app (Google or GitHub) |
 | **2. Local + real OpenAI** | Drive a real `sk-proj-...` key through the gateway, observe rate-limit / cache headers, exercise the admin onboarding flow with live data | +5 min | Mode 1 done + an OpenAI org / project key |
-| **3. On-prem production** | Run aide on a server inside your office / home / colo, reachable from internal users via a real domain | hours | Mode 2 done + reverse proxy + DNS + TLS + backup cron |
+| **3. On-prem production** | Run Caliber on a server inside your office / home / colo, reachable from internal users via a real domain | hours | Mode 2 done + reverse proxy + DNS + TLS + backup cron |
 
 > **First time?** Always start at Mode 1. The whole stack runs on
 > docker-compose; there's nothing to install beyond Docker itself.
@@ -43,7 +43,7 @@ no tunneling required.
 
 ```bash
 git clone https://github.com/hanfour/caliber.git
-cd aide/docker
+cd caliber/docker
 cp .env.example .env
 ```
 
@@ -142,7 +142,7 @@ Quick version:
 
 1. <https://platform.openai.com/> → create an org if you don't have one
 2. Set a monthly **spend cap** at the org level (start small — e.g. $20)
-3. Create a Project (e.g. `aide-local-eval`) with its own spend cap
+3. Create a Project (e.g. `caliber-local-eval`) with its own spend cap
 4. From the Project's API keys page → **+ Create new secret key** →
    service-account-owned if available, scoped to inference only
 5. Copy the `sk-proj-...` value (only shown once)
@@ -210,7 +210,7 @@ faster.
 
 ## Mode 3 — On-prem production
 
-When you want aide running on a server inside your network for
+When you want Caliber running on a server inside your network for
 internal users (not your laptop). Build on Mode 2 first.
 
 ### Required infrastructure
@@ -218,7 +218,7 @@ internal users (not your laptop). Build on Mode 2 first.
 | Component | What you need |
 |---|---|
 | **Linux server** | 4 GB+ RAM, 20 GB+ disk, Docker installed. NAS / mini-PC / VM all fine |
-| **Internal DNS** | Two hostnames resolving to the server's IP — e.g. `aide.internal.example.com` (admin UI) and `gateway.internal.example.com` (customer SDKs) |
+| **Internal DNS** | Two hostnames resolving to the server's IP — e.g. `caliber.internal.example.com` (admin UI) and `gateway.internal.example.com` (customer SDKs) |
 | **TLS certificates** | Let's Encrypt (if server can reach the internet for ACME), internal CA, or self-signed |
 | **Reverse proxy** | Caddy or nginx in front of docker-compose. Sample configs in [`../deploy/proxy/`](../deploy/proxy/) |
 | **Backup target** | Off-server disk or NAS share for nightly `pg_dumpall` snapshots |
@@ -233,8 +233,8 @@ internal users (not your laptop). Build on Mode 2 first.
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 newgrp docker
-git clone https://github.com/hanfour/caliber.git /opt/aide
-cd /opt/aide/docker
+git clone https://github.com/hanfour/caliber.git /opt/caliber
+cd /opt/caliber/docker
 ```
 
 #### 2. Configure `.env` for the on-prem hostnames
@@ -242,7 +242,7 @@ cd /opt/aide/docker
 Same as Mode 1 + 2, but with internal hostnames:
 
 ```bash
-NEXTAUTH_URL=https://aide.internal.example.com
+NEXTAUTH_URL=https://caliber.internal.example.com
 GATEWAY_BASE_URL=https://gateway.internal.example.com
 ```
 
@@ -257,16 +257,16 @@ Pick one of the [`deploy/proxy/`](../deploy/proxy/) configs:
 - **Caddy** (recommended for new setups, auto Let's Encrypt):
   ```bash
   apt install caddy
-  cp /opt/aide/deploy/proxy/Caddyfile.example /etc/caddy/Caddyfile
+  cp /opt/caliber/deploy/proxy/Caddyfile.example /etc/caddy/Caddyfile
   # Edit hostnames in /etc/caddy/Caddyfile to match your DNS
   systemctl reload caddy
   ```
 - **nginx** (existing nginx infra):
   ```bash
-  certbot certonly --standalone -d aide.internal.example.com -d gateway.internal.example.com
-  cp /opt/aide/deploy/proxy/nginx.example.conf /etc/nginx/sites-available/aide
+  certbot certonly --standalone -d caliber.internal.example.com -d gateway.internal.example.com
+  cp /opt/caliber/deploy/proxy/nginx.example.conf /etc/nginx/sites-available/caliber
   # Edit hostnames + cert paths
-  ln -s /etc/nginx/sites-available/aide /etc/nginx/sites-enabled/aide
+  ln -s /etc/nginx/sites-available/caliber /etc/nginx/sites-enabled/caliber
   nginx -t && systemctl reload nginx
   ```
 
@@ -305,11 +305,11 @@ Full procedure (including restore) in
 
 #### 6. Auto-start on reboot
 
-Create `/etc/systemd/system/aide.service`:
+Create `/etc/systemd/system/caliber.service`:
 
 ```ini
 [Unit]
-Description=aide platform stack
+Description=Caliber platform stack
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -317,7 +317,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/aide/docker
+WorkingDirectory=/opt/caliber/docker
 ExecStart=/usr/bin/docker compose --profile gateway up -d
 ExecStop=/usr/bin/docker compose --profile gateway down
 
@@ -327,7 +327,7 @@ WantedBy=multi-user.target
 
 ```bash
 systemctl daemon-reload
-systemctl enable --now aide
+systemctl enable --now caliber
 ```
 
 #### 7. Monitoring (optional but recommended)

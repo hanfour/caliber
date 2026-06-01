@@ -4,7 +4,7 @@
 warning (>6h for 30m) | critical (>24h for 15m)
 
 ## Symptoms
-- `gw_body_purge_lag_hours` is non-zero and growing on the AIDE — Body Capture dashboard.
+- `gw_body_purge_lag_hours` is non-zero and growing on the Caliber — Body Capture dashboard.
 - `request_bodies` table size is growing faster than expected.
 - DPO dashboard reports retention SLA breaches.
 

@@ -4,7 +4,7 @@
 warning
 
 ## Symptoms
-- `gw_gdpr_failures_total` is incrementing on the AIDE — GDPR dashboard.
+- `gw_gdpr_failures_total` is incrementing on the Caliber — GDPR dashboard.
 - `gw_gdpr_auto_rejected_total` is non-zero (a request hit the 30-day SLA).
 - Customer support reports a user complaining their delete request hasn't been honored.
 

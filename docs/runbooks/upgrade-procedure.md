@@ -6,7 +6,7 @@ procedural (not an alert; ran every release)
 
 ## When to use
 
-- A new `aide` release is published on
+- A new `caliber` release is published on
   [GitHub Releases](https://github.com/hanfour/caliber/releases) and you
   want to roll forward.
 - You're unsure whether the release contains breaking schema changes
@@ -46,7 +46,7 @@ docker compose logs migrate --tail 50  # confirm "Migrations complete." at end
 docker compose --profile gateway up -d
 
 # 5. Verify health.
-curl -fsS https://aide.example.com/api/health
+curl -fsS https://caliber.example.com/api/health
 curl -fsS https://gateway.example.com/health  # should print {"status":"ok"}
 
 # 6. Smoke-test a request from a known-good apiKey.
@@ -135,7 +135,7 @@ curl -fsS https://gateway.example.com/v1/messages \
 docker compose --profile gateway logs gateway --since 5m | grep oauth-refresh-scan
 
 # BullMQ queues healthy.
-docker compose exec redis redis-cli zcard 'aide:gw:bull:usage-log:wait'
+docker compose exec redis redis-cli zcard 'caliber:gw:bull:usage-log:wait'
 ```
 
 ## Escalation

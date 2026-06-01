@@ -4,7 +4,7 @@
 warning (>10 for 15m) | critical (>50 for 5m)
 
 ## Symptoms
-- `gw_eval_dlq_count` panel on the AIDE — Evaluator dashboard is climbing.
+- `gw_eval_dlq_count` panel on the Caliber — Evaluator dashboard is climbing.
 - Org admins report missing or stale evaluation reports for the last 24h cron run.
 - The "Job rate" panel shows `failed` series spiking while `completed` flatlines.
 

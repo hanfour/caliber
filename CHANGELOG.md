@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to aide are documented here. Format loosely follows
+All notable changes to Caliber are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Platform mode
 releases are tagged `vX.Y.Z`; each tag publishes multi-arch images to
 `ghcr.io/hanfour/caliber-{api,web,gateway}`.
@@ -109,8 +109,8 @@ rollback (drizzle-kit doesn't generate down migrations).
 ### Breaking changes
 
 - **Web Docker image drops `linux/arm64`** (`ghcr.io/hanfour/caliber-web` is
-  now amd64-only). The QEMU-based cross-build was unstable. `aide-api`
-  and `aide-gateway` continue to publish both architectures. Self-build
+  now amd64-only). The QEMU-based cross-build was unstable. `caliber-api`
+  and `caliber-gateway` continue to publish both architectures. Self-build
   the web image for arm64 with
   `docker buildx build --platform linux/arm64 ./docker/Dockerfile.web`.
 
@@ -139,7 +139,7 @@ admin-customizable rubrics, GDPR workflow, labor-law-friendly transparency.
 1. Opt-in per-org content capture (`organizations.content_capture_enabled`); 
    members transparent via `/dashboard/profile/evaluation`.
 2. AES-256-GCM body encryption using `CREDENTIAL_ENCRYPTION_KEY` with 
-   domain-separated HKDF info (`aide-gateway-body-v1`); 90-day default 
+   domain-separated HKDF info (`caliber-gateway-body-v1`); 90-day default 
    retention with per-org override (30/60/90).
 3. Dual-layer evaluation: rule-based scoring always-on, LLM Deep Analysis 
    opt-in per org.
