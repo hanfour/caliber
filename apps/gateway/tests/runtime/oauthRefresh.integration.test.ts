@@ -463,12 +463,18 @@ describe("maybeRefreshOAuth", () => {
       expiresAt,
     };
 
+    // design 4.9 — gw_oauth_refresh_dead_total{account_id} must fire exactly
+    // once when exhaustion auto-pauses the account.
+    const deadCalls: Array<{ account_id: string }> = [];
+    const deadMetric = { inc: (l: { account_id: string }) => { deadCalls.push(l); } };
+
     await expect(
       maybeRefreshOAuth(db as never, redis, acct.id, currentCredential, {
         masterKeyHex: MASTER_KEY,
         leadMinutes: 10,
         maxFail: 3,
         tokenUrl: tokenBaseUrl,
+        oauthRefreshDeadMetric: deadMetric,
       }),
     ).rejects.toBeInstanceOf(OAuthRefreshError);
 
@@ -483,6 +489,7 @@ describe("maybeRefreshOAuth", () => {
     expect(acctRow!.failCount).toBe(3);
     expect(acctRow!.status).toBe("error");
     expect(acctRow!.schedulable).toBe(false);
+    expect(deadCalls).toEqual([{ account_id: acct.id }]);
   });
 
   it("5. winner: token endpoint returns malformed JSON → OAuthRefreshError + recordFailure", async () => {

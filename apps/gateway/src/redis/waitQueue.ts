@@ -2,7 +2,10 @@ import type { Redis } from "ioredis";
 import { ENQUEUE_WAIT_LUA } from "./lua/enqueueWait.js";
 import { keys } from "./keys.js";
 
-// TODO(part-7): emit gw_wait_queue_depth gauge (design 4.9)
+// TODO(part-7, blocked on part-6): emit gw_wait_queue_depth gauge (design 4.9).
+// Deferred: `enqueueWait` has no callers yet (wait-queue admission isn't wired
+// into the routes — see the part-6 TODOs in messages.ts), so there is nothing to
+// observe. Wire when part-6 lands.
 
 /**
  * Atomically enqueues a request into a user's wait queue ZSET.

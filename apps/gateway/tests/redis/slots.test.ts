@@ -75,4 +75,44 @@ describe("slots", () => {
     expect(userOk).toBe(true);
     expect(acctOk).toBe(true);
   });
+
+  describe("gw_slot_acquire_total metric (design 4.9)", () => {
+    function fakeMetric() {
+      const calls: Array<{ scope: string; result: string }> = [];
+      return { calls, inc: (labels: { scope: "user" | "account"; result: "ok" | "over_limit" | "redis_error" }) => { calls.push(labels); } };
+    }
+
+    it("emits result=ok with the call's scope on a successful acquire", async () => {
+      const m = fakeMetric();
+      const ok = await acquireSlot(redis, "account", "m1", "req-1", 1, 60_000, m);
+      expect(ok).toBe(true);
+      expect(m.calls).toEqual([{ scope: "account", result: "ok" }]);
+    });
+
+    it("emits result=over_limit when at capacity", async () => {
+      const m = fakeMetric();
+      await acquireSlot(redis, "user", "m2", "req-1", 1, 60_000, m);
+      await acquireSlot(redis, "user", "m2", "req-2", 1, 60_000, m);
+      expect(m.calls).toEqual([
+        { scope: "user", result: "ok" },
+        { scope: "user", result: "over_limit" },
+      ]);
+    });
+
+    it("emits result=redis_error and re-throws when the Redis op fails", async () => {
+      const m = fakeMetric();
+      const boom = new Error("redis down");
+      const failing = { eval: () => Promise.reject(boom) } as unknown as Redis;
+      await expect(
+        acquireSlot(failing, "user", "m3", "req-1", 1, 60_000, m),
+      ).rejects.toBe(boom);
+      expect(m.calls).toEqual([{ scope: "user", result: "redis_error" }]);
+    });
+
+    it("is a no-op safe when no metric is passed (back-compat)", async () => {
+      await expect(
+        acquireSlot(redis, "user", "m4", "req-1", 1, 60_000),
+      ).resolves.toBe(true);
+    });
+  });
 });

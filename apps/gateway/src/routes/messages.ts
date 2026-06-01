@@ -276,6 +276,7 @@ async function runNonStreamFailover(
         requestId,
         account.concurrency,
         SLOT_DURATION_MS,
+        app.gwMetrics.slotAcquireTotal,
       );
       if (!acquired) {
         throw new CapacityError();
@@ -297,6 +298,7 @@ async function runNonStreamFailover(
               keychainEndpoint: opts.env.GATEWAY_KEYCHAIN_HELPER_ENDPOINT,
               keychainTokenPath: opts.env.GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH,
               logger: app.log,
+              oauthRefreshDeadMetric: app.gwMetrics.oauthRefreshDeadTotal,
             },
           );
         }
@@ -464,6 +466,7 @@ async function runStreamingFailover(
         requestId,
         account.concurrency,
         SLOT_DURATION_MS,
+        app.gwMetrics.slotAcquireTotal,
       );
       if (!acquired) {
         throw new CapacityError();
@@ -525,6 +528,7 @@ async function runStreamingFailover(
               keychainEndpoint: opts.env.GATEWAY_KEYCHAIN_HELPER_ENDPOINT,
               keychainTokenPath: opts.env.GATEWAY_KEYCHAIN_HELPER_TOKEN_PATH,
               logger: app.log,
+              oauthRefreshDeadMetric: app.gwMetrics.oauthRefreshDeadTotal,
             },
           );
         }

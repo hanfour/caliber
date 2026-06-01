@@ -2,8 +2,19 @@ import type { Redis } from "ioredis";
 import { ACQUIRE_SLOT_LUA } from "./lua/acquireSlot.js";
 import { keys } from "./keys.js";
 
-// TODO(part-7): emit gw_slot_acquire_total{scope, result} counter (design 4.9)
 // TODO(perf): migrate from EVAL to defineCommand+EVALSHA when call rate warrants
+
+/**
+ * Minimal structural shape of the `gw_slot_acquire_total` counter, kept
+ * local so this Redis primitive stays decoupled from prom-client / the
+ * fastify metrics plugin. `fastify.gwMetrics.slotAcquireTotal` satisfies it.
+ */
+export interface SlotAcquireMetric {
+  inc(labels: {
+    scope: "user" | "account";
+    result: "ok" | "over_limit" | "redis_error";
+  }): void;
+}
 
 /**
  * Atomically acquires a slot in a Redis ZSET rate-limiting bucket.
@@ -19,6 +30,9 @@ import { keys } from "./keys.js";
  * @param requestId - Unique identifier for this request/slot
  * @param limit     - Maximum number of concurrent slots allowed
  * @param durationMs - How long (ms) this slot is valid for
+ * @param metric    - Optional `gw_slot_acquire_total` counter (design 4.9).
+ *   Emits {scope, result=ok|over_limit|redis_error}. On a Redis error the
+ *   `redis_error` result is counted and the error is re-thrown unchanged.
  * @returns true if the slot was acquired, false if at capacity
  */
 export async function acquireSlot(
@@ -28,19 +42,27 @@ export async function acquireSlot(
   requestId: string,
   limit: number,
   durationMs: number,
+  metric?: SlotAcquireMetric,
 ): Promise<boolean> {
   const key = keys.slots(scope, id);
   const now = Date.now();
-  const result = (await redis.eval(
-    ACQUIRE_SLOT_LUA,
-    1,
-    key,
-    String(now),
-    String(durationMs),
-    requestId,
-    String(limit),
-  )) as number;
-  return result === 1;
+  try {
+    const result = (await redis.eval(
+      ACQUIRE_SLOT_LUA,
+      1,
+      key,
+      String(now),
+      String(durationMs),
+      requestId,
+      String(limit),
+    )) as number;
+    const acquired = result === 1;
+    metric?.inc({ scope, result: acquired ? "ok" : "over_limit" });
+    return acquired;
+  } catch (err) {
+    metric?.inc({ scope, result: "redis_error" });
+    throw err;
+  }
 }
 
 /**
