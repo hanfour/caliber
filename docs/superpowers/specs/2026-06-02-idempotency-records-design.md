@@ -31,7 +31,7 @@ That last point is the gap this table fills. `usage_logs` records billing per re
 
 ## Non-goals
 
-- **Not** the dedup mechanism — that is the Redis cache, unchanged.
+- **Not** a change to dedup *semantics* — the Redis cache's replay/conflict/fail-closed behaviour is unchanged; the prerequisite fix only tenant-scopes its key.
 - **Not** a replacement for `usage_logs` — `usage_logs` remains the permanent, authoritative billing ledger.
 - **Not** wired to any refund/billing UI — this PR only produces the durable record. Query/refund tooling is future work.
 
@@ -79,15 +79,19 @@ New env knob (mirrors the cache/purge knobs): `GATEWAY_IDEMPOTENCY_RECORD_TTL_SE
 
 Mirror `apps/gateway/src/workers/bodyPurge.ts`:
 
-- `purgeExpiredIdempotencyRecords({ db, now?, batchSize? })` — batched delete looping until 0 rows, `MAX_ITERATIONS` guard, returns `{ deleted, durationSec }`. **The delete target must be the composite PK, not bare `request_id`** — with `(api_key_id, request_id)` two callers can share a `request_id`, so `DELETE … WHERE request_id IN (…)` would wrongly remove a *fresh* row of one key when another key's same-id row expired. Use a composite match:
+- `purgeExpiredIdempotencyRecords({ db, now?, batchSize? })` — batched delete looping until 0 rows, `MAX_ITERATIONS` guard, returns `{ deleted, durationSec }`. Compute a single `const cutoff = now()` (the **injected** clock, default `() => new Date()`, matching `bodyPurge`) and bind it everywhere — so test overrides and production share one cutoff. Two correctness requirements:
+  - **Composite delete target, not bare `request_id`** — with `(api_key_id, request_id)` two callers can share a `request_id`, so `WHERE request_id IN (…)` would wrongly remove another key's row.
+  - **Re-check `expires_at <= cutoff` in the outer `WHERE`** — between the subquery selecting a doomed `(api_key_id, request_id)` and the delete, a concurrent new dispatch may `ON CONFLICT`-refresh that exact key into a *fresh* row (new `expires_at`). Matching on PK alone would delete the just-refreshed row, contradicting "row = latest dispatch". The outer recheck (same `cutoff`) skips any row refreshed past the cutoff.
 
   ```sql
   DELETE FROM idempotency_records r
   USING (
     SELECT api_key_id, request_id FROM idempotency_records
-    WHERE expires_at <= now() LIMIT ${batchSize}
+    WHERE expires_at <= ${cutoff} LIMIT ${batchSize}
   ) doomed
-  WHERE r.api_key_id = doomed.api_key_id AND r.request_id = doomed.request_id
+  WHERE r.api_key_id = doomed.api_key_id
+    AND r.request_id = doomed.request_id
+    AND r.expires_at <= ${cutoff}
   ```
 - `startIdempotencyPurgeCron(...)` scheduled via `setInterval` in `server.ts` (interval-based scheduling is the repo convention; no cron-expression parser). `IDEMPOTENCY_PURGE_INTERVAL_MS` = 1 h (sufficient for a 1-h-TTL table).
 - **Gating (finding 3):** the body-purge cron is wrapped in `if (opts.env.ENABLE_EVALUATOR)` (server.ts:181) because captured bodies only exist when the evaluator is on. `idempotency_records` are **gateway** data, written whenever idempotency is active **regardless of the evaluator**. So the new purge cron must be gated on **`opts.env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC > 0`** (the same knob that enables the write), NOT on `ENABLE_EVALUATOR` — otherwise with the evaluator off, records would accumulate unpurged forever. It stays inside the existing `opts.redis === undefined` test-mode gate (tests call the purge fn directly).
