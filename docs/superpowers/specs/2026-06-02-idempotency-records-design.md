@@ -54,8 +54,8 @@ Table `idempotency_records`:
 | `status_code` | `integer NOT NULL` | |
 | `total_cost` | `numeric(20,10) NOT NULL default '0'` | self-contained billing snapshot (raw provider cost) |
 | `actual_cost_usd` | `numeric(20,10) NOT NULL default '0'` | snapshot of multiplier-applied cost (the value budgets charge against) |
-| `created_at` | `timestamptz NOT NULL default now()` | |
-| `expires_at` | `timestamptz NOT NULL` | `created_at + 1 hour`; purge key |
+| `created_at` | `timestamptz NOT NULL default now()` | time of the dispatch this row reflects; refreshed to `now()` on conflict (see Write path) |
+| `expires_at` | `timestamptz NOT NULL` | `created_at + GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC` (default 1 h); purge key |
 
 Indexes:
 - `idempotency_records_expires_at_idx` on `(expires_at)` — purge scan.
@@ -69,7 +69,7 @@ Written inline, fire-and-forget, from `apps/gateway/src/runtime/usageLogging.ts`
 
 - **Trigger:** only when `req.headers["x-request-id"]` is present **and** `GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC > 0`. Non-participating requests write nothing — zero behaviour change for the common path.
 - **Source values:** `request_id` = the raw `X-Request-Id`; `api_key_id` = `payload.apiKeyId`; `internal_request_id` = `payload.requestId` (`req.id`); `org_id`/`user_id`/`requested_model`/`surface`/`platform`/`status_code` from the already-built usage-log `payload`. **Cost: write `payload.totalCost` and `payload.actualCostUsd`** — these are the canonical persisted strings (usageLogging.ts:369–370): `payload.totalCost` already includes OpenAI cached-input cost (`totalWithCachedInput`) and `payload.actualCostUsd` is multiplier-applied. The raw `cost` `CostBreakdown` excludes both, so it must NOT be used. `expires_at` = now + `GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC`.
-- **Conflict:** `ON CONFLICT (api_key_id, request_id) DO UPDATE` (refresh the snapshot + `expires_at`). Handles the rare case where the same `(api_key_id, X-Request-Id)` is reused for a genuinely new dispatch after the 5-min Redis TTL but within the 1-h DB window.
+- **Conflict:** `ON CONFLICT (api_key_id, request_id) DO UPDATE` refreshing **all** non-PK columns to the new dispatch's values — `internal_request_id`, `requested_model`, `surface`, `platform`, `status_code`, `total_cost`, `actual_cost_usd`, **`created_at = now()`**, and `expires_at = now() + TTL`. A conflict only happens when the same `(api_key_id, X-Request-Id)` is reused for a genuinely *new* dispatch (after the 5-min Redis TTL, within the 1-h DB window), so the row must wholly reflect that latest dispatch — including `created_at`, or the `(org_id, created_at)` billing query would report the stale first-dispatch time. The row is "latest dispatch under this key", not "first seen".
 - **Robustness:** fire-and-forget (`void insert().catch(() => {})`), never throws, never blocks the user response — mirrors `storeIdempotent`. A failed write loses one supplementary record, nothing billing-critical (`usage_logs` is unaffected).
 - **Replays write nothing here either:** a replay never reaches `emitUsageLog` (no dispatch), so the original record (already present, ≤1 h old) is the single source — no double-write.
 
@@ -79,7 +79,16 @@ New env knob (mirrors the cache/purge knobs): `GATEWAY_IDEMPOTENCY_RECORD_TTL_SE
 
 Mirror `apps/gateway/src/workers/bodyPurge.ts`:
 
-- `purgeExpiredIdempotencyRecords({ db, now?, batchSize? })` — batched `DELETE FROM idempotency_records WHERE request_id IN (SELECT … WHERE expires_at <= now() LIMIT batchSize)`, looping until 0 rows, `MAX_ITERATIONS` guard. Returns `{ deleted, durationSec }`.
+- `purgeExpiredIdempotencyRecords({ db, now?, batchSize? })` — batched delete looping until 0 rows, `MAX_ITERATIONS` guard, returns `{ deleted, durationSec }`. **The delete target must be the composite PK, not bare `request_id`** — with `(api_key_id, request_id)` two callers can share a `request_id`, so `DELETE … WHERE request_id IN (…)` would wrongly remove a *fresh* row of one key when another key's same-id row expired. Use a composite match:
+
+  ```sql
+  DELETE FROM idempotency_records r
+  USING (
+    SELECT api_key_id, request_id FROM idempotency_records
+    WHERE expires_at <= now() LIMIT ${batchSize}
+  ) doomed
+  WHERE r.api_key_id = doomed.api_key_id AND r.request_id = doomed.request_id
+  ```
 - `startIdempotencyPurgeCron(...)` scheduled via `setInterval` in `server.ts` (interval-based scheduling is the repo convention; no cron-expression parser). `IDEMPOTENCY_PURGE_INTERVAL_MS` = 1 h (sufficient for a 1-h-TTL table).
 - **Gating (finding 3):** the body-purge cron is wrapped in `if (opts.env.ENABLE_EVALUATOR)` (server.ts:181) because captured bodies only exist when the evaluator is on. `idempotency_records` are **gateway** data, written whenever idempotency is active **regardless of the evaluator**. So the new purge cron must be gated on **`opts.env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC > 0`** (the same knob that enables the write), NOT on `ENABLE_EVALUATOR` — otherwise with the evaluator off, records would accumulate unpurged forever. It stays inside the existing `opts.redis === undefined` test-mode gate (tests call the purge fn directly).
 - **Metric:** `gw_idempotency_records_purged_total` Counter (no labels), defined in `metrics.ts` (def + zero-init `inc(0)` + decorate), incremented by the cron with the deleted count — consistent with `gw_body_purge_deleted_total`.
@@ -95,11 +104,11 @@ The migration only `CREATE TABLE` + indexes — no data backfill, no column drop
 - **Tenant-scope (security regression):** two api keys send the same `X-Request-Id`; assert key B is not served key A's cached response and gets no `409` from A's in-flight marker (independent namespaces). Assert the scoped Redis key shape `idem:{apiKeyId}:{X-Request-Id}` and that the `409` body still reports the raw `X-Request-Id`. Existing idempotency unit/integration tests updated for the new `scope` dep.
 - **Schema/migration:** integration test applies `0017` in a testcontainer (CI `gateway-integration` / `integration` already do migration application).
 - **Write path:** unit/integration test of the write hook — with `X-Request-Id` present → row inserted with `api_key_id` + raw `request_id`, snapshot using `payload.totalCost`/`payload.actualCostUsd`, `expires_at ≈ now + TTL`; without the header → no row; with `GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC=0` → no row; conflict (same `(api_key_id, request_id)` twice) → single row, refreshed; **different api keys, same `request_id` → two distinct rows**. Assert it never throws on a failing `db`.
-- **Purge:** unit test of `purgeExpiredIdempotencyRecords` — seeds expired + fresh rows, asserts only expired deleted, batches correctly, returns count; metric incremented. Assert the cron is gated on the TTL knob, not `ENABLE_EVALUATOR`.
+- **Purge:** unit test of `purgeExpiredIdempotencyRecords` — seeds expired + fresh rows, asserts only expired deleted, batches correctly, returns count; metric incremented. **Composite-key regression: key A has expired `request_id=x`, key B has fresh `request_id=x` → only A's row is deleted, B's survives.** Assert the cron is gated on the TTL knob, not `ENABLE_EVALUATOR`.
 - Coverage ≥ 80 %.
 
 ## Out of scope (explicitly deferred)
 
 - Refund/billing query tooling or UI that consumes the table.
-- Any change to the Redis idempotency cache or the dedup behaviour.
+- Any change to the Redis idempotency cache or dedup behaviour **beyond tenant-scoping the key** (the prerequisite fix above) — the replay/conflict/fail-closed semantics are unchanged.
 - Backfill (the table starts empty; only future X-Request-Id requests populate it).
