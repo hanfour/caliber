@@ -53,6 +53,12 @@ import {
 declare module "fastify" {
   interface FastifyInstance {
     /**
+     * The resolved server env. Decorated so runtime helpers that only receive
+     * `app` (e.g. emitUsageLog) can read config knobs without threading them
+     * through every call site.
+     */
+    env: ServerEnv;
+    /**
      * BullMQ usage-log queue. Decorated only when ENABLE_GATEWAY=true AND no
      * test-injected Redis was provided (BullMQ does not work with ioredis-mock,
      * so test paths skip queue/worker/audit instantiation entirely — see
@@ -130,6 +136,7 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
     // for direct-internet deploys.
     trustProxy: parseTrustedProxies(opts.env.GATEWAY_TRUSTED_PROXIES),
   });
+  app.decorate("env", opts.env);
   await app.register(metricsPlugin);
   app.get("/health", async () =>
     enabled ? { status: "ok" } : { status: "disabled" },
