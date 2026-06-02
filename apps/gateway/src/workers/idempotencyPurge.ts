@@ -50,3 +50,37 @@ export async function purgeExpiredIdempotencyRecords(
     durationSec: (Date.now() - startMs) / 1000,
   };
 }
+
+export interface IdempotencyPurgeCronHandle {
+  stop: () => void;
+}
+
+export function startIdempotencyPurgeCron(deps: {
+  db: Database;
+  metrics: { purgedTotal: { inc: (n?: number) => void } };
+  logger: {
+    info: (o: unknown, m?: string) => void;
+    warn: (o: unknown, m?: string) => void;
+  };
+  intervalMs?: number;
+}): IdempotencyPurgeCronHandle {
+  const intervalMs = deps.intervalMs ?? IDEMPOTENCY_PURGE_INTERVAL_MS;
+  const timer = setInterval(() => {
+    void purgeExpiredIdempotencyRecords({ db: deps.db })
+      .then((r) => {
+        if (r.deleted > 0) deps.metrics.purgedTotal.inc(r.deleted);
+        deps.logger.info(
+          { deleted: r.deleted, durationSec: r.durationSec },
+          "idempotency_records purge tick",
+        );
+      })
+      .catch((err) =>
+        deps.logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "idempotency_records purge failed",
+        ),
+      );
+  }, intervalMs);
+  timer.unref?.();
+  return { stop: () => clearInterval(timer) };
+}

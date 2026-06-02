@@ -49,6 +49,10 @@ import {
   startGdprExpireCron,
   type GdprExpireCronHandle,
 } from "./workers/gdprExpire.js";
+import {
+  startIdempotencyPurgeCron,
+  type IdempotencyPurgeCronHandle,
+} from "./workers/idempotencyPurge.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -253,6 +257,20 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
           gdprExpireCronHandle?.stop();
         });
       }
+    }
+
+    // Idempotency-record retention purge — Plan 4A §4.5. Gateway data written
+    // regardless of the evaluator, so gate on the record TTL knob, NOT
+    // ENABLE_EVALUATOR (which guards captured bodies).
+    if (opts.env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC > 0 && app.db) {
+      const idemPurgeHandle = startIdempotencyPurgeCron({
+        db: app.db,
+        metrics: { purgedTotal: app.gwMetrics.idempotencyRecordsPurgedTotal },
+        logger: app.log,
+      });
+      app.addHook("onClose", async () => {
+        idemPurgeHandle.stop();
+      });
     }
   }
 
