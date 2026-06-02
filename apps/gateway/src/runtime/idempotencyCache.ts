@@ -56,6 +56,15 @@ export interface CheckIdempotencyDeps {
   failClosed: boolean;
   /** The client's `X-Request-Id`; null/empty disables idempotency for this request. */
   requestKey: string | null;
+  /**
+   * Tenant scope (the api_key_id) — composed into the Redis key as
+   * `${scope}:${requestKey}` so two tenants using the same X-Request-Id never
+   * collide. `scope` is a UUID (colon-free), so the `:` delimiter is an
+   * unambiguous scope boundary even when X-Request-Id itself contains `:`.
+   * The route helper guarantees a non-empty scope (it skips the check entirely
+   * when no authenticated api key is present), hence `string`, not `string | null`.
+   */
+  scope: string;
   reply: ReplyLike;
   /** Per-check metric (`gw_idempotency_hit_total` on replay/conflict). */
   onResult?: (r: "replayed" | "conflict") => void;
@@ -85,7 +94,7 @@ export async function checkIdempotency(
   if (deps.ttlSec === 0 || !deps.requestKey) {
     return { outcome: "disabled", idemKey: null };
   }
-  const key = deps.requestKey;
+  const key = `${deps.scope}:${deps.requestKey}`;
 
   let entry;
   try {
@@ -102,7 +111,7 @@ export async function checkIdempotency(
   if (entry && isInFlight(entry)) {
     deps.reply.code(409);
     deps.reply.header("retry-after", "1");
-    deps.reply.send({ error: "request_in_progress", requestId: key });
+    deps.reply.send({ error: "request_in_progress", requestId: deps.requestKey });
     deps.onResult?.("conflict");
     return { outcome: "conflict", idemKey: null };
   }

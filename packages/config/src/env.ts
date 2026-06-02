@@ -154,6 +154,9 @@ export const serverEnvSchema = z
     GATEWAY_IDEMPOTENCY_TTL_SEC: emptyAsUndefined(
       z.coerce.number().int().min(0).default(300),
     ),
+    GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(3600),
+    ),
     GATEWAY_TRUSTED_PROXIES: emptyAsUndefined(z.string().default("")),
     GATEWAY_OAUTH_REFRESH_LEAD_MIN: emptyAsUndefined(
       z.coerce.number().int().min(1).default(10),

@@ -49,9 +49,19 @@ import {
   startGdprExpireCron,
   type GdprExpireCronHandle,
 } from "./workers/gdprExpire.js";
+import {
+  startIdempotencyPurgeCron,
+  type IdempotencyPurgeCronHandle,
+} from "./workers/idempotencyPurge.js";
 
 declare module "fastify" {
   interface FastifyInstance {
+    /**
+     * The resolved server env. Decorated so runtime helpers that only receive
+     * `app` (e.g. emitUsageLog) can read config knobs without threading them
+     * through every call site.
+     */
+    env: ServerEnv;
     /**
      * BullMQ usage-log queue. Decorated only when ENABLE_GATEWAY=true AND no
      * test-injected Redis was provided (BullMQ does not work with ioredis-mock,
@@ -130,6 +140,7 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
     // for direct-internet deploys.
     trustProxy: parseTrustedProxies(opts.env.GATEWAY_TRUSTED_PROXIES),
   });
+  app.decorate("env", opts.env);
   await app.register(metricsPlugin);
   app.get("/health", async () =>
     enabled ? { status: "ok" } : { status: "disabled" },
@@ -246,6 +257,20 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
           gdprExpireCronHandle?.stop();
         });
       }
+    }
+
+    // Idempotency-record retention purge — Plan 4A §4.5. Gateway data written
+    // regardless of the evaluator, so gate on the record TTL knob, NOT
+    // ENABLE_EVALUATOR (which guards captured bodies).
+    if (opts.env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC > 0 && app.db) {
+      const idemPurgeHandle = startIdempotencyPurgeCron({
+        db: app.db,
+        metrics: { purgedTotal: app.gwMetrics.idempotencyRecordsPurgedTotal },
+        logger: app.log,
+      });
+      app.addHook("onClose", async () => {
+        idemPurgeHandle.stop();
+      });
     }
   }
 

@@ -165,4 +165,19 @@ describe("parseServerEnv — gateway vars", () => {
       }),
     ).toThrow(/API_KEY_HASH_PEPPER/);
   });
+
+  // 17. GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC defaults to 3600
+  it("defaults GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC to 3600", () => {
+    const env = parseServerEnv(validBase);
+    expect(env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC).toBe(3600);
+  });
+
+  // 18. GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC coerces "0" to 0
+  it('accepts GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC="0" and coerces to 0', () => {
+    const env = parseServerEnv({
+      ...validBase,
+      GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC: "0",
+    });
+    expect(env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC).toBe(0);
+  });
 });

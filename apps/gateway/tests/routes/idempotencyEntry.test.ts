@@ -54,8 +54,9 @@ function counters(): Counters {
   return { hits: 0, malformed: 0, redisErrors: [] };
 }
 
-function fakeReq(xRequestId?: string | string[]): FastifyRequest {
+function fakeReq(xRequestId?: string | string[], apiKeyId: string | null = "test-key"): FastifyRequest {
   return {
+    apiKey: apiKeyId ? { id: apiKeyId } : undefined,
     headers: xRequestId === undefined ? {} : { "x-request-id": xRequestId },
   } as unknown as FastifyRequest;
 }
@@ -91,11 +92,11 @@ describe("checkRequestIdempotency", () => {
       fakeReq("rid-miss"),
       fakeReply() as unknown as FastifyReply,
     );
-    expect(res).toEqual({ handled: false, idemKey: "rid-miss" });
+    expect(res).toEqual({ handled: false, idemKey: "test-key:rid-miss" });
   });
 
   it("in-flight duplicate → handled (409 sent) + metric incremented", async () => {
-    await setInFlight(redis, "rid-dup", 300);
+    await setInFlight(redis, "test-key:rid-dup", 300);
     const c = counters();
     const reply = fakeReply();
     const res = await checkRequestIdempotency(
@@ -112,7 +113,7 @@ describe("checkRequestIdempotency", () => {
   it("completed entry → handled (replay sent) + metric incremented", async () => {
     await setCached(
       redis,
-      "rid-done",
+      "test-key:rid-done",
       {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -140,11 +141,11 @@ describe("checkRequestIdempotency", () => {
       fakeReq(["rid-array-first", "rid-array-second"]),
       fakeReply() as unknown as FastifyReply,
     );
-    expect(res.idemKey).toBe("rid-array-first");
+    expect(res.idemKey).toBe("test-key:rid-array-first");
   });
 
   it("malformed stored entry → increments idempotencyMalformedTotal, proceeds as a miss", async () => {
-    await redis.set("idem:rid-bad", "not json", "EX", 300);
+    await redis.set("idem:test-key:rid-bad", "not json", "EX", 300);
     const c = counters();
     const res = await checkRequestIdempotency(
       fakeApp(redis, c),
@@ -153,8 +154,21 @@ describe("checkRequestIdempotency", () => {
       fakeReply() as unknown as FastifyReply,
     );
     expect(res.handled).toBe(false);
-    expect(res.idemKey).toBe("rid-bad");
+    expect(res.idemKey).toBe("test-key:rid-bad");
     expect(c.malformed).toBe(1);
+  });
+
+  it("no apiKey on request → not handled, no idemKey (idempotency skipped before Redis)", async () => {
+    const c = counters();
+    const res = await checkRequestIdempotency(
+      fakeApp(redis, c),
+      strictEnv,
+      fakeReq("rid", null),
+      fakeReply() as unknown as FastifyReply,
+    );
+    expect(res).toEqual({ handled: false, idemKey: null });
+    expect(c.hits).toBe(0);
+    expect(c.redisErrors).toEqual([]);
   });
 
   it("Redis error (strict) → increments redisErrorTotal{op:idempotency}", async () => {

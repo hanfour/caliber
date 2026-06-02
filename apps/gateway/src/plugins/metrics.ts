@@ -22,6 +22,7 @@ export interface GatewayMetrics {
   // redis_error}) with a unified redis-health signal; pairs with
   // gw_redis_latency_seconds.
   redisErrorTotal: Counter<"op">;
+  idempotencyRecordsPurgedTotal: Counter<string>;
   // Phase 3 #2 follow-up — cache hit/miss counter so operators can
   // observe hit-rate from Prometheus rather than only via the
   // `x-cache` response header on individual requests.
@@ -132,6 +133,12 @@ async function metricsPluginBody(
     name: "gw_redis_error_total",
     help: "Redis op failures caught on the hot path, by operation",
     labelNames: ["op"] as const,
+    registers: [register],
+  });
+
+  const idempotencyRecordsPurgedTotal = new Counter({
+    name: "gw_idempotency_records_purged_total",
+    help: "idempotency_records rows deleted by the retention purge cron",
     registers: [register],
   });
 
@@ -411,6 +418,7 @@ async function metricsPluginBody(
   waitQueueDepth.set(0);
   idempotencyHitTotal.inc(0);
   idempotencyMalformedTotal.inc(0);
+  idempotencyRecordsPurgedTotal.inc(0);
   queueDepth.set(0);
   queueDlqCount.set(0);
   usagePersistLostTotal.inc(0);
@@ -450,6 +458,7 @@ async function metricsPluginBody(
     idempotencyHitTotal,
     idempotencyMalformedTotal,
     redisErrorTotal,
+    idempotencyRecordsPurgedTotal,
     gwCacheTotal,
     gwRateLimitFailOpenTotal,
     redisLatencySeconds,

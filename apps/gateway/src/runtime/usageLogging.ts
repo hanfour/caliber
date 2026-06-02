@@ -35,6 +35,7 @@ import {
   enqueueUsageLog,
   type UsageLogJobPayload,
 } from "../workers/usageLogQueue.js";
+import { writeIdempotencyRecord } from "./idempotencyRecord.js";
 
 // ── Pricing cache ────────────────────────────────────────────────────────────
 
@@ -574,6 +575,28 @@ export async function emitUsageLog(input: EmitUsageLogInput): Promise<void> {
         },
         "pricing miss — usage log row will record zero cost",
       );
+    }
+
+    const xReqId = req.headers["x-request-id"];
+    const requestKey = Array.isArray(xReqId) ? xReqId[0] : xReqId;
+    if (requestKey && app.env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC > 0 && app.db) {
+      writeIdempotencyRecord({
+        db: app.db,
+        requestKey,
+        ttlSec: app.env.GATEWAY_IDEMPOTENCY_RECORD_TTL_SEC,
+        payload: {
+          apiKeyId: payload.apiKeyId,
+          orgId: payload.orgId,
+          userId: payload.userId,
+          requestId: payload.requestId,
+          requestedModel: payload.requestedModel,
+          surface: payload.surface,
+          platform: payload.platform,
+          statusCode: payload.statusCode,
+          totalCost: payload.totalCost,
+          actualCostUsd: payload.actualCostUsd,
+        },
+      });
     }
 
     if (!app.usageLogQueue) {

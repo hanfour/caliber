@@ -1252,6 +1252,69 @@ describe("POST /v1/messages", () => {
     await app.close();
   });
 
+  it("idempotency: cross-tenant isolation — same X-Request-Id from two different tenants never replays across tenants", async () => {
+    // Tenant A
+    const orgIdA = await seedOrg();
+    const userIdA = await seedUser(orgIdA);
+    const rawKeyA = `ak_idem_ta_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgIdA, userIdA, rawKeyA);
+    await seedAccount(
+      orgIdA,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test-a" }),
+    );
+
+    // Tenant B — separate org/user/account
+    const orgIdB = await seedOrg();
+    const userIdB = await seedUser(orgIdB);
+    const rawKeyB = `ak_idem_tb_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgIdB, userIdB, rawKeyB);
+    await seedAccount(
+      orgIdB,
+      JSON.stringify({ type: "api_key", api_key: "sk-anthropic-test-b" }),
+    );
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+    const sharedReqId = `rid-cross-tenant-${Math.random().toString(36).slice(2)}`;
+    const payload = { model: "claude-3-haiku-20240307", max_tokens: 10 };
+
+    // Tenant A fires first — upstream returns body A.
+    nextUpstreamResponse = {
+      status: 200,
+      body: '{"id":"msg_tenant_a","content":[]}',
+    };
+    const resA = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${rawKeyA}`, "x-request-id": sharedReqId },
+      payload,
+    });
+    expect(resA.statusCode).toBe(200);
+    expect(resA.json()).toMatchObject({ id: "msg_tenant_a" });
+    expect(resA.headers["x-idempotent-replay"]).toBeUndefined();
+
+    // Let the fire-and-forget storeIdempotent write flush.
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Tenant B fires with the SAME X-Request-Id but different API key.
+    // Upstream now returns body B — if cross-tenant replay occurred B would get A's body.
+    nextUpstreamResponse = {
+      status: 200,
+      body: '{"id":"msg_tenant_b","content":[]}',
+    };
+    const resB = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${rawKeyB}`, "x-request-id": sharedReqId },
+      payload,
+    });
+    expect(resB.statusCode).toBe(200);
+    expect(resB.json()).toMatchObject({ id: "msg_tenant_b" }); // own dispatch, NOT tenant A's replay
+    expect(resB.headers["x-idempotent-replay"]).toBeUndefined(); // no replay header
+
+    await app.close();
+  });
+
   it("idempotency: openai-platform messages handler replays a 200 on a repeated X-Request-Id", async () => {
     const orgId = await seedOrg();
     const userId = await seedUser(orgId);

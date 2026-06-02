@@ -29,24 +29,24 @@ describe("checkIdempotency", () => {
   });
 
   it("disabled when ttlSec=0 or no requestKey (no Redis touch)", async () => {
-    const r1 = await checkIdempotency({ redis, ttlSec: 0, failClosed: true, requestKey: "rid", reply: fakeReply() });
+    const r1 = await checkIdempotency({ redis, ttlSec: 0, failClosed: true, scope: "k", requestKey: "rid", reply: fakeReply() });
     expect(r1.outcome).toBe("disabled");
-    const r2 = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, requestKey: null, reply: fakeReply() });
+    const r2 = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, scope: "k", requestKey: null, reply: fakeReply() });
     expect(r2.outcome).toBe("disabled");
   });
 
   it("miss → writes an in-flight marker and returns proceed + idemKey", async () => {
-    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, requestKey: "rid-1", reply: fakeReply() });
-    expect(res).toEqual({ outcome: "proceed", idemKey: "rid-1" });
-    const entry = await getCached(redis, "rid-1");
+    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, scope: "k", requestKey: "rid-1", reply: fakeReply() });
+    expect(res).toEqual({ outcome: "proceed", idemKey: "k:rid-1" });
+    const entry = await getCached(redis, "k:rid-1");
     expect(entry).toMatchObject({ marker: "in_progress" });
   });
 
   it("duplicate in-flight → 409 request_in_progress with retry-after", async () => {
-    await setInFlight(redis, "rid-2", 300);
+    await setInFlight(redis, "k:rid-2", 300);
     const reply = fakeReply();
     const onResult: string[] = [];
-    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, requestKey: "rid-2", reply, onResult: (r) => onResult.push(r) });
+    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, scope: "k", requestKey: "rid-2", reply, onResult: (r) => onResult.push(r) });
     expect(res.outcome).toBe("conflict");
     expect(reply.calls.status).toBe(409);
     expect(reply.calls.headers["retry-after"]).toBe("1");
@@ -55,14 +55,14 @@ describe("checkIdempotency", () => {
   });
 
   it("completed entry → replays status/headers/body verbatim", async () => {
-    await setCached(redis, "rid-3", {
+    await setCached(redis, "k:rid-3", {
       status: 200,
       headers: { "content-type": "application/json" },
       body: Buffer.from('{"ok":true}').toString("base64"),
     }, 300);
     const reply = fakeReply();
     const onResult: string[] = [];
-    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, requestKey: "rid-3", reply, onResult: (r) => onResult.push(r) });
+    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, scope: "k", requestKey: "rid-3", reply, onResult: (r) => onResult.push(r) });
     expect(res.outcome).toBe("replayed");
     expect(reply.calls.status).toBe(200);
     expect(reply.calls.headers["content-type"]).toBe("application/json");
@@ -75,7 +75,7 @@ describe("checkIdempotency", () => {
     const failing = { get: () => Promise.reject(new Error("down")) } as unknown as Redis;
     const reply = fakeReply();
     let redisErrors = 0;
-    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: true, requestKey: "rid-4", reply, onRedisError: () => (redisErrors += 1) });
+    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: true, scope: "k", requestKey: "rid-4", reply, onRedisError: () => (redisErrors += 1) });
     expect(res.outcome).toBe("degraded");
     expect(reply.calls.status).toBe(503);
     expect(reply.calls.body).toMatchObject({ error: "service_degraded" });
@@ -86,19 +86,34 @@ describe("checkIdempotency", () => {
     const failing = { get: () => Promise.reject(new Error("down")) } as unknown as Redis;
     const reply = fakeReply();
     let redisErrors = 0;
-    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: false, requestKey: "rid-5", reply, onRedisError: () => (redisErrors += 1) });
+    const res = await checkIdempotency({ redis: failing, ttlSec: 300, failClosed: false, scope: "k", requestKey: "rid-5", reply, onRedisError: () => (redisErrors += 1) });
     expect(res.outcome).toBe("disabled");
     expect(reply.calls.status).toBe(0); // nothing sent
     expect(redisErrors).toBe(1); // still counted as a raw redis error
   });
 
   it("malformed stored entry → fires onMalformed, then proceeds as a miss", async () => {
-    await redis.set("idem:rid-malformed", "not json at all", "EX", 300);
+    await redis.set("idem:sc:rid-malformed", "not json at all", "EX", 300);
     let malformed = 0;
-    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, requestKey: "rid-malformed", reply: fakeReply(), onMalformed: () => (malformed += 1) });
+    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, scope: "sc", requestKey: "rid-malformed", reply: fakeReply(), onMalformed: () => (malformed += 1) });
     // getCached treats malformed as a miss → checkIdempotency claims the slot.
     expect(res.outcome).toBe("proceed");
     expect(malformed).toBe(1);
+  });
+
+  it("scopes the Redis key by `scope` — a hit under another scope is a miss", async () => {
+    await setCached(redis, "keyA:rid-z", { status: 200, headers: {}, body: Buffer.from("A").toString("base64") }, 300);
+    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, scope: "keyB", requestKey: "rid-z", reply: fakeReply() });
+    expect(res.outcome).toBe("proceed");
+    expect(res.idemKey).toBe("keyB:rid-z");
+  });
+
+  it("409 body reports the RAW X-Request-Id, not the scoped composite", async () => {
+    await setInFlight(redis, "keyA:rid-dup", 300);
+    const reply = fakeReply();
+    const res = await checkIdempotency({ redis, ttlSec: 300, failClosed: true, scope: "keyA", requestKey: "rid-dup", reply });
+    expect(res.outcome).toBe("conflict");
+    expect(reply.calls.body).toMatchObject({ error: "request_in_progress", requestId: "rid-dup" });
   });
 });
 

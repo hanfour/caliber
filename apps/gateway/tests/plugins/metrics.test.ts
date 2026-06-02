@@ -9,6 +9,7 @@ const METRIC_NAMES = [
   'gw_wait_queue_depth',
   'gw_idempotency_hit_total',
   'gw_idempotency_malformed_total',
+  'gw_idempotency_records_purged_total',
   'gw_redis_error_total',
   'gw_redis_latency_seconds',
   'gw_upstream_duration_seconds',
@@ -87,6 +88,7 @@ describe('metricsPlugin', () => {
     expect(m.idempotencyHitTotal).toBeInstanceOf(Counter)
     expect(m.idempotencyMalformedTotal).toBeInstanceOf(Counter)
     expect(m.redisErrorTotal).toBeInstanceOf(Counter)
+    expect(m.idempotencyRecordsPurgedTotal).toBeInstanceOf(Counter)
     expect(m.redisLatencySeconds).toBeInstanceOf(Histogram)
     expect(m.upstreamDurationSeconds).toBeInstanceOf(Histogram)
     expect(m.pricingMissTotal).toBeInstanceOf(Counter)
