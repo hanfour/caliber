@@ -141,9 +141,27 @@ async function fetchRow(apiKeyId: string, requestKey: string) {
   return rows[0];
 }
 
-/** Flush fire-and-forget void promises. */
+/** Settle wait for the fire-and-forget write (used for absence/count assertions). */
 function flush(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 30));
+  return new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/**
+ * Poll for a row to appear (and optionally satisfy a predicate), up to ~1s.
+ * Robust against fire-and-forget timing under a slow/cold testcontainer —
+ * preferred over a fixed sleep for "row should exist" assertions.
+ */
+async function waitForRow(
+  apiKeyId: string,
+  requestKey: string,
+  predicate?: (row: NonNullable<Awaited<ReturnType<typeof fetchRow>>>) => boolean,
+): Promise<NonNullable<Awaited<ReturnType<typeof fetchRow>>>> {
+  for (let i = 0; i < 50; i++) {
+    const row = await fetchRow(apiKeyId, requestKey);
+    if (row && (!predicate || predicate(row))) return row;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`row (${apiKeyId}, ${requestKey}) did not appear within ~1s`);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -164,9 +182,7 @@ describe("writeIdempotencyRecord", () => {
       now: () => fixedNow,
     });
 
-    await flush();
-
-    const row = await fetchRow(apiKeyIdA, "client-req-1");
+    const row = await waitForRow(apiKeyIdA, "client-req-1");
     expect(row).toBeDefined();
     expect(row!.apiKeyId).toBe(apiKeyIdA);
     expect(row!.requestId).toBe("client-req-1");
@@ -223,7 +239,7 @@ describe("writeIdempotencyRecord", () => {
       now: () => t1,
     });
 
-    await flush();
+    await waitForRow(apiKeyIdA, "shared-req-key");
 
     writeIdempotencyRecord({
       db,
@@ -233,7 +249,12 @@ describe("writeIdempotencyRecord", () => {
       now: () => t2,
     });
 
-    await flush();
+    // Wait until the row reflects the SECOND call before the count assertion.
+    await waitForRow(
+      apiKeyIdA,
+      "shared-req-key",
+      (r) => r.internalRequestId === secondPayload.requestId,
+    );
 
     // Exactly one row
     const allRows = await db
@@ -268,10 +289,8 @@ describe("writeIdempotencyRecord", () => {
       payload: makePayload(apiKeyIdB),
     });
 
-    await flush();
-
-    const rowA = await fetchRow(apiKeyIdA, "multi-key-req");
-    const rowB = await fetchRow(apiKeyIdB, "multi-key-req");
+    const rowA = await waitForRow(apiKeyIdA, "multi-key-req");
+    const rowB = await waitForRow(apiKeyIdB, "multi-key-req");
     expect(rowA).toBeDefined();
     expect(rowB).toBeDefined();
     expect(rowA!.apiKeyId).toBe(apiKeyIdA);
@@ -293,5 +312,35 @@ describe("writeIdempotencyRecord", () => {
         payload: makePayload(apiKeyIdA),
       }),
     ).not.toThrow();
+  });
+
+  it("never surfaces an async rejection (insert chain rejects)", async () => {
+    const rejectingDb = {
+      insert: () => ({
+        values: () => ({
+          onConflictDoUpdate: () => Promise.reject(new Error("async db failure")),
+        }),
+      }),
+    } as unknown as Database;
+
+    // Must not throw synchronously...
+    expect(() =>
+      writeIdempotencyRecord({
+        db: rejectingDb,
+        requestKey: "async-fail-key",
+        ttlSec: 3600,
+        payload: makePayload(apiKeyIdA),
+      }),
+    ).not.toThrow();
+
+    // ...and the rejected promise must be swallowed (no unhandledRejection).
+    let unhandled: unknown;
+    const onUnhandled = (err: unknown) => {
+      unhandled = err;
+    };
+    process.on("unhandledRejection", onUnhandled);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    process.off("unhandledRejection", onUnhandled);
+    expect(unhandled).toBeUndefined();
   });
 });
