@@ -42,10 +42,15 @@ export async function checkRequestIdempotency(
   reply: FastifyReply,
 ): Promise<RequestIdempotency> {
   const xReqId = req.headers["x-request-id"];
+  const apiKeyId = req.apiKey?.id;
+  if (!apiKeyId) {
+    return { handled: false, idemKey: null };
+  }
   const result = await checkIdempotency({
     redis: app.redis,
     ttlSec: env.GATEWAY_IDEMPOTENCY_TTL_SEC,
     failClosed: env.GATEWAY_REDIS_FAILURE_MODE === "strict",
+    scope: apiKeyId,
     requestKey: Array.isArray(xReqId) ? (xReqId[0] ?? null) : (xReqId ?? null),
     reply,
     onResult: () => app.gwMetrics.idempotencyHitTotal.inc(),
