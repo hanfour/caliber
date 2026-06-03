@@ -150,10 +150,10 @@ describe("apiKeys router", () => {
     expect(result.prefix).toMatch(/^ak_/);
     // Admin must NOT see the raw key.
     expect(result).not.toHaveProperty("raw");
-    // URL shape is `{GATEWAY_BASE_URL}/api-keys/reveal/<token>`.
-    expect(result.revealUrl.startsWith(defaultTestEnv.GATEWAY_BASE_URL!)).toBe(
-      true,
-    );
+    // URL shape is `{NEXTAUTH_URL}/api-keys/reveal/<token>` — the reveal page
+    // is a web route, served from the dashboard origin, not the gateway (#192).
+    expect(result.revealUrl.startsWith(defaultTestEnv.NEXTAUTH_URL)).toBe(true);
+    expect(result.revealUrl).toContain("/api-keys/reveal/");
     const token = result.revealUrl.split("/").pop()!;
     expect(token.length).toBeGreaterThan(20);
 
