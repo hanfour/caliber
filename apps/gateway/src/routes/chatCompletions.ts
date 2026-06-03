@@ -300,9 +300,7 @@ export function makeChatCompletionsAnthropicHandler(
               parsed as Parameters<typeof translateAnthropicToOpenAI>[0],
             );
           } finally {
-            app.gwMetrics.slotHoldDurationSeconds.observe(
-              (Date.now() - slotAcquiredMs) / 1000,
-            );
+            // Release FIRST (swallowed); best-effort metric after, guarded.
             await releaseSlot(
               app.redis,
               "account",
@@ -311,6 +309,13 @@ export function makeChatCompletionsAnthropicHandler(
             ).catch(() => {
               // Intentionally swallowed — slot expires on its own within SLOT_DURATION_MS.
             });
+            try {
+              app.gwMetrics.slotHoldDurationSeconds.observe(
+                (Date.now() - slotAcquiredMs) / 1000,
+              );
+            } catch {
+              // metric only
+            }
           }
         },
       });
@@ -539,14 +544,19 @@ async function runChatCompletionsStreamingFailover(
           });
           return undefined as never;
         } finally {
-          app.gwMetrics.slotHoldDurationSeconds.observe(
-            (Date.now() - slotAcquiredMs) / 1000,
-          );
+          // Release FIRST (swallowed); best-effort metric after, guarded.
           await releaseSlot(app.redis, "account", account.id, requestId).catch(
             () => {
               // Slot expires on its own.
             },
           );
+          try {
+            app.gwMetrics.slotHoldDurationSeconds.observe(
+              (Date.now() - slotAcquiredMs) / 1000,
+            );
+          } catch {
+            // metric only
+          }
         }
       },
     });

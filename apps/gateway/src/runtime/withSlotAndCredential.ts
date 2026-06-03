@@ -89,13 +89,19 @@ export async function withSlotAndCredential<T>(
     }
     return await fn(credential);
   } finally {
-    app.gwMetrics.slotHoldDurationSeconds.observe(
-      (Date.now() - slotAcquiredMs) / 1000,
-    );
+    // Release FIRST (swallowed) so observability can never skip cleanup or
+    // mask the in-flight error; then best-effort observe in its own guard.
     await releaseSlot(app.redis, "account", account.id, requestId).catch(
       () => {
         // Slot expires on its own within SLOT_DURATION_MS.
       },
     );
+    try {
+      app.gwMetrics.slotHoldDurationSeconds.observe(
+        (Date.now() - slotAcquiredMs) / 1000,
+      );
+    } catch {
+      // metric only — never block release.
+    }
   }
 }

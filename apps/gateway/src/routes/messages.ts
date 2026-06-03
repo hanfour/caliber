@@ -415,14 +415,20 @@ async function runNonStreamFailover(
         );
         throw err;
       } finally {
-        app.gwMetrics.slotHoldDurationSeconds.observe(
-          (Date.now() - slotAcquiredMs) / 1000,
-        );
+        // Release FIRST (swallowed); best-effort metric after, guarded — so it
+        // can never skip release or mask the in-flight error.
         await releaseSlot(app.redis, "account", account.id, requestId).catch(
           () => {
             // Intentionally swallowed — slot expires on its own within SLOT_DURATION_MS.
           },
         );
+        try {
+          app.gwMetrics.slotHoldDurationSeconds.observe(
+            (Date.now() - slotAcquiredMs) / 1000,
+          );
+        } catch {
+          // metric only
+        }
       }
     },
   });
@@ -769,12 +775,17 @@ async function runStreamingFailover(
           attemptErrors: errMsg,
         });
       } finally {
-        app.gwMetrics.slotHoldDurationSeconds.observe(
-          (Date.now() - slotAcquiredMs) / 1000,
-        );
+        // Release FIRST (swallowed); best-effort metric after, guarded.
         await releaseSlot(app.redis, "account", account.id, requestId).catch(
           () => {},
         );
+        try {
+          app.gwMetrics.slotHoldDurationSeconds.observe(
+            (Date.now() - slotAcquiredMs) / 1000,
+          );
+        } catch {
+          // metric only
+        }
       }
     },
   }).catch((err) => {
