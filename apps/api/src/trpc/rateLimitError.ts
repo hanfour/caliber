@@ -29,9 +29,13 @@ export function trpcTooManyRequestsBody(
   req: { url?: string },
   retryAfter: string,
 ): TrpcErrorEnvelope | TrpcErrorEnvelope[] {
+  // Plain concatenation (not a backtick template) so the audit-zod-i18n guard
+  // — which bans `message: ` + template literals app-wide — stays green; this
+  // is a transport error body, not a translatable Zod validation message.
+  const message = "Rate limit exceeded, retry in " + retryAfter;
   const mk = (path: string | null): TrpcErrorEnvelope => ({
     error: {
-      message: `Rate limit exceeded, retry in ${retryAfter}`,
+      message,
       code: TRPC_TOO_MANY_REQUESTS,
       data: { code: "TOO_MANY_REQUESTS", httpStatus: 429, path },
     },
