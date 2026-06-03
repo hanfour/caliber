@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
 import type { Database } from "@caliber/db";
-import { apiKeys } from "@caliber/db";
+import { apiKeys, accountGroups } from "@caliber/db";
 import { verifyApiKey } from "@caliber/gateway-core";
 import { resolvePermissions } from "@caliber/auth";
 import type { ServerEnv } from "@caliber/config";
@@ -666,5 +666,100 @@ describe("apiKeys router", () => {
     await expect(
       caller.apiKeys.revoke({ id: issued.id }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // #191 — binding a key to an account group (so it routes to that group's
+  // platform/accounts instead of the legacy null-group anthropic default).
+  async function makeGroup(orgId: string, platform = "openai") {
+    const [g] = await t.db
+      .insert(accountGroups)
+      .values({ orgId, name: `grp-${Math.random().toString(36).slice(2, 8)}`, platform })
+      .returning({ id: accountGroups.id });
+    return g!.id;
+  }
+
+  it("issueOwn: binds groupId when the group is in the caller's org", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const groupId = await makeGroup(org.id);
+    const caller = await callerFor({ db: t.db, userId: user.id, redis });
+
+    const result = await caller.apiKeys.issueOwn({ name: "oai-key", groupId });
+    const [row] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, result.id));
+    expect(row!.groupId).toBe(groupId);
+  });
+
+  it("issueOwn: omitting groupId leaves it null (legacy/anthropic default)", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: user.id, redis });
+    const result = await caller.apiKeys.issueOwn({ name: "legacy-key" });
+    const [row] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, result.id));
+    expect(row!.groupId).toBeNull();
+  });
+
+  it("issueOwn: groupId from another org → FORBIDDEN (cross-tenant group guard)", async () => {
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const userA = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: orgA.id,
+      orgId: orgA.id,
+    });
+    const groupInB = await makeGroup(orgB.id);
+    const caller = await callerFor({ db: t.db, userId: userA.id, redis });
+    await expect(
+      caller.apiKeys.issueOwn({ name: "x", groupId: groupInB }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: expect.stringContaining("group"),
+    });
+  });
+
+  it("issueForUser: binds groupId for the target user", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const target = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const groupId = await makeGroup(org.id);
+    const caller = await callerFor({ db: t.db, userId: admin.id, redis });
+
+    const result = await caller.apiKeys.issueForUser({
+      orgId: org.id,
+      targetUserId: target.id,
+      name: "admin-oai",
+      groupId,
+    });
+    const [row] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, result.id));
+    expect(row!.groupId).toBe(groupId);
   });
 });
