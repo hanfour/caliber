@@ -536,6 +536,16 @@ export interface EmitUsageLogInput {
  */
 export async function emitUsageLog(input: EmitUsageLogInput): Promise<void> {
   const { app, req } = input;
+  // gw_upstream_duration_seconds (issue #190): observe end-to-end request
+  // latency (durationMs is dominated by the upstream LLM call — translation /
+  // credential / slot acquire are sub-/low-ms). Kept OUTSIDE the billing try
+  // below and self-guarded so a metric failure can NEVER short-circuit payload
+  // construction, usage-log enqueue, or the idempotency-record write.
+  try {
+    app.gwMetrics.upstreamDurationSeconds.observe(input.durationMs / 1000);
+  } catch {
+    // metric only — never block billing persistence.
+  }
   // Top-level try/catch enforces the documented never-throws contract:
   // a successful upstream response must never surface as a 500 to the
   // client because of a usage-log-emission failure. This wraps EVERY
