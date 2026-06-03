@@ -58,6 +58,13 @@ describe("parseServerEnv", () => {
       expect(env.GATEWAY_APIKEY_RPM_LIMIT).toBe(600);
     });
 
+    it("API_TRPC_RPM_LIMIT defaults to 2000 and accepts 0 (disable)", () => {
+      expect(parseServerEnv({ ...valid }).API_TRPC_RPM_LIMIT).toBe(2000);
+      expect(
+        parseServerEnv({ ...valid, API_TRPC_RPM_LIMIT: "0" }).API_TRPC_RPM_LIMIT,
+      ).toBe(0);
+    });
+
     it("GATEWAY_CACHE_TTL_SEC='' falls back to 0 (disabled)", () => {
       const env = parseServerEnv({ ...valid, GATEWAY_CACHE_TTL_SEC: "" });
       expect(env.GATEWAY_CACHE_TTL_SEC).toBe(0);
