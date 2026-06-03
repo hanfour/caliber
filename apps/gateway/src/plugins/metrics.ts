@@ -104,10 +104,14 @@ async function metricsPluginBody(
     registers: [register],
   });
 
-  // TODO(part-5): tune buckets for upstream durations >10s; defaults are HTTP-shaped
+  // LLM-shaped buckets: a slot is held for the full upstream call, which for
+  // LLM workloads routinely exceeds the prom-client default cap (10s) —
+  // completions + streaming run 10–120s+. Default buckets dump everything >10s
+  // into +Inf, making p95/p99 useless. Range to 300s (≈ upstream timeout).
   const slotHoldDurationSeconds = new Histogram({
     name: "gw_slot_hold_duration_seconds",
     help: "Time a slot was held",
+    buckets: [0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300],
     registers: [register],
   });
 
@@ -162,10 +166,13 @@ async function metricsPluginBody(
     registers: [register],
   });
 
-  // TODO(part-5): tune buckets for upstream durations >10s; defaults are HTTP-shaped
+  // LLM-shaped buckets (see slotHoldDurationSeconds): LLM upstream calls run
+  // well past the prom-client 10s default cap; range to 300s so p95/p99 are
+  // meaningful instead of collapsing into +Inf.
   const upstreamDurationSeconds = new Histogram({
     name: "gw_upstream_duration_seconds",
     help: "Upstream API call duration",
+    buckets: [0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300],
     registers: [register],
   });
 
