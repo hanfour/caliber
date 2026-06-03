@@ -28,6 +28,9 @@ const schema = z.object({
   name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
   // Empty string means "— Any team —"; server treats undefined as null.
   teamId: z.string().uuid().optional().or(z.literal("")),
+  // Empty string means "— None (legacy/anthropic) —"; server treats undefined
+  // as null (the key routes to the legacy null-group anthropic default). (#191)
+  groupId: z.string().uuid().optional().or(z.literal("")),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -64,6 +67,8 @@ export function AdminIssueDialog({
     { orgId },
     { enabled: open },
   );
+  const { data: groups, isLoading: groupsLoading } =
+    trpc.accountGroups.list.useQuery({ orgId }, { enabled: open });
 
   const {
     register,
@@ -72,7 +77,7 @@ export function AdminIssueDialog({
     formState: { errors },
   } = useForm<FormValues>({
     resolver: useTranslatedZodResolver(schema),
-    defaultValues: { name: "", teamId: "" },
+    defaultValues: { name: "", teamId: "", groupId: "" },
   });
 
   // On close (Cancel, X, ESC, click-outside, Done): reset form + issued state
@@ -80,7 +85,7 @@ export function AdminIssueDialog({
   useEffect(() => {
     if (!open) {
       setIssued(null);
-      reset({ name: "", teamId: "" });
+      reset({ name: "", teamId: "", groupId: "" });
     }
   }, [open, reset]);
 
@@ -119,10 +124,12 @@ export function AdminIssueDialog({
       name: values.name,
       // undefined (not "") so server nullable().optional() matches self-issue.
       teamId: values.teamId ? values.teamId : undefined,
+      groupId: values.groupId ? values.groupId : undefined,
     });
   };
 
   const hasTeams = !teamsLoading && !!teams && teams.length > 0;
+  const hasGroups = !groupsLoading && !!groups && groups.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -231,6 +238,37 @@ export function AdminIssueDialog({
                   {errors.teamId && (
                     <p className="text-xs text-destructive">
                       {errors.teamId.message}
+                    </p>
+                  )}
+                </div>
+              )}
+              {(groupsLoading || hasGroups) && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="adminApiKeyGroupId">
+                    {t("groupOptionalLabel")}
+                  </Label>
+                  <select
+                    id="adminApiKeyGroupId"
+                    className={SELECT_CLASS}
+                    disabled={groupsLoading}
+                    {...register("groupId")}
+                  >
+                    {groupsLoading ? (
+                      <option value="">{t("loadingGroups")}</option>
+                    ) : (
+                      <>
+                        <option value="">{t("noGroup")}</option>
+                        {groups?.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.name} ({group.platform})
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                  {errors.groupId && (
+                    <p className="text-xs text-destructive">
+                      {errors.groupId.message}
                     </p>
                   )}
                 </div>

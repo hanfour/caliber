@@ -11,7 +11,7 @@ import {
   permissionProcedure,
   router,
 } from "../procedures.js";
-import { assertTeamBelongsToOrg } from "./_shared.js";
+import { assertTeamBelongsToOrg, assertGroupBelongsToOrg } from "./_shared.js";
 import { writeAudit } from "../../services/audit.js";
 
 const uuid = z.string().uuid();
@@ -141,6 +141,9 @@ export const apiKeysRouter = router({
     z.object({
       name: z.string().min(1).max(255),
       teamId: uuid.nullable().optional(),
+      // #191 — bind the key to an account group (routes to that group's
+      // platform + accounts). null/omitted = legacy null-group → anthropic.
+      groupId: uuid.nullable().optional(),
     }),
     () => ({ type: "api_key.issue_own" }),
   ).mutation(async ({ ctx, input }) => {
@@ -154,6 +157,10 @@ export const apiKeysRouter = router({
     if (input.teamId) {
       await assertTeamBelongsToOrg(ctx.db, input.teamId, orgId);
     }
+    // #191 — same cross-tenant guard for the bound account group.
+    if (input.groupId) {
+      await assertGroupBelongsToOrg(ctx.db, input.groupId, orgId);
+    }
 
     const { raw, prefix } = generateApiKey();
     const keyHash = hashApiKey(pepper, raw);
@@ -164,6 +171,7 @@ export const apiKeysRouter = router({
         userId: ctx.user.id,
         orgId,
         teamId: input.teamId ?? null,
+        groupId: input.groupId ?? null,
         keyHash,
         keyPrefix: prefix,
         name: input.name,
@@ -184,7 +192,7 @@ export const apiKeysRouter = router({
       targetType: "api_key",
       targetId: row.id,
       orgId,
-      metadata: { name: input.name, prefix: row.prefix, teamId: input.teamId ?? null },
+      metadata: { name: input.name, prefix: row.prefix, teamId: input.teamId ?? null, groupId: input.groupId ?? null },
     });
 
     return { id: row.id, prefix: row.prefix, raw };
@@ -200,6 +208,9 @@ export const apiKeysRouter = router({
       targetUserId: uuid,
       name: z.string().min(1).max(255),
       teamId: uuid.nullable().optional(),
+      // #191 — bind the key to an account group (routes to that group's
+      // platform + accounts). null/omitted = legacy null-group → anthropic.
+      groupId: uuid.nullable().optional(),
     }),
     (_, input) => ({
       type: "api_key.issue_for_user",
@@ -242,6 +253,10 @@ export const apiKeysRouter = router({
     if (input.teamId) {
       await assertTeamBelongsToOrg(ctx.db, input.teamId, input.orgId);
     }
+    // #191 — same cross-tenant guard for the bound account group.
+    if (input.groupId) {
+      await assertGroupBelongsToOrg(ctx.db, input.groupId, input.orgId);
+    }
 
     const { raw, prefix } = generateApiKey();
     const keyHash = hashApiKey(pepper, raw);
@@ -264,6 +279,7 @@ export const apiKeysRouter = router({
         userId: input.targetUserId,
         orgId: input.orgId,
         teamId: input.teamId ?? null,
+        groupId: input.groupId ?? null,
         keyHash,
         keyPrefix: prefix,
         name: input.name,
@@ -305,6 +321,7 @@ export const apiKeysRouter = router({
         name: input.name,
         prefix: row.prefix,
         teamId: input.teamId ?? null,
+        groupId: input.groupId ?? null,
       },
     });
 
