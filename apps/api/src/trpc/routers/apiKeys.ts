@@ -45,15 +45,13 @@ function requirePepper(env: { API_KEY_HASH_PEPPER?: string }): string {
   return pepper;
 }
 
-function requireGatewayBaseUrl(env: { GATEWAY_BASE_URL?: string }): string {
-  const url = env.GATEWAY_BASE_URL;
-  if (!url) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "GATEWAY_BASE_URL not configured",
-    });
-  }
-  return url;
+// The one-time reveal page is a WEB route (apps/web/.../api-keys/reveal/[token]),
+// served from the dashboard origin — NOT the gateway. Build the reveal URL from
+// NEXTAUTH_URL (the app's public origin), trailing slash stripped.
+// (Issue #192: this used GATEWAY_BASE_URL, which pointed the link at the gateway
+// port — a Fastify proxy with no such route — so the link 404'd.)
+function revealBaseUrl(env: { NEXTAUTH_URL: string }): string {
+  return env.NEXTAUTH_URL.replace(/\/+$/, "");
 }
 
 // Generate a 32-byte URL-safe token. Used as the one-time secret in the admin
@@ -211,7 +209,7 @@ export const apiKeysRouter = router({
   ).mutation(async ({ ctx, input }) => {
     ensureGatewayEnabled(ctx.env);
     const pepper = requirePepper(ctx.env);
-    const baseUrl = requireGatewayBaseUrl(ctx.env);
+    const baseUrl = revealBaseUrl(ctx.env);
 
     // Cross-tenant integrity #1 — membership: RBAC only proves the caller is
     // an admin in `orgId`, not that `targetUserId` is actually a member of
