@@ -762,4 +762,37 @@ describe("apiKeys router", () => {
       .where(eq(apiKeys.id, result.id));
     expect(row!.groupId).toBe(groupId);
   });
+
+  it("issueForUser: groupId from another org → FORBIDDEN (cross-tenant group guard)", async () => {
+    // org_admin in orgA targets a member of orgA (membership passes) but
+    // supplies a groupId that lives in orgB. The group-org check must reject
+    // so the inserted row can't cross-bind org and account group.
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const groupInB = await makeGroup(orgB.id);
+    const adminA = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgA.id,
+      orgId: orgA.id,
+    });
+    const targetA = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: orgA.id,
+      orgId: orgA.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: adminA.id, redis });
+
+    await expect(
+      caller.apiKeys.issueForUser({
+        orgId: orgA.id,
+        targetUserId: targetA.id,
+        name: "x",
+        groupId: groupInB,
+      }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
 });
