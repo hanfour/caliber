@@ -17,6 +17,7 @@ import { authPlugin } from "./plugins/auth.js";
 import { appRouter } from "./trpc/router.js";
 import { createContextFactory } from "./trpc/context.js";
 import { buildTrpcErrorLogPayload } from "./trpc/onErrorLog.js";
+import { trpcTooManyRequestsBody } from "./trpc/rateLimitError.js";
 import {
   EVALUATOR_QUEUE_NAME,
   EVALUATOR_QUEUE_PREFIX,
@@ -149,14 +150,21 @@ export async function buildServer() {
     });
   }
 
-  // /trpc with rate limit 600/min/user (fall back to IP if no user)
+  // /trpc rate limit: API_TRPC_RPM_LIMIT/min PER authenticated user (fall back
+  // to IP only when unauthenticated). 0 disables. The 429 body is tRPC-shaped
+  // (see trpcTooManyRequestsBody) so the web client gets a clean
+  // TOO_MANY_REQUESTS error instead of "Unable to transform response". (#193)
   await app.register(
     async (scope) => {
-      await scope.register(rateLimit, {
-        max: 600,
-        timeWindow: "1 minute",
-        keyGenerator: (req) => req.user?.id ?? req.ip,
-      });
+      if (env.API_TRPC_RPM_LIMIT > 0) {
+        await scope.register(rateLimit, {
+          max: env.API_TRPC_RPM_LIMIT,
+          timeWindow: "1 minute",
+          keyGenerator: (req) => req.user?.id ?? req.ip,
+          errorResponseBuilder: (req, context) =>
+            trpcTooManyRequestsBody(req, context.after),
+        });
+      }
       await scope.register(fastifyTRPCPlugin, {
         prefix: "",
         trpcOptions: {

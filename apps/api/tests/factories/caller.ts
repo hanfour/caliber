@@ -81,6 +81,7 @@ export const defaultTestEnv: ServerEnv = {
   GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL: "https://console.anthropic.com/v1/oauth/token",
   GATEWAY_QUEUE_SATURATE_THRESHOLD: 5000,
   GATEWAY_APIKEY_RPM_LIMIT: 600,
+  API_TRPC_RPM_LIMIT: 2000,
   GATEWAY_CACHE_TTL_SEC: 0,
   GATEWAY_LOCAL_BASE_URL: "http://localhost:3002",
   ENABLE_EVALUATOR: true,

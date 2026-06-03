@@ -217,6 +217,13 @@ export const serverEnvSchema = z
     GATEWAY_APIKEY_RPM_LIMIT: emptyAsUndefined(
       z.coerce.number().int().min(0).default(600),
     ),
+    // API server /trpc rate limit — requests-per-minute PER authenticated user
+    // (falls back to IP only when unauthenticated). The dashboard fires several
+    // batched tRPC requests per page plus React-Query refetch-on-focus, so the
+    // default is generous; 0 disables enforcement. (#193)
+    API_TRPC_RPM_LIMIT: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(2000),
+    ),
     // Phase 3 #2 — response-cache TTL. 0 disables caching. Cache scope is
     // (orgId, platform, request_body_bytes) → upstream response, only for
     // 200 + non-streaming + body < 64 KiB.  See
