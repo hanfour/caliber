@@ -62,6 +62,9 @@ export async function withSlotAndCredential<T>(
   if (!acquired) {
     throw { status: 503, message: "account_at_capacity" };
   }
+  // gw_slot_hold_duration_seconds (issue #190) — time the slot hold
+  // (acquire → release) and observe it in the finally below.
+  const slotAcquiredMs = Date.now();
   try {
     let credential = await resolveCredential(app.db, account.id, {
       masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
@@ -86,6 +89,9 @@ export async function withSlotAndCredential<T>(
     }
     return await fn(credential);
   } finally {
+    app.gwMetrics.slotHoldDurationSeconds.observe(
+      (Date.now() - slotAcquiredMs) / 1000,
+    );
     await releaseSlot(app.redis, "account", account.id, requestId).catch(
       () => {
         // Slot expires on its own within SLOT_DURATION_MS.

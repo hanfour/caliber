@@ -171,7 +171,10 @@ async function metricsPluginBody(
   // meaningful instead of collapsing into +Inf.
   const upstreamDurationSeconds = new Histogram({
     name: "gw_upstream_duration_seconds",
-    help: "Upstream API call duration",
+    // Observed from emitUsageLog's durationMs (issue #190): end-to-end request
+    // duration, dominated by the upstream LLM call (translation / credential /
+    // slot acquire are sub-/low-ms).
+    help: "End-to-end request duration (dominated by the upstream API call)",
     buckets: [0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300],
     registers: [register],
   });

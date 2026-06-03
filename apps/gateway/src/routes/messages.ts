@@ -302,6 +302,8 @@ async function runNonStreamFailover(
       if (!acquired) {
         throw new CapacityError();
       }
+      // gw_slot_hold_duration_seconds (issue #190) — time slot hold.
+      const slotAcquiredMs = Date.now();
       try {
         let credential = await resolveCredential(app.db, account.id, {
           masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
@@ -413,6 +415,9 @@ async function runNonStreamFailover(
         );
         throw err;
       } finally {
+        app.gwMetrics.slotHoldDurationSeconds.observe(
+          (Date.now() - slotAcquiredMs) / 1000,
+        );
         await releaseSlot(app.redis, "account", account.id, requestId).catch(
           () => {
             // Intentionally swallowed — slot expires on its own within SLOT_DURATION_MS.
@@ -506,6 +511,8 @@ async function runStreamingFailover(
       if (!acquired) {
         throw new CapacityError();
       }
+      // gw_slot_hold_duration_seconds (issue #190) — time slot hold.
+      const slotAcquiredMs = Date.now();
 
       // Per-attempt state — reset on each failover retry so a successful
       // second account doesn't inherit the first account's (failed) counters.
@@ -762,6 +769,9 @@ async function runStreamingFailover(
           attemptErrors: errMsg,
         });
       } finally {
+        app.gwMetrics.slotHoldDurationSeconds.observe(
+          (Date.now() - slotAcquiredMs) / 1000,
+        );
         await releaseSlot(app.redis, "account", account.id, requestId).catch(
           () => {},
         );

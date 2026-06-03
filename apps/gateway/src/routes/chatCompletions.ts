@@ -198,6 +198,8 @@ export function makeChatCompletionsAnthropicHandler(
             // Treat as a transient failure so failover loop tries another account.
             throw { status: 503, message: "account_at_capacity" };
           }
+          // gw_slot_hold_duration_seconds (issue #190) — time slot hold.
+          const slotAcquiredMs = Date.now();
           try {
             let credential = await resolveCredential(app.db, account.id, {
               masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
@@ -298,6 +300,9 @@ export function makeChatCompletionsAnthropicHandler(
               parsed as Parameters<typeof translateAnthropicToOpenAI>[0],
             );
           } finally {
+            app.gwMetrics.slotHoldDurationSeconds.observe(
+              (Date.now() - slotAcquiredMs) / 1000,
+            );
             await releaseSlot(
               app.redis,
               "account",
@@ -406,6 +411,8 @@ async function runChatCompletionsStreamingFailover(
         if (!acquired) {
           throw { status: 503, message: "account_at_capacity" };
         }
+        // gw_slot_hold_duration_seconds (issue #190) — time slot hold.
+        const slotAcquiredMs = Date.now();
 
         try {
           let credential = await resolveCredential(app.db, account.id, {
@@ -532,6 +539,9 @@ async function runChatCompletionsStreamingFailover(
           });
           return undefined as never;
         } finally {
+          app.gwMetrics.slotHoldDurationSeconds.observe(
+            (Date.now() - slotAcquiredMs) / 1000,
+          );
           await releaseSlot(app.redis, "account", account.id, requestId).catch(
             () => {
               // Slot expires on its own.

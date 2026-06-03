@@ -73,6 +73,7 @@ function makeApp(
 ): FastifyInstance {
   const pricingMissInc = vi.fn();
   const persistLostInc = vi.fn();
+  const upstreamDurationObserve = vi.fn();
   const app = {
     db: { __marker: "fake-db" },
     usageLogQueue:
@@ -80,6 +81,7 @@ function makeApp(
     gwMetrics: {
       pricingMissTotal: { inc: pricingMissInc },
       usagePersistLostTotal: { inc: persistLostInc },
+      upstreamDurationSeconds: { observe: upstreamDurationObserve },
     },
   };
   return app as unknown as FastifyInstance;
@@ -426,6 +428,10 @@ describe("emitUsageLog", () => {
     expect(payload.requestId).toBe("req-emit-happy");
     expect(payload.platform).toBe("anthropic");
     expect(payload.surface).toBe("messages");
+    // gw_upstream_duration_seconds (issue #190): durationMs=50 → observe(0.05s).
+    expect(app.gwMetrics.upstreamDurationSeconds.observe).toHaveBeenCalledWith(
+      0.05,
+    );
     // pricingMissTotal.inc should NOT have been called for a known model.
     expect(app.gwMetrics.pricingMissTotal.inc).not.toHaveBeenCalled();
   });

@@ -543,6 +543,13 @@ export async function emitUsageLog(input: EmitUsageLogInput): Promise<void> {
   // `buildUsageLogPayload`, the pricing-miss metering, AND the enqueue
   // — so any thrown error lands here and is logged, not propagated.
   try {
+    // gw_upstream_duration_seconds (issue #190): observe end-to-end request
+    // latency. durationMs is dominated by the upstream LLM call (translation /
+    // credential / slot acquire are sub-/low-ms), so this is a faithful proxy
+    // for upstream latency. Emitted here because every surface funnels through
+    // emitUsageLog with a durationMs measured against the same startedAtMs.
+    app.gwMetrics.upstreamDurationSeconds.observe(input.durationMs / 1000);
+
     const { payload, cost } = await buildUsageLogPayload({
       req,
       requestedModel: input.requestedModel,
