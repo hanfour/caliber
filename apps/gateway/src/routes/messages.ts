@@ -323,9 +323,6 @@ async function runNonStreamFailover(
             },
           );
         }
-        // TODO(part-6): wait queue admission control
-        // TODO(part-6): sticky session lookup
-        // TODO(part-6): idempotency cache check
 
         const upstream = await callUpstreamMessages({
           baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,

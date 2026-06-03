@@ -108,4 +108,21 @@ describe('metricsPlugin', () => {
     expect(res1.statusCode).toBe(200)
     expect(res2.statusCode).toBe(200)
   })
+
+  it('8. upstream/slot-hold histograms carry LLM-range buckets (>10s)', async () => {
+    const app = await buildTestApp()
+    apps.push(app)
+    // A 45s observation must land in a finite bucket, not +Inf — proving the
+    // buckets extend past the prom-client 10s default cap.
+    app.gwMetrics.upstreamDurationSeconds.observe(45)
+    app.gwMetrics.slotHoldDurationSeconds.observe(45)
+    const res = await app.inject({ method: 'GET', url: '/metrics' })
+    const body = res.body
+    expect(body).toContain('gw_upstream_duration_seconds_bucket{le="60"}')
+    expect(body).toContain('gw_slot_hold_duration_seconds_bucket{le="60"}')
+    // Default buckets top out at 10 and have no le="60"; confirm the 45s
+    // observation is captured at le="60" (count 1) but not at le="10".
+    expect(body).toMatch(/gw_upstream_duration_seconds_bucket\{le="10"\} 0/)
+    expect(body).toMatch(/gw_upstream_duration_seconds_bucket\{le="60"\} 1/)
+  })
 })
