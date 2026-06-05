@@ -427,6 +427,95 @@ export const accountsRouter = router({
   }),
 
   /**
+   * In-place credential rotation for the caller's own upstream. Replaces the
+   * encrypted secret in credential_vault WITHOUT deleting the upstream_accounts
+   * row, so the account id and any associated usage history survive intact.
+   * Ownership is enforced via account.manage_own (same as updateOwn/deleteOwn).
+   * Only api_key is supported in P1 (mirrors registerOwn).
+   */
+  rotateOwn: permissionProcedure(
+    z.object({
+      id: uuid,
+      credentials: z.string().min(1).max(100_000),
+    }),
+    () => ({ type: "account.register_own" as const }),
+  ).mutation(async ({ ctx, input }) => {
+    ensureGatewayEnabled(ctx.env);
+    const masterKeyHex = requireMasterKeyHex(ctx.env);
+
+    const [existing] = await ctx.db
+      .select()
+      .from(upstreamAccounts)
+      .where(
+        and(
+          eq(upstreamAccounts.id, input.id),
+          isNull(upstreamAccounts.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (
+      !existing ||
+      !can(ctx.perm, {
+        type: "account.manage_own",
+        // null = admin/pool-owned row; "" never equals a real UUID, so members are correctly denied
+        ownerUserId: existing.userId ?? "",
+      })
+    ) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "upstream not found" });
+    }
+
+    const sealed = encryptCredential({
+      masterKeyHex,
+      accountId: existing.id,
+      plaintext: buildCredentialPlaintext("api_key", input.credentials),
+    });
+
+    const rotatedAt = new Date();
+
+    await ctx.db.transaction(async (tx) => {
+      // UPDATE the existing vault row in-place — the unique constraint on
+      // accountId guarantees exactly one row. Use .returning() to detect a
+      // missing vault row (legacy data, partial fixture) instead of silently
+      // no-oping.
+      const updated = await tx
+        .update(credentialVault)
+        .set({
+          nonce: sealed.nonce,
+          ciphertext: sealed.ciphertext,
+          authTag: sealed.authTag,
+          rotatedAt,
+        })
+        .where(eq(credentialVault.accountId, existing.id))
+        .returning({ id: credentialVault.id });
+      if (updated.length !== 1) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "credential_vault row missing for account",
+        });
+      }
+
+      await tx
+        .update(upstreamAccounts)
+        .set({ updatedAt: rotatedAt })
+        .where(eq(upstreamAccounts.id, existing.id));
+
+      await writeAudit(tx, {
+        actorUserId: ctx.user.id,
+        action: "account.rotated_own",
+        targetType: "upstream_account",
+        targetId: existing.id,
+        orgId: existing.orgId,
+        metadata: {
+          name: existing.name,
+          platform: existing.platform,
+        },
+      });
+    });
+
+    return { id: existing.id, rotatedAt };
+  }),
+
+  /**
    * Soft-delete the caller's own upstream. Same ownership check via
    * account.manage_own RBAC action.
    */
