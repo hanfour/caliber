@@ -97,4 +97,6 @@ export type Action =
       type: "enrollment_token.issue_for_user";
       orgId: string;
       targetUserId: string;
-    };
+    }
+  | { type: "account.register_own" }
+  | { type: "account.manage_own"; ownerUserId: string };

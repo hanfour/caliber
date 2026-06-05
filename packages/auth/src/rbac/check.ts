@@ -192,7 +192,10 @@ export function can(perm: UserPermissions, action: Action): boolean {
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "device.list_own":
     case "enrollment_token.issue_own":
+    case "account.register_own":
       return true;
+    case "account.manage_own":
+      return perm.userId === action.ownerUserId;
     case "device.revoke":
       if (action.ownerUserId === perm.userId) return true; // self-revoke
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
