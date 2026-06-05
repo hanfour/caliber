@@ -13,6 +13,7 @@ import { apiKeyAuthPlugin } from "./middleware/apiKeyAuth.js";
 import { rateLimitPlugin } from "./middleware/rateLimitPlugin.js";
 import { waitQueuePlugin } from "./middleware/waitQueuePlugin.js";
 import { groupContextPlugin } from "./middleware/groupContext.js";
+import { gatewayErrorHandler } from "./middleware/errorHandler.js";
 import { messagesRoutes } from "./routes/messages.js";
 import { chatCompletionsRoutes } from "./routes/chatCompletions.js";
 import { responsesRoutes } from "./routes/responses.js";
@@ -141,6 +142,13 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
     trustProxy: parseTrustedProxies(opts.env.GATEWAY_TRUSTED_PROXIES),
   });
   app.decorate("env", opts.env);
+  // Global SAFETY NET for errors that escape per-route handling. Registered at
+  // the root so every route/plugin (incl. /health and the disabled-gateway
+  // path) inherits it. Routes that already send explicit `reply.code().send()`
+  // responses are UNAFFECTED — this only fires for genuinely-uncaught throws
+  // (e.g. the BYOK `platformForGatewayRoute` throw on an unmapped route, or a
+  // route catch block's terminal `throw err`). See errorHandler.ts.
+  app.setErrorHandler(gatewayErrorHandler);
   await app.register(metricsPlugin);
   app.get("/health", async () =>
     enabled ? { status: "ok" } : { status: "disabled" },

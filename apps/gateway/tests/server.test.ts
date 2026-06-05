@@ -144,6 +144,23 @@ describe("gateway server", () => {
   // time and would hang in CI without it. Keeping that case unit-side caused
   // a hidden localhost:6379 dependency.
 
+  it("buildServer registers the setErrorHandler safety net (uncaught throw → clean 500, not a Fastify 500 default with stack)", async () => {
+    // Use the disabled-gateway path: it registers NO apiKeyAuthPlugin, so a
+    // throwaway throwing route reaches the global handler without auth/db
+    // machinery to mock. Proves `app.setErrorHandler(gatewayErrorHandler)` is
+    // wired in buildServer (the handler's branch behaviour is covered in
+    // tests/middleware/errorHandler.test.ts).
+    const app = await buildServer({ env: makeEnv() });
+    app.get("/boom", async () => {
+      throw new Error("super-secret-internal-detail");
+    });
+    const res = await app.inject({ method: "GET", url: "/boom" });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toMatchObject({ error: "internal_error" });
+    expect(res.payload).not.toContain("super-secret-internal-detail");
+    await app.close();
+  });
+
   it("app.close() is idempotent / does not throw when BullMQ wiring is skipped", async () => {
     // Regression guard: the onClose hook only fires when wireUsageLogPipeline()
     // ran, so the test-mode path (opts.redis injected) must close cleanly with
