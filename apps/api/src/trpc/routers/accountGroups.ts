@@ -334,6 +334,7 @@ export const accountGroupsRouter = router({
             id: upstreamAccounts.id,
             orgId: upstreamAccounts.orgId,
             platform: upstreamAccounts.platform,
+            userId: upstreamAccounts.userId,
           })
           .from(upstreamAccounts)
           .where(
@@ -385,6 +386,18 @@ export const accountGroupsRouter = router({
               groupPlatform: group.platform,
             },
           ),
+        });
+      }
+      // Admin-facing developer message — intentionally plain English, no i18n key (unlike the org/platform-mismatch guards above that use formatValidationKey).
+      // BYOK guard — user-owned upstreams (userId IS NOT NULL) must never
+      // enter a pool group. Pool groups are shared across the org; adding a
+      // user's personal credentials here would expose them to every user
+      // routed through the pool.
+      if (account.userId !== null) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "user-owned (BYOK) upstreams cannot be added to a pool group",
         });
       }
 
