@@ -98,4 +98,14 @@ describe("account.manage_own", () => {
       }),
     ).toBe(true);
   });
+
+  it("an org_admin is denied manage_own on another user's upstream (no bypass; only super_admin)", () => {
+    const orgAdmin = makePerm(
+      [{ role: "org_admin", scopeType: "organization", scopeId: "org1" }],
+      "admin-1",
+    );
+    expect(
+      can(orgAdmin, { type: "account.manage_own", ownerUserId: "someone-else" }),
+    ).toBe(false);
+  });
 });

@@ -426,8 +426,13 @@ Expected: FAIL — procedures not defined.
 
 - [ ] **Step 3: Implement the three procedures**
 
-Add to `accountsRouter`. A small `loadOwnedAccount(tx, id, userId)` helper enforces ownership before
-mutate/delete; the RBAC action carries the row's owner:
+Add to `accountsRouter`. The procedure-level `permissionProcedure` gate is `account.register_own`
+(it runs before any DB access so it cannot know the row's owner). Ownership is then enforced
+**inside the handler via the `account.manage_own` RBAC action** — so the rule lives in RBAC (and
+super_admin keeps break-glass) rather than as an ad-hoc field compare, and `account.manage_own` is a
+live, tested action instead of dead code. Import `can` from `@caliber/auth`; `ctx.permissions` is the
+`UserPermissions` the permissionProcedure middleware already resolves (verify its exact name on
+`ctx`).
 
 ```ts
 listOwn: permissionProcedure(z.void(), () => ({ type: "account.register_own" }))
@@ -452,7 +457,7 @@ updateOwn: permissionProcedure(
   ensureGatewayEnabled(ctx.env);
   const [existing] = await ctx.db.select().from(upstreamAccounts)
     .where(and(eq(upstreamAccounts.id, input.id), isNull(upstreamAccounts.deletedAt)));
-  if (!existing || existing.userId !== ctx.user.id) {
+  if (!existing || !can(ctx.permissions, { type: "account.manage_own", ownerUserId: existing.userId })) {
     throw new TRPCError({ code: "NOT_FOUND", message: "upstream not found" });
   }
   const [row] = await ctx.db.update(upstreamAccounts).set({
@@ -469,7 +474,7 @@ deleteOwn: permissionProcedure(z.object({ id: uuid }), () => ({ type: "account.r
     ensureGatewayEnabled(ctx.env);
     const [existing] = await ctx.db.select().from(upstreamAccounts)
       .where(and(eq(upstreamAccounts.id, input.id), isNull(upstreamAccounts.deletedAt)));
-    if (!existing || existing.userId !== ctx.user.id) {
+    if (!existing || !can(ctx.permissions, { type: "account.manage_own", ownerUserId: existing.userId })) {
       throw new TRPCError({ code: "NOT_FOUND", message: "upstream not found" });
     }
     await ctx.db.update(upstreamAccounts).set({ deletedAt: new Date() })
