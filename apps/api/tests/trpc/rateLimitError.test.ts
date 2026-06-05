@@ -55,4 +55,20 @@ describe("trpcTooManyRequestsBody", () => {
     const body = trpcTooManyRequestsBody({}, "5 seconds");
     expect(body).toMatchObject({ error: { data: { path: null } } });
   });
+
+  it("carries a non-enumerable statusCode 429 for fastify, hidden from JSON", () => {
+    // @fastify/rate-limit throws this value; fastify's error handler reads
+    // `.statusCode` for the response code. It must be 429 (not the 500 default)
+    // but must not appear in the serialised body. Checked for both shapes.
+    for (const url of ["/trpc/me.session", "/trpc/a.b,c.d?batch=1"]) {
+      const body = trpcTooManyRequestsBody({ url }, "5 seconds") as {
+        statusCode?: number;
+      };
+      expect(body.statusCode).toBe(429);
+      expect(
+        Object.prototype.propertyIsEnumerable.call(body, "statusCode"),
+      ).toBe(false);
+      expect(JSON.stringify(body)).not.toContain("statusCode");
+    }
+  });
 });

@@ -21,9 +21,29 @@ interface TrpcErrorEnvelope {
 }
 
 /**
+ * Tag the payload with a non-enumerable `statusCode: 429`.
+ *
+ * @fastify/rate-limit@10 does `throw errorResponseBuilder(req, ctx)` on exceed
+ * (index.js), so the return value reaches fastify's error handler, which derives
+ * the HTTP status from the thrown value's `.statusCode` (defaulting to 500). The
+ * library's own default builder returns an Error carrying `statusCode: 429`; our
+ * tRPC-shaped payload is a plain object/array, so without this marker the
+ * response is a (wrong) 500 even though the body is correct. The property is
+ * non-enumerable so it never serialises into the JSON wire body.
+ */
+function withStatus429<T extends object>(payload: T): T {
+  return Object.defineProperty(payload, "statusCode", {
+    value: 429,
+    enumerable: false,
+  });
+}
+
+/**
  * Build the rate-limit 429 response body. Returns an array (one envelope per
  * batched op) for `?batch=...` requests, else a single envelope. `req.url` is
  * the full request URL (e.g. `/trpc/me.session,organizations.list?batch=1`).
+ * The returned value also carries a non-enumerable `statusCode: 429` so that,
+ * once thrown by @fastify/rate-limit, fastify responds 429 rather than 500.
  */
 export function trpcTooManyRequestsBody(
   req: { url?: string },
@@ -46,7 +66,7 @@ export function trpcTooManyRequestsBody(
   );
   if (/[?&]batch=/.test(url)) {
     const procs = procPath ? procPath.split(",") : [""];
-    return procs.map((p) => mk(p || null));
+    return withStatus429(procs.map((p) => mk(p || null)));
   }
-  return mk(procPath || null);
+  return withStatus429(mk(procPath || null));
 }
