@@ -113,12 +113,28 @@ export const apiKeysRouter = router({
       // #191 — bind the key to an account group (routes to that group's
       // platform + accounts). null/omitted = legacy null-group → anthropic.
       groupId: uuid.nullable().optional(),
+      // BYOK Task 6 — controls which upstream accounts are eligible for this key.
+      routingPolicy: z.enum(["pool", "own", "own_then_pool"]).optional(),
     }),
     () => ({ type: "api_key.issue_own" }),
   ).mutation(async ({ ctx, input }) => {
     ensureGatewayEnabled(ctx.env);
     const pepper = requirePepper(ctx.env);
     const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
+
+    const routingPolicy = input.routingPolicy ?? "pool";
+    // A non-pool routing policy targets user-owned accounts directly; combining
+    // it with a groupId (which targets a shared account group) is semantically
+    // contradictory. The DB also enforces this via CHECK, but we surface a
+    // clean BAD_REQUEST here so callers get a useful message. Guard fires
+    // before any DB round-trips so unconditionally invalid requests are
+    // rejected immediately.
+    if (routingPolicy !== "pool" && input.groupId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "routing_policy and group_id are mutually exclusive",
+      });
+    }
 
     // Cross-tenant integrity: if the caller pinned a team, it must live in
     // their resolved org. Without this a member could self-issue a key whose
@@ -146,6 +162,7 @@ export const apiKeysRouter = router({
         name: input.name,
         status: "active",
         issuedByUserId: null,
+        routingPolicy,
       })
       .returning({ id: apiKeys.id, prefix: apiKeys.keyPrefix });
     if (!row) {
