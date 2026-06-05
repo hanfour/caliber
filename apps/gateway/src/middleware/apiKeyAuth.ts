@@ -18,6 +18,7 @@ declare module "fastify" {
       groupId: string | null;
       quotaUsd: string;
       quotaUsedUsd: string;
+      routingPolicy: "pool" | "own" | "own_then_pool";
     } | null;
     gwUser: { id: string; email: string } | null;
     gwOrg: {
@@ -138,6 +139,7 @@ async function pluginBody(
       groupId: row.apiKey.groupId,
       quotaUsd: row.apiKey.quotaUsd,
       quotaUsedUsd: row.apiKey.quotaUsedUsd,
+      routingPolicy: row.apiKey.routingPolicy as "pool" | "own" | "own_then_pool",
     };
     req.gwUser = row.user;
     req.gwOrg = {
