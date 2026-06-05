@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { upstreamAccounts, credentialVault } from "@caliber/db";
 import type { Database } from "@caliber/db";
@@ -341,6 +341,138 @@ export const accountsRouter = router({
     });
 
     return insertedRow;
+  }),
+
+  /**
+   * Returns all non-deleted upstreams owned by the calling user.
+   */
+  listOwn: permissionProcedure(z.void(), () => ({
+    type: "account.register_own" as const,
+  })).query(async ({ ctx }) => {
+    ensureGatewayEnabled(ctx.env);
+    return ctx.db
+      .select()
+      .from(upstreamAccounts)
+      .where(
+        and(
+          eq(upstreamAccounts.userId, ctx.user.id),
+          isNull(upstreamAccounts.deletedAt),
+        ),
+      )
+      .orderBy(asc(upstreamAccounts.createdAt));
+  }),
+
+  /**
+   * Metadata-only update (name / schedulable / priority) for the caller's own
+   * upstream. Credentials are not touched — rotation = deleteOwn + registerOwn.
+   * Ownership is enforced via the account.manage_own RBAC action so super_admin
+   * keeps break-glass access.
+   */
+  updateOwn: permissionProcedure(
+    z.object({
+      id: uuid,
+      name: z.string().min(1).max(255).optional(),
+      schedulable: z.boolean().optional(),
+      priority: z.number().int().min(0).max(1000).optional(),
+    }),
+    () => ({ type: "account.register_own" as const }),
+  ).mutation(async ({ ctx, input }) => {
+    ensureGatewayEnabled(ctx.env);
+    const [existing] = await ctx.db
+      .select()
+      .from(upstreamAccounts)
+      .where(
+        and(
+          eq(upstreamAccounts.id, input.id),
+          isNull(upstreamAccounts.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (
+      !existing ||
+      !can(ctx.perm, {
+        type: "account.manage_own",
+        // null = admin/pool-owned row; "" never equals a real UUID, so members are correctly denied
+        ownerUserId: existing.userId ?? "",
+      })
+    ) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "upstream not found" });
+    }
+    const [row] = await ctx.db
+      .update(upstreamAccounts)
+      .set({
+        name: input.name ?? existing.name,
+        schedulable: input.schedulable ?? existing.schedulable,
+        priority: input.priority ?? existing.priority,
+        updatedAt: new Date(),
+      })
+      .where(eq(upstreamAccounts.id, input.id))
+      .returning();
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "upstream not found" });
+
+    await writeAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "account.updated_own",
+      targetType: "upstream_account",
+      targetId: input.id,
+      orgId: existing.orgId,
+      metadata: {
+        name: row.name,
+        schedulable: row.schedulable,
+        priority: row.priority,
+      },
+    });
+
+    return row;
+  }),
+
+  /**
+   * Soft-delete the caller's own upstream. Same ownership check via
+   * account.manage_own RBAC action.
+   */
+  deleteOwn: permissionProcedure(
+    z.object({ id: uuid }),
+    () => ({ type: "account.register_own" as const }),
+  ).mutation(async ({ ctx, input }) => {
+    ensureGatewayEnabled(ctx.env);
+    const [existing] = await ctx.db
+      .select()
+      .from(upstreamAccounts)
+      .where(
+        and(
+          eq(upstreamAccounts.id, input.id),
+          isNull(upstreamAccounts.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (
+      !existing ||
+      !can(ctx.perm, {
+        type: "account.manage_own",
+        // null = admin/pool-owned row; "" never equals a real UUID, so members are correctly denied
+        ownerUserId: existing.userId ?? "",
+      })
+    ) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "upstream not found" });
+    }
+    await ctx.db
+      .update(upstreamAccounts)
+      .set({ deletedAt: new Date() })
+      .where(eq(upstreamAccounts.id, input.id));
+
+    await writeAudit(ctx.db, {
+      actorUserId: ctx.user.id,
+      action: "account.deleted_own",
+      targetType: "upstream_account",
+      targetId: input.id,
+      orgId: existing.orgId,
+      metadata: {
+        name: existing.name,
+        platform: existing.platform,
+      },
+    });
+
+    return { id: input.id };
   }),
 
   update: protectedProcedure
