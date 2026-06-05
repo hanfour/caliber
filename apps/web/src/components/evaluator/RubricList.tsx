@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Plus, FlaskConical, BookOpen, MoreHorizontal, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -53,15 +54,18 @@ function RubricRowActions({
   const { can } = usePermissions();
   const t = useTranslations("evaluator.rubrics");
   const tCommon = useTranslations("common");
+  const confirm = useConfirm();
   const isPlatformDefault = row.orgId === null;
   const canUpdate = !isPlatformDefault && can({ type: "rubric.update", orgId, rubricId: row.id });
   const canDelete = !isPlatformDefault && can({ type: "rubric.delete", orgId, rubricId: row.id });
   const canSetActive = can({ type: "rubric.update", orgId, rubricId: row.id });
   const isActive = activeRubricId === row.id;
 
-  const handleDelete = () => {
-    if (typeof window === "undefined") return;
-    const ok = window.confirm(t("confirmDelete", { name: row.name }));
+  const handleDelete = async () => {
+    const ok = await confirm({
+      description: t("confirmDelete", { name: row.name }),
+      destructive: true,
+    });
     if (!ok) return;
     onDelete(row);
   };

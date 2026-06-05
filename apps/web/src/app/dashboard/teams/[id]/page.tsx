@@ -19,10 +19,12 @@ import {
   DialogTitle,
   DialogTrigger
 } from '@/components/ui/dialog'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 export default function TeamDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const confirm = useConfirm()
   const teamId = params?.id as string
   const [searchEmail, setSearchEmail] = useState('')
   const [editOpen, setEditOpen] = useState(false)
@@ -159,9 +161,13 @@ export default function TeamDetailPage() {
                 variant="destructive"
                 className="gap-1.5"
                 disabled={deleteTeam.isPending}
-                onClick={() => {
+                onClick={async () => {
                   if (!team?.name) return
-                  if (!window.confirm(`Delete team "${team.name}"?`)) return
+                  const ok = await confirm({
+                    description: `Delete team "${team.name}"?`,
+                    destructive: true,
+                  })
+                  if (!ok) return
                   deleteTeam.mutate({ id: teamId })
                 }}
               >

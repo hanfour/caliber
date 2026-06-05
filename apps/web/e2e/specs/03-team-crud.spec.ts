@@ -50,9 +50,13 @@ test("org_admin can create, rename, and delete a team through the UI", async ({
   await page.getByRole("button", { name: /save|update/i }).click();
   await expect(page.getByRole("heading", { name: renamed })).toBeVisible();
 
-  // Delete — accept the confirm dialog.
-  page.on("dialog", (d) => d.accept());
+  // Delete — confirm via the in-app confirm dialog (replaces the old native
+  // window.confirm; see #199).
   await page.getByRole("button", { name: /delete team|remove/i }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /^(confirm|delete|確認|確定)/i })
+    .click();
   await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${orgId}/teams`));
   await expect(page.locator("tbody tr", { hasText: renamed })).toHaveCount(0);
 });

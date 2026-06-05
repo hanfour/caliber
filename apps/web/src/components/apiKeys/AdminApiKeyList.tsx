@@ -4,6 +4,7 @@ import { useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -41,6 +42,7 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const t = useTranslations("memberApiKeys");
   const tCommon = useTranslations("common");
+  const confirm = useConfirm();
   const {
     data: keys,
     isLoading,
@@ -61,9 +63,11 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
     onSettled: () => setRevokingId(null),
   });
 
-  const handleRevoke = (row: AdminKeyRow) => {
-    if (typeof window === "undefined") return;
-    const ok = window.confirm(t("confirmRevoke", { name: row.name }));
+  const handleRevoke = async (row: AdminKeyRow) => {
+    const ok = await confirm({
+      description: t("confirmRevoke", { name: row.name }),
+      destructive: true,
+    });
     if (!ok) return;
     setRevokingId(row.id);
     revoke.mutate({ id: row.id });

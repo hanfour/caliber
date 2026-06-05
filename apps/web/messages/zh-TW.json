@@ -6,6 +6,8 @@
     "saving": "儲存中…",
     "saveChanges": "儲存變更",
     "cancel": "取消",
+    "confirm": "確認",
+    "confirmTitle": "確定嗎？",
     "create": "建立",
     "creating": "建立中…",
     "delete": "刪除",

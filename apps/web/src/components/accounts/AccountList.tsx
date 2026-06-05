@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -48,6 +49,7 @@ function AccountRowActions({
   const { can } = usePermissions();
   const t = useTranslations("accounts");
   const tCommon = useTranslations("common");
+  const confirm = useConfirm();
   const canRotate = can({ type: "account.rotate", orgId, accountId: row.id });
   const canUpdate = can({ type: "account.update", orgId, accountId: row.id });
   const canDelete = can({ type: "account.delete", orgId, accountId: row.id });
@@ -57,9 +59,11 @@ function AccountRowActions({
   // a dead trigger.
   if (!canRotate && !canUpdate && !canDelete) return null;
 
-  const handleDelete = () => {
-    if (typeof window === "undefined") return;
-    const ok = window.confirm(t("confirmDelete", { name: row.name }));
+  const handleDelete = async () => {
+    const ok = await confirm({
+      description: t("confirmDelete", { name: row.name }),
+      destructive: true,
+    });
     if (!ok) return;
     onDelete(row);
   };

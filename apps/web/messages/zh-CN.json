@@ -6,6 +6,8 @@
     "saving": "保存中…",
     "saveChanges": "保存更改",
     "cancel": "取消",
+    "confirm": "确认",
+    "confirmTitle": "确定吗？",
     "create": "创建",
     "creating": "创建中…",
     "delete": "删除",
