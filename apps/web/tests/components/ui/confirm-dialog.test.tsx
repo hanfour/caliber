@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   ConfirmDialogProvider,
@@ -76,6 +76,42 @@ describe("useConfirm / ConfirmDialogProvider", () => {
 
     unmount();
     await waitFor(() => expect(onResult).toHaveBeenCalledWith(false));
+  });
+
+  it("cancels a pending prompt (resolves false) when confirm() is called again", async () => {
+    // The modal blocks page clicks while open, so a second prompt can only be
+    // raised programmatically — capture confirm() and drive it directly to
+    // exercise the re-entrancy guard.
+    const user = userEvent.setup();
+    let confirmFn: ((o: { description: string }) => Promise<boolean>) | null =
+      null;
+    function Capture() {
+      confirmFn = useConfirm();
+      return null;
+    }
+    render(
+      <ConfirmDialogProvider>
+        <Capture />
+      </ConfirmDialogProvider>,
+    );
+
+    const first = vi.fn();
+    const second = vi.fn();
+    await act(async () => {
+      confirmFn!({ description: "First?" }).then(first);
+    });
+    await screen.findByText("First?");
+
+    await act(async () => {
+      confirmFn!({ description: "Second?" }).then(second);
+    });
+    // The first promise is settled as cancelled; the second prompt is shown.
+    await waitFor(() => expect(first).toHaveBeenCalledWith(false));
+    expect(await screen.findByText("Second?")).toBeInTheDocument();
+    expect(second).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(second).toHaveBeenCalledWith(true));
   });
 
   it("throws when useConfirm is used outside the provider", () => {
