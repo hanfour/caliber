@@ -44,11 +44,12 @@ vision was decomposed into four independent sub-projects:
 
 Three cohesive changes, all backward-compatible (existing keys/upstreams behave exactly as today):
 
-1. **Data model** — `upstream_accounts.user_id` (ownership) + `api_keys.routing_policy` (candidate-set policy).
+1. **Data model** — `upstream_accounts.user_id` (ownership) + `api_keys.routing_policy` (candidate-set policy), plus schema-level CHECK guards (§1.4).
 2. **Self-service API surface** — non-admin tRPC mutations to register/list/update/delete *own*
    upstreams, plus a `routingPolicy` param on `apiKeys.issueOwn`, gated by ownership RBAC.
-3. **Scheduler routing** — `listSchedulableCandidates` branches on `routing_policy`, enforcing two
-   isolation invariants.
+3. **Scheduler routing** — a groupless, surface-derived platform context for non-pool keys (§3.1),
+   and `listSchedulableCandidates` (+ the forced/probe and sticky paths) branch on `routing_policy`,
+   enforcing the isolation invariants of §1.3 on **every** selection path.
 
 ## 1. Data Model
 
@@ -90,10 +91,34 @@ Add `routing_policy` enum, default **`pool`**:
    dangerous leak. This filter closes it.
 2. **An `own` request only schedules the caller's own upstreams** (`user_id = api_key.user_id`),
    across both platforms from a single key.
+3. **The ownership predicate is applied on EVERY account-selection path, not only the candidate
+   query.** The scheduler resolves an account through several paths besides
+   `listSchedulableCandidates` — the **forced / probe** path (`probeAccount` /
+   `loadSchedulableAccount`, which loads a caller-named account) and the **sticky** layers
+   (`getRespSticky` / `getSessionSticky`). A stale sticky entry or a future forced path could
+   otherwise return an account that violates invariant 1 or 2. Therefore every path that yields an
+   `accountId` must **re-validate** it against the request's policy predicate before use:
+   `pool` ⇒ the resolved account must satisfy `user_id IS NULL`; `own` ⇒ `user_id = req.userId`.
+   (Sticky layers are keyed on `groupId` and so are naturally skipped for `own` keys — which carry
+   no group — but the re-validation is still asserted for the `pool`/grouped case so a sticky row
+   written before an account became user-owned can never be honoured.)
 
 `routing_policy` and `group_id` are **mutually exclusive**: `own` / `own_then_pool` bypass
-group dispatch (groups are a pool concept). The API layer rejects setting a non-`pool` policy and a
-`group_id` on the same key.
+group dispatch (groups are a pool concept). This is enforced at **two** layers: the API layer
+rejects setting a non-`pool` policy together with a `group_id`, **and** a DB CHECK constraint
+backs it (§1.4).
+
+### 1.4 Schema-level anti-drift guards
+Belt-and-braces constraints so a bug or a future code path cannot create an unsafe row:
+
+- `api_keys`: `CHECK (routing_policy = 'pool' OR group_id IS NULL)` — a non-pool key can never
+  carry a group binding.
+- `upstream_accounts`: `CHECK (user_id IS NULL OR team_id IS NULL)` — a row is **user-owned XOR
+  team-scoped**, never both (org-pooled = both NULL).
+- **Admin surface guard:** `accountGroups.addMember` (the group member-management mutation) must
+  **reject** an upstream whose `user_id IS NOT NULL`. Account groups are a pool concept; a BYOK
+  credential must never be placed into a pool group by an admin, which would re-expose it to other
+  users via the `pool` path.
 
 ## 2. Self-Service API Surface (apps/api tRPC)
 
@@ -111,6 +136,12 @@ group dispatch (groups are a pool concept). The API layer rejects setting a non-
 ### 2.2 `accounts.listOwn` / `accounts.updateOwn` / `accounts.deleteOwn`
 - Operate strictly on rows where `user_id = caller.id` (ownership-scoped RBAC action
   `account.manage_own`). A non-admin manages only their own upstreams.
+- **`updateOwn` is metadata-only** in P1 — `name`, `schedulable`, `priority`. It does **not**
+  rotate the credential.
+- **Credential rotation in P1 = delete + re-register** (`deleteOwn` then `registerOwn`). This
+  matches the current admin surface, where "輪替憑證" / rotate is itself stubbed ("即將推出"). A
+  dedicated `accounts.rotateOwn` (in-place re-encrypt without losing the row/usage history) is
+  **deferred** — it pairs naturally with delivering the admin rotate feature (candidate for P3).
 
 ### 2.3 `apiKeys.issueOwn` — add `routingPolicy`
 - New optional param `routingPolicy: "pool" | "own" | "own_then_pool"` (default `pool`).
@@ -133,6 +164,31 @@ deleteOwn), `apps/api/src/trpc/routers/apiKeys.ts` (issueOwn + routingPolicy),
 `apps/gateway/src/middleware/apiKeyAuth.ts`: select `routing_policy` into `req.apiKey`
 (alongside the existing userId/orgId/teamId/groupId).
 
+### 3.1 Platform source for non-pool keys (the groupless routing context)
+Today platform is **group-derived**: `groupContextPlugin` (`middleware/groupContext.ts`) resolves
+`req.gwGroupContext`, and `resolveGroupContext` (`runtime/groupDispatch.ts`) **synthesizes a legacy
+`anthropic` group when `group_id IS NULL`**. Routes and dispatch then read
+`req.gwGroupContext!.platform`, and `autoRoute` (`routes/dispatch.ts`) dispatches by that platform.
+This is fine for `pool` keys but breaks BYOK: an `own` key carries no group, and the legacy-synth
+would wrongly force every such request to `anthropic`.
+
+P1 therefore makes **platform surface-derived for non-pool keys**:
+
+- A request's platform for a non-pool key comes from the **request surface (the route)**, reusing
+  the existing surface→platform mapping (`usageLogInboundPlatformForSurface`):
+  `/v1/messages` → `anthropic`; `/v1/chat/completions` & `/v1/responses` → `openai`.
+- `groupContextPlugin` / `resolveGroupContext` must **not** synthesize the legacy group for a
+  non-pool key. Instead it produces a **groupless routing context** carrying
+  `{ policy, userId, platform: <from surface> }` (and no `groupId`). For `pool` keys the existing
+  group resolution (including the legacy-anthropic synth for null group) is **unchanged**.
+- The `req.gwGroupContext!.platform` reads in `messages.ts` / `chatCompletions.ts` /
+  `responses.ts` and the `autoRoute` wrap must handle the groupless case by reading platform from
+  this context (surface-derived) rather than asserting a group is present.
+
+**Touch-points:** `middleware/groupContext.ts`, `runtime/groupDispatch.ts`, `routes/dispatch.ts`
+(`autoRoute`), and the `req.gwGroupContext` reads in `routes/{messages,chatCompletions,responses}.ts`.
+
+### 3.2 Candidate selection
 `apps/gateway/src/runtime/scheduler.ts` `listSchedulableCandidates` branches on
 `req.routingPolicy` (layered on the existing org_id + platform + schedulable + not-rate-limited
 / not-overloaded base conditions):
@@ -140,17 +196,27 @@ deleteOwn), `apps/api/src/trpc/routers/apiKeys.ts` (issueOwn + routingPolicy),
 | policy | added WHERE |
 |---|---|
 | `pool` | `user_id IS NULL` + existing group/team logic (**only change: the extra `user_id IS NULL`**) |
-| `own` | `user_id = req.userId` (ignores `group_id`; picks the caller's upstream for the request platform) |
+| `own` | `user_id = req.userId` (ignores `group_id`; platform from §3.1; picks the caller's upstream for the request platform) |
 | `own_then_pool` | run the `own` query; only if it returns empty, run the `pool` query |
 
-`own` / `own_then_pool` bypass `groupDispatch` (group is a pool concept).
+`own` / `own_then_pool` bypass `groupDispatch` (group is a pool concept). Per invariant §1.3.3, the
+**forced/probe** path and any **sticky** hit re-validate the resolved account against the policy
+predicate (`pool` ⇒ `user_id IS NULL`; `own` ⇒ `user_id = req.userId`) before use — the ownership
+filter is not confined to the candidate query.
 
 ## 4. Error Handling
 
-- `own` (or `own_then_pool` after fallback) with **no own upstream for the platform** → clean
-  **4xx** (e.g. `409 no_own_upstream`, message: "No credential registered for <platform> — add one
-  in settings"). **Not 503** — 503 implies transient and would mislead clients into retrying.
-- Own upstream exists but the upstream rejects the credential (401) → existing
+Per-policy "no upstream" semantics (the `own` vs `own_then_pool` distinction is deliberate):
+
+- **`own`** with **no own upstream for the platform** → clean **4xx** (`409 no_own_upstream`,
+  message: "No credential registered for <platform> — add one in settings"). **Not 503** — 503
+  implies transient and would mislead clients into retrying.
+- **`own_then_pool`** with no own upstream → **falls back to the pool** (it does *not* return
+  `no_own_upstream`). It surfaces an error only when **both** own and pool yield nothing, and that
+  error uses the **existing pool error semantics** (e.g. the current no-pool-upstream / 503 path) —
+  not `409 no_own_upstream`.
+- **`pool`** with no pool upstream → unchanged existing behaviour.
+- Any policy where an upstream exists but the upstream **rejects the credential** (401) → existing
   `all_upstreams_failed` 503 path (consistent with the 2026-06-05 live smoke); surfaced as a
   "credential health" signal in **P3**.
 - `registerOwn` with malformed credentials → rejected at tRPC input validation.
@@ -169,12 +235,24 @@ dashboard is **P3**.
   `openai / anthropic`.
 - **Isolation invariants (highest priority), each its own assertion:**
   1. a `pool` request never returns any `user_id IS NOT NULL` candidate;
-  2. user A's `own` request never returns user B's upstream.
+  2. user A's `own` request never returns user B's upstream;
+  3. the **forced/probe** path re-validates ownership (a forced account that violates the policy
+     predicate is rejected, not honoured);
+  4. a **stale sticky** entry resolving to a now-user-owned account is rejected on the `pool` path.
+- **Platform-from-surface (§3.1):** an `own` key with no group routes `/v1/messages` to the
+  caller's `anthropic` upstream and `/v1/chat/completions` to the caller's `openai` upstream — i.e.
+  the legacy-anthropic synth does NOT apply to non-pool keys.
+- **Schema guards (§1.4):** DB rejects `api_keys` with non-`pool` policy + non-null `group_id`;
+  rejects `upstream_accounts` with both `user_id` and `team_id` set; `accountGroups.addMember`
+  rejects an upstream whose `user_id IS NOT NULL`.
+- **Error semantics (§4):** `own` with no own upstream → `409 no_own_upstream`; `own_then_pool`
+  with no own upstream but an available pool upstream → served by pool (no 409).
 - **Integration (testcontainer pg):** `registerOwn` → `issueOwn(routingPolicy:"own")` → call
   gateway → request is served by the caller's own upstream; `usage_logs.account_id` = that
   upstream and `user_id` = caller.
 - **RBAC:** a non-admin can `registerOwn` but `listOwn` shows only their own; cannot
-  update/delete another user's upstream; cannot set `group_id` together with a non-`pool` policy.
+  update/delete another user's upstream; cannot set `group_id` together with a non-`pool` policy;
+  `updateOwn` cannot mutate the credential (metadata-only).
 
 ## Open Questions / Risks
 
