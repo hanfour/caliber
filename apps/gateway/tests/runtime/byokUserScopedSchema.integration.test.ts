@@ -1,10 +1,18 @@
 /**
- * Integration test for Task 1: upstream_accounts.user_id ownership column.
+ * Integration tests for Task 1 and Task 2 BYOK schema changes.
  *
- * Stands up a real Postgres testcontainer, migrates the schema, seeds parent
- * FK rows (org + user + team), then verifies:
- *   1. A row with BOTH user_id AND team_id set is rejected by the CHECK constraint.
- *   2. A user-owned upstream (user_id set, team_id null) is accepted.
+ * Task 1 — upstream_accounts.user_id ownership column:
+ *   Verifies the user_id XOR team_id CHECK constraint and that user-owned,
+ *   team-owned, and org-pooled upstreams are all accepted correctly.
+ *
+ * Task 2 — api_keys.routing_policy column:
+ *   Verifies the routing_policy default ('pool'), the mutex CHECK constraint
+ *   that rejects a non-pool policy when group_id is set, the enum CHECK that
+ *   rejects unknown policy values, and that a non-pool policy without a
+ *   group_id (e.g. 'own') inserts successfully.
+ *
+ * Stands up a real Postgres testcontainer and migrates the full schema before
+ * running all assertions.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
@@ -18,7 +26,7 @@ import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { sql } from "drizzle-orm";
-import { organizations, teams, users, upstreamAccounts, type Database } from "@caliber/db";
+import { organizations, teams, users, upstreamAccounts, apiKeys, accountGroups, type Database } from "@caliber/db";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
@@ -36,6 +44,7 @@ let db: Database;
 let orgId: string;
 let userId: string;
 let teamId: string;
+let groupId: string;
 
 beforeAll(async () => {
   pgContainer = await new PostgreSqlContainer("postgres:16-alpine").start();
@@ -63,6 +72,13 @@ beforeAll(async () => {
     .values({ orgId, name: "BYOK Schema Test Team", slug: "byok-schema-test-team" })
     .returning();
   teamId = team!.id;
+
+  // Seed one account group (needed for routing_policy tests)
+  const [group] = await db
+    .insert(accountGroups)
+    .values({ orgId, name: "BYOK Schema Test Group", platform: "openai" })
+    .returning();
+  groupId = group!.id;
 }, 90_000);
 
 afterAll(async () => {
@@ -74,7 +90,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.execute(
-    sql`TRUNCATE TABLE upstream_accounts RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE api_keys, upstream_accounts RESTART IDENTITY CASCADE`,
   );
 });
 
@@ -131,5 +147,47 @@ describe("upstream_accounts user_id column", () => {
     }).returning();
     expect(row!.userId).toBeNull();
     expect(row!.teamId).toBeNull();
+  });
+});
+
+// ── Task 2: api_keys.routing_policy ───────────────────────────────────────────
+
+describe("api_keys routing_policy column", () => {
+  it("api_keys default routing_policy is 'pool'", async () => {
+    const [k] = await db.insert(apiKeys).values({
+      userId, orgId, keyHash: "h1", keyPrefix: "ak_p1", name: "k",
+    }).returning();
+    expect(k!.routingPolicy).toBe("pool");
+  });
+
+  it("api_keys CHECK rejects non-pool policy with a group_id", async () => {
+    // expect a DB CHECK violation on api_keys_routing_policy_group_mutex
+    let err: unknown;
+    try {
+      await db.insert(apiKeys).values({
+        userId, orgId, groupId, keyHash: "h2", keyPrefix: "ak_p2", name: "k", routingPolicy: "own",
+      });
+    } catch (e) { err = e; }
+    expect(err).toBeDefined();
+    expect((err as { constraint?: string }).constraint ?? (err as any).cause?.constraint).toBe("api_keys_routing_policy_group_mutex");
+  });
+
+  it("api_keys CHECK rejects an unknown routing_policy value", async () => {
+    let err: unknown;
+    try {
+      await db.insert(apiKeys).values({
+        userId, orgId, keyHash: "h3", keyPrefix: "ak_p3", name: "k", routingPolicy: "nonsense" as never,
+      });
+    } catch (e) { err = e; }
+    expect(err).toBeDefined();
+    expect((err as { constraint?: string }).constraint ?? (err as any).cause?.constraint).toBe("api_keys_routing_policy_values");
+  });
+
+  it("accepts a non-pool policy when no group_id is set", async () => {
+    const [k] = await db.insert(apiKeys).values({
+      userId, orgId, keyHash: "hpos", keyPrefix: "ak_pos", name: "k", routingPolicy: "own",
+    }).returning();
+    expect(k!.routingPolicy).toBe("own");
+    expect(k!.groupId).toBeNull();
   });
 });

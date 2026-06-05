@@ -1,0 +1,3 @@
+ALTER TABLE "api_keys" ADD COLUMN "routing_policy" text DEFAULT 'pool' NOT NULL;--> statement-breakpoint
+ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_routing_policy_values" CHECK ("api_keys"."routing_policy" IN ('pool','own','own_then_pool'));--> statement-breakpoint
+ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_routing_policy_group_mutex" CHECK ("api_keys"."routing_policy" = 'pool' OR "api_keys"."group_id" IS NULL);

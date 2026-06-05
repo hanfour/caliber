@@ -6,6 +6,7 @@ import {
   decimal,
   inet,
   index,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { users } from "./auth.js";
@@ -32,6 +33,7 @@ export const apiKeys = pgTable(
     keyPrefix: text("key_prefix").notNull(),
     name: text("name").notNull(),
     status: text("status").notNull().default("active"),
+    routingPolicy: text("routing_policy").notNull().default("pool"),
     ipWhitelist: text("ip_whitelist").array(),
     ipBlacklist: text("ip_blacklist").array(),
     quotaUsd: decimal("quota_usd", { precision: 20, scale: 8 })
@@ -75,5 +77,13 @@ export const apiKeys = pgTable(
     groupIdx: index("api_keys_group_idx")
       .on(t.groupId)
       .where(sql`${t.revokedAt} IS NULL AND ${t.groupId} IS NOT NULL`),
+    routingPolicyValues: check(
+      "api_keys_routing_policy_values",
+      sql`${t.routingPolicy} IN ('pool','own','own_then_pool')`,
+    ),
+    routingPolicyGroupMutex: check(
+      "api_keys_routing_policy_group_mutex",
+      sql`${t.routingPolicy} = 'pool' OR ${t.groupId} IS NULL`,
+    ),
   }),
 );
