@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -25,6 +26,7 @@ export function AccountGroupMembers({ orgId, group }: Props) {
   const utils = trpc.useUtils();
   const t = useTranslations("accountGroups.detail");
   const tCommon = useTranslations("common");
+  const confirm = useConfirm();
   // Server-side platform narrowing: avoids pulling every anthropic account
   // when this group is openai-only (and vice versa). `accounts.list`
   // accepts an optional `platform` filter — backward-compatible.
@@ -108,11 +110,14 @@ export function AccountGroupMembers({ orgId, group }: Props) {
     });
   };
 
-  const handleRemove = (accountId: string, accountName: string) => {
-    if (typeof window === "undefined") return;
-    const ok = window.confirm(
-      t("confirmRemoveMember", { name: accountName, group: group.name }),
-    );
+  const handleRemove = async (accountId: string, accountName: string) => {
+    const ok = await confirm({
+      description: t("confirmRemoveMember", {
+        name: accountName,
+        group: group.name,
+      }),
+      destructive: true,
+    });
     if (!ok) return;
     removeMember.mutate({ groupId: group.id, accountId });
   };

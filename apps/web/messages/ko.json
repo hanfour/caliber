@@ -6,6 +6,8 @@
     "saving": "저장 중…",
     "saveChanges": "변경사항 저장",
     "cancel": "취소",
+    "confirm": "확인",
+    "confirmTitle": "확실합니까?",
     "create": "만들기",
     "creating": "만드는 중…",
     "delete": "삭제",

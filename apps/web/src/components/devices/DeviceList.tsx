@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Plus, Trash2, Laptop } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -41,6 +42,7 @@ export function DeviceList() {
   const utils = trpc.useUtils();
   const t = useTranslations("devices");
   const tCommon = useTranslations("common");
+  const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const { data: devices, isLoading, error } = trpc.devices.listOwn.useQuery();
@@ -59,9 +61,11 @@ export function DeviceList() {
     },
   });
 
-  const handleRevoke = (row: DeviceRow) => {
-    if (typeof window === "undefined") return;
-    const ok = window.confirm(t("confirmRevoke", { name: row.hostname }));
+  const handleRevoke = async (row: DeviceRow) => {
+    const ok = await confirm({
+      description: t("confirmRevoke", { name: row.hostname }),
+      destructive: true,
+    });
     if (!ok) return;
     setRevokingId(row.id);
     revoke.mutate({ id: row.id });

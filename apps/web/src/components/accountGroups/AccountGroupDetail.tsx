@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { trpc } from "@/lib/trpc/client";
 import { usePermissions } from "@/lib/usePermissions";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
   const t = useTranslations("accountGroups");
   const tDetail = useTranslations("accountGroups.detail");
   const tCommon = useTranslations("common");
+  const confirm = useConfirm();
   const {
     data: group,
     isLoading,
@@ -103,9 +105,11 @@ export function AccountGroupDetail({ orgId, groupId }: Props) {
     groupId: group.id,
   });
 
-  const handleDelete = () => {
-    if (typeof window === "undefined") return;
-    const ok = window.confirm(tDetail("confirmDelete", { name: group.name }));
+  const handleDelete = async () => {
+    const ok = await confirm({
+      description: tDetail("confirmDelete", { name: group.name }),
+      destructive: true,
+    });
     if (!ok) return;
     del.mutate({ id: group.id });
   };

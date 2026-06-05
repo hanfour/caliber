@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Plus, Trash2, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
@@ -44,6 +45,7 @@ export function ApiKeyList() {
   const utils = trpc.useUtils();
   const t = useTranslations("memberApiKeys");
   const tCommon = useTranslations("common");
+  const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const { data: keys, isLoading, error } = trpc.apiKeys.listOwn.useQuery();
@@ -62,9 +64,11 @@ export function ApiKeyList() {
     },
   });
 
-  const handleRevoke = (row: ApiKeyRow) => {
-    if (typeof window === "undefined") return;
-    const ok = window.confirm(t("confirmRevoke", { name: row.name }));
+  const handleRevoke = async (row: ApiKeyRow) => {
+    const ok = await confirm({
+      description: t("confirmRevoke", { name: row.name }),
+      destructive: true,
+    });
     if (!ok) return;
     setRevokingId(row.id);
     revoke.mutate({ id: row.id });

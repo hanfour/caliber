@@ -6,6 +6,8 @@
     "saving": "Saving…",
     "saveChanges": "Save changes",
     "cancel": "Cancel",
+    "confirm": "Confirm",
+    "confirmTitle": "Are you sure?",
     "create": "Create",
     "creating": "Creating…",
     "delete": "Delete",
