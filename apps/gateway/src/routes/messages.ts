@@ -15,6 +15,7 @@ import {
   FatalUpstreamError,
   NoOwnUpstreamError,
 } from "../runtime/failoverLoop.js";
+import { buildFailoverInput } from "../runtime/buildFailoverInput.js";
 import {
   noOwnUpstreamReplyBody,
   NO_OWN_UPSTREAM_STATUS,
@@ -293,14 +294,7 @@ async function runNonStreamFailover(
   // before invoking this function, so the cast is safe.)
   const requestedModel = (req.body as { model: string }).model;
 
-  const result = await runFailover({
-    db: app.db,
-    orgId: req.apiKey!.orgId,
-    teamId: req.apiKey!.teamId,
-    groupId: req.apiKey?.groupId ?? null,
-    routingPolicy: req.gwGroupContext!.policy,
-    userId: req.apiKey!.userId,
-    platform: req.gwGroupContext!.platform,
+  const result = await runFailover(buildFailoverInput(req, app.db, {
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
     scheduler: app.gwScheduler,
     // Layer 2 sticky (Plan 5A §8.2 / design §4.4) — Claude Code sends a stable
@@ -448,7 +442,7 @@ async function runNonStreamFailover(
         }
       }
     },
-  });
+  }));
 
   // Forward upstream status code.
   reply.code(result.status);
@@ -514,14 +508,7 @@ async function runStreamingFailover(
   // before this function is called, so the cast is safe.
   const requestedModel = (req.body as { model: string }).model;
 
-  await runFailover({
-    db: app.db,
-    orgId: req.apiKey!.orgId,
-    teamId: req.apiKey!.teamId,
-    groupId: req.apiKey?.groupId ?? null,
-    routingPolicy: req.gwGroupContext!.policy,
-    userId: req.apiKey!.userId,
-    platform: req.gwGroupContext!.platform,
+  await runFailover(buildFailoverInput(req, app.db, {
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
     attempt: async (account: SelectedAccount) => {
       const acquired = await acquireSlot(
@@ -807,7 +794,7 @@ async function runStreamingFailover(
         }
       }
     },
-  }).catch((err) => {
+  })).catch((err) => {
     // After hijack, AllUpstreamsFailed / FatalUpstreamError can't go through reply.send.
     // Emit error event if headers not sent yet, otherwise log only.
     if (!reply.raw.headersSent) {
@@ -1002,14 +989,7 @@ export function makeMessagesOpenaiHandler(
     req.raw.once("close", onClose);
 
     try {
-      const anthropicResp = await runFailover({
-        db: app.db,
-        orgId: req.apiKey.orgId,
-        teamId: req.apiKey.teamId,
-        groupId: req.apiKey?.groupId ?? null,
-        routingPolicy: req.gwGroupContext!.policy,
-        userId: req.apiKey!.userId,
-        platform: req.gwGroupContext!.platform,
+      const anthropicResp = await runFailover(buildFailoverInput(req, app.db, {
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         sessionHash: sessionHashFromHeaders(req.headers),
@@ -1096,7 +1076,7 @@ export function makeMessagesOpenaiHandler(
               return translated;
             },
           ),
-      });
+      }));
 
       // Serialize once so the cache stores the exact bytes Fastify
       // emits (no risk of cached version drifting due to key-order
@@ -1203,14 +1183,7 @@ async function runMessagesOpenaiStreamingFailover(
   req.raw.once("close", onClose);
 
   try {
-    await runFailover({
-      db: app.db,
-      orgId: req.apiKey!.orgId,
-      teamId: req.apiKey!.teamId,
-      groupId: req.apiKey?.groupId ?? null,
-      routingPolicy: req.gwGroupContext!.policy,
-      userId: req.apiKey!.userId,
-      platform: req.gwGroupContext!.platform,
+    await runFailover(buildFailoverInput(req, app.db, {
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       sessionHash: sessionHashFromHeaders(req.headers),
@@ -1351,7 +1324,7 @@ async function runMessagesOpenaiStreamingFailover(
             return undefined as never;
           },
         ),
-    });
+    }));
   } catch (err) {
     respondStreamFailoverCollapse(
       reply,

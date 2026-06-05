@@ -44,6 +44,7 @@ import {
   FatalUpstreamError,
   NoOwnUpstreamError,
 } from "../runtime/failoverLoop.js";
+import { buildFailoverInput } from "../runtime/buildFailoverInput.js";
 import {
   noOwnUpstreamReplyBody,
   NO_OWN_UPSTREAM_STATUS,
@@ -342,14 +343,7 @@ export function makeResponsesRouteHandler(
     const requestedModel = body.model;
 
     try {
-      const responsesResp = await runFailover({
-        db: app.db,
-        orgId: req.apiKey.orgId,
-        teamId: req.apiKey.teamId,
-        groupId: req.apiKey?.groupId ?? null,
-        routingPolicy: req.gwGroupContext!.policy,
-        userId: req.apiKey!.userId,
-        platform: req.gwGroupContext!.platform,
+      const responsesResp = await runFailover(buildFailoverInput(req, app.db, {
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         previousResponseId: previousResponseIdFromBody(req.body),
@@ -422,7 +416,7 @@ export function makeResponsesRouteHandler(
               );
             },
           ),
-      });
+      }));
 
       const responseBuf = Buffer.from(JSON.stringify(responsesResp));
       reply
@@ -542,14 +536,7 @@ export function makeResponsesCompactRouteHandler(
     req.raw.once("close", onClose);
 
     try {
-      const upstream = await runFailover({
-        db: app.db,
-        orgId: req.apiKey.orgId,
-        teamId: req.apiKey.teamId,
-        groupId: req.apiKey?.groupId ?? null,
-        routingPolicy: req.gwGroupContext!.policy,
-        userId: req.apiKey!.userId,
-        platform: ctx.platform,
+      const upstream = await runFailover(buildFailoverInput(req, app.db, {
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         previousResponseId: previousResponseIdFromBody(req.body),
@@ -572,7 +559,7 @@ export function makeResponsesCompactRouteHandler(
               return res;
             },
           ),
-      });
+      }));
 
       const contentType =
         (upstream.headers["content-type"] as string | undefined) ??
@@ -654,14 +641,7 @@ async function runResponsesStreamingFailover(
   req.raw.once("close", onClose);
 
   try {
-    await runFailover({
-      db: app.db,
-      orgId: req.apiKey!.orgId,
-      teamId: req.apiKey!.teamId,
-      groupId: req.apiKey?.groupId ?? null,
-      routingPolicy: req.gwGroupContext!.policy,
-      userId: req.apiKey!.userId,
-      platform: req.gwGroupContext!.platform,
+    await runFailover(buildFailoverInput(req, app.db, {
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       previousResponseId: previousResponseIdFromBody(req.body),
@@ -788,7 +768,7 @@ async function runResponsesStreamingFailover(
             return undefined as never;
           },
         ),
-    });
+    }));
   } catch (err) {
     respondStreamFailoverCollapse(
       reply,
@@ -868,14 +848,7 @@ async function runOpenaiResponsesPassthroughFailover(
   req.raw.once("close", onClose);
 
   try {
-    const responsesResp = await runFailover({
-      db: app.db,
-      orgId: req.apiKey!.orgId,
-      teamId: req.apiKey!.teamId,
-      groupId: req.apiKey?.groupId ?? null,
-      routingPolicy: req.gwGroupContext!.policy,
-      userId: req.apiKey!.userId,
-      platform: req.gwGroupContext!.platform,
+    const responsesResp = await runFailover(buildFailoverInput(req, app.db, {
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       previousResponseId: previousResponseIdFromBody(req.body),
@@ -955,7 +928,7 @@ async function runOpenaiResponsesPassthroughFailover(
             return openaiResp;
           },
         ),
-    });
+    }));
 
     const responseBuf = Buffer.from(JSON.stringify(responsesResp));
     reply
@@ -1048,14 +1021,7 @@ async function runOpenaiResponsesStreamingPassthrough(
   req.raw.once("close", onClose);
 
   try {
-    await runFailover({
-      db: app.db,
-      orgId: req.apiKey!.orgId,
-      teamId: req.apiKey!.teamId,
-      groupId: req.apiKey?.groupId ?? null,
-      routingPolicy: req.gwGroupContext!.policy,
-      userId: req.apiKey!.userId,
-      platform: req.gwGroupContext!.platform,
+    await runFailover(buildFailoverInput(req, app.db, {
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       previousResponseId: previousResponseIdFromBody(req.body),
@@ -1196,7 +1162,7 @@ async function runOpenaiResponsesStreamingPassthrough(
             return undefined as never;
           },
         ),
-    });
+    }));
   } catch (err) {
     respondStreamFailoverCollapse(
       reply,
