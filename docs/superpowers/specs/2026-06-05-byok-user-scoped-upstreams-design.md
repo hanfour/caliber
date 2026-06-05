@@ -172,21 +172,36 @@ Today platform is **group-derived**: `groupContextPlugin` (`middleware/groupCont
 This is fine for `pool` keys but breaks BYOK: an `own` key carries no group, and the legacy-synth
 would wrongly force every such request to `anthropic`.
 
-P1 therefore makes **platform surface-derived for non-pool keys**:
+P1 therefore makes **platform surface-derived for non-pool keys**, via a **new dedicated resolver**
+`platformForGatewayRoute(req)` — *not* the usage-log helper. `usageLogInboundPlatformForSurface`
+(`runtime/usageLogging.ts:193`) only knows the three usage-writing surfaces and `compact` doesn't
+even write a usage row, so it cannot be the routing authority. `platformForGatewayRoute` enumerates
+**every** registered gateway route:
 
-- A request's platform for a non-pool key comes from the **request surface (the route)**, reusing
-  the existing surface→platform mapping (`usageLogInboundPlatformForSurface`):
-  `/v1/messages` → `anthropic`; `/v1/chat/completions` & `/v1/responses` → `openai`.
+| route surface | platform |
+|---|---|
+| `/v1/messages` | `anthropic` |
+| `/v1/chat/completions` | `openai` |
+| `/v1/responses` | `openai` |
+| `/v1/responses/compact` | `openai` |
+| `/backend-api/codex/responses` (Codex alias) | `openai` |
+
+(Only `/v1/messages` is anthropic; the Codex alias and `compact` are OpenAI-only. The resolver is
+the single source of truth and must be updated whenever a route is added.)
+
 - `groupContextPlugin` / `resolveGroupContext` must **not** synthesize the legacy group for a
   non-pool key. Instead it produces a **groupless routing context** carrying
-  `{ policy, userId, platform: <from surface> }` (and no `groupId`). For `pool` keys the existing
-  group resolution (including the legacy-anthropic synth for null group) is **unchanged**.
+  `{ policy, userId, platform: platformForGatewayRoute(req) }` (and no `groupId`). For `pool` keys
+  the existing group resolution (including the legacy-anthropic synth for null group) is
+  **unchanged**.
 - The `req.gwGroupContext!.platform` reads in `messages.ts` / `chatCompletions.ts` /
-  `responses.ts` and the `autoRoute` wrap must handle the groupless case by reading platform from
-  this context (surface-derived) rather than asserting a group is present.
+  `responses.ts` / `codexResponses.ts` and the `autoRoute` wrap must handle the groupless case by
+  reading platform from this context (surface-derived) rather than asserting a group is present.
 
-**Touch-points:** `middleware/groupContext.ts`, `runtime/groupDispatch.ts`, `routes/dispatch.ts`
-(`autoRoute`), and the `req.gwGroupContext` reads in `routes/{messages,chatCompletions,responses}.ts`.
+**Touch-points:** new `platformForGatewayRoute` (likely in `routes/dispatch.ts` or a small
+`routes/surfacePlatform.ts`), `middleware/groupContext.ts`, `runtime/groupDispatch.ts`,
+`routes/dispatch.ts` (`autoRoute`), and the `req.gwGroupContext` reads in
+`routes/{messages,chatCompletions,responses,codexResponses}.ts`.
 
 ### 3.2 Candidate selection
 `apps/gateway/src/runtime/scheduler.ts` `listSchedulableCandidates` branches on
@@ -197,7 +212,7 @@ P1 therefore makes **platform surface-derived for non-pool keys**:
 |---|---|
 | `pool` | `user_id IS NULL` + existing group/team logic (**only change: the extra `user_id IS NULL`**) |
 | `own` | `user_id = req.userId` (ignores `group_id`; platform from §3.1; picks the caller's upstream for the request platform) |
-| `own_then_pool` | run the `own` query; only if it returns empty, run the `pool` query |
+| `own_then_pool` | run the `own` query; only if it returns empty, run the **ungrouped org/team pool** query defined in §4.3 |
 
 `own` / `own_then_pool` bypass `groupDispatch` (group is a pool concept). Per invariant §1.3.3, the
 **forced/probe** path and any **sticky** hit re-validate the resolved account against the policy
@@ -206,20 +221,47 @@ filter is not confined to the candidate query.
 
 ## 4. Error Handling
 
-Per-policy "no upstream" semantics (the `own` vs `own_then_pool` distinction is deliberate):
+### 4.1 "No upstream" must distinguish *not-registered* from *temporarily-unschedulable*
+The candidate query (§3.2) applies `schedulable = true` + `status = 'active'` + not-rate-limited +
+not-overloaded + not-temp-unschedulable filters **before** the set is empty-tested. So emptiness of
+the *filtered candidate set* does **not** mean "no credential" — the user may own an upstream that
+is merely paused / rate-limited / overloaded. The `409` must therefore key off a **separate,
+unfiltered existence check**, not the candidate-set emptiness:
 
-- **`own`** with **no own upstream for the platform** → clean **4xx** (`409 no_own_upstream`,
-  message: "No credential registered for <platform> — add one in settings"). **Not 503** — 503
-  implies transient and would mislead clients into retrying.
-- **`own_then_pool`** with no own upstream → **falls back to the pool** (it does *not* return
-  `no_own_upstream`). It surfaces an error only when **both** own and pool yield nothing, and that
-  error uses the **existing pool error semantics** (e.g. the current no-pool-upstream / 503 path) —
-  not `409 no_own_upstream`.
+For an `own` request, resolve in two steps:
+1. **Existence:** is there ≥1 **non-deleted** own row (`user_id = req.userId`, matching the surface
+   platform, `deleted_at IS NULL`) — *ignoring* schedulability filters?
+   - **No** → `409 no_own_upstream` ("No credential registered for <platform> — add one in
+     settings"). **Not 503.**
+2. **Schedulability:** a row exists but the *filtered* candidate set is empty (paused / rate-limited
+   / overloaded / temp-unschedulable / expired) → the **existing transient / health error** (the
+   current no-schedulable-account path, typically 503), **not** `409 no_own_upstream`. Surfaced as
+   a credential-health signal in **P3**.
+
+### 4.2 Per-policy semantics
+- **`own`** → §4.1 (409 only when no non-deleted own row exists).
+- **`own_then_pool`** with no own row → **falls back to the pool** (§4.3); does *not* return
+  `no_own_upstream`. Surfaces an error only when **both** own and pool yield nothing, using the
+  **existing pool error semantics** — never `409 no_own_upstream`.
 - **`pool`** with no pool upstream → unchanged existing behaviour.
 - Any policy where an upstream exists but the upstream **rejects the credential** (401) → existing
   `all_upstreams_failed` 503 path (consistent with the 2026-06-05 live smoke); surfaced as a
-  "credential health" signal in **P3**.
-- `registerOwn` with malformed credentials → rejected at tRPC input validation.
+  credential-health signal in **P3**.
+
+### 4.3 `own_then_pool` fallback scope (pinned, no ambiguity)
+A non-pool key carries **no `group_id`** (mutual exclusion, §1.3/§1.4), so the fallback cannot
+target any *named* group. P1 defines the fallback pool explicitly as the **ungrouped org/team
+pool**: candidates with `org_id = req.orgId` **AND** the existing `teamPredicate(req.teamId)`
+(team-scoped beats org-level) **AND** `platform = <surface platform>` **AND** `user_id IS NULL`
+**AND not bound through `account_group_members`** — i.e. exactly the candidate set a `pool` key with
+a NULL `group_id` resolves today (the legacy org/team path), minus any user-owned rows. (A future
+explicit `fallback_group_id` on the key is noted as a possible enhancement but is **out of P1**.)
+
+### 4.4 Registration input validation (no probe in P1)
+`registerOwn` does **not** probe the provider (probe is P3), and the credential is an opaque string.
+So input validation only rejects **empty / oversized / non-string** credentials. A **well-formed but
+provider-invalid** key **is stored** and later surfaces as a credential-health signal / upstream
+failure (P3) — it is *not* caught at registration time.
 
 ## 5. Usage / Status Surfacing (P1 minimum)
 
@@ -245,8 +287,17 @@ dashboard is **P3**.
 - **Schema guards (§1.4):** DB rejects `api_keys` with non-`pool` policy + non-null `group_id`;
   rejects `upstream_accounts` with both `user_id` and `team_id` set; `accountGroups.addMember`
   rejects an upstream whose `user_id IS NOT NULL`.
-- **Error semantics (§4):** `own` with no own upstream → `409 no_own_upstream`; `own_then_pool`
-  with no own upstream but an available pool upstream → served by pool (no 409).
+- **Error semantics (§4):**
+  - `own` with **no non-deleted own row** → `409 no_own_upstream`;
+  - `own` **with** an own row that is paused / rate-limited / overloaded / temp-unschedulable →
+    the existing **transient/503** path, **not** `409` (the §4.1 existence-vs-schedulability split);
+  - `own_then_pool` with no own row but an available pool upstream → served by pool (no 409);
+  - `own_then_pool` fallback resolves to the **ungrouped org/team pool** (§4.3), never a named group.
+- **Surface→platform (§3.1):** `platformForGatewayRoute` returns `anthropic` for `/v1/messages` and
+  `openai` for `/v1/chat/completions`, `/v1/responses`, `/v1/responses/compact`, and
+  `/backend-api/codex/responses` (Codex alias + compact included).
+- **Registration validation (§4.4):** empty / oversized / non-string credential rejected; a
+  well-formed but provider-invalid key is **stored** (no probe in P1).
 - **Integration (testcontainer pg):** `registerOwn` → `issueOwn(routingPolicy:"own")` → call
   gateway → request is served by the caller's own upstream; `usage_logs.account_id` = that
   upstream and `user_id` = caller.
