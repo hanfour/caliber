@@ -1,0 +1,4 @@
+ALTER TABLE "upstream_accounts" ADD COLUMN "user_id" uuid;--> statement-breakpoint
+ALTER TABLE "upstream_accounts" ADD CONSTRAINT "upstream_accounts_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "upstream_accounts_user_select_idx" ON "upstream_accounts" USING btree ("org_id","user_id","platform","priority") WHERE "upstream_accounts"."deleted_at" IS NULL AND "upstream_accounts"."schedulable" = true;--> statement-breakpoint
+ALTER TABLE "upstream_accounts" ADD CONSTRAINT "upstream_accounts_user_id_xor_team_id" CHECK ("upstream_accounts"."user_id" IS NULL OR "upstream_accounts"."team_id" IS NULL);

@@ -7,9 +7,11 @@ import {
   timestamp,
   decimal,
   index,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations, teams } from "./org.js";
+import { users } from "./auth.js";
 
 export const upstreamAccounts = pgTable(
   "upstream_accounts",
@@ -19,6 +21,7 @@ export const upstreamAccounts = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     notes: text("notes"),
     platform: text("platform").notNull(),
@@ -66,5 +69,12 @@ export const upstreamAccounts = pgTable(
     selectIdx: index("upstream_accounts_select_idx")
       .on(t.orgId, t.teamId, t.priority)
       .where(sql`${t.deletedAt} IS NULL AND ${t.schedulable} = true`),
+    userSelectIdx: index("upstream_accounts_user_select_idx")
+      .on(t.orgId, t.userId, t.platform, t.priority)
+      .where(sql`${t.deletedAt} IS NULL AND ${t.schedulable} = true`),
+    userXorTeam: check(
+      "upstream_accounts_user_id_xor_team_id",
+      sql`${t.userId} IS NULL OR ${t.teamId} IS NULL`,
+    ),
   }),
 );
