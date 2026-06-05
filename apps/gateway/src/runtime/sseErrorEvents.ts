@@ -25,7 +25,12 @@ import type { FastifyReply } from "fastify";
 import {
   AllUpstreamsFailed,
   FatalUpstreamError,
+  NoOwnUpstreamError,
 } from "./failoverLoop.js";
+import {
+  noOwnUpstreamReplyBody,
+  NO_OWN_UPSTREAM_STATUS,
+} from "./noOwnUpstream.js";
 
 /**
  * Pulls the upstream body off a FatalUpstreamError when failover
@@ -151,6 +156,22 @@ export function respondStreamFailoverCollapse(
   requestId: string,
   serializeSseError: SseErrorSerializer,
 ): void {
+  if (err instanceof NoOwnUpstreamError) {
+    // BYOK §4.1: existence-check 409. Always thrown before any upstream
+    // attempt, so headers can't have been sent — emit the JSON 409 over the
+    // hijacked socket (never an SSE error chunk).
+    if (!reply.raw.headersSent) {
+      reply.raw.writeHead(NO_OWN_UPSTREAM_STATUS, {
+        "content-type": "application/json",
+      });
+      reply.raw.end(
+        JSON.stringify(noOwnUpstreamReplyBody(err.platform, requestId)),
+      );
+    } else {
+      reply.raw.end();
+    }
+    return;
+  }
   if (err instanceof AllUpstreamsFailed || err instanceof FatalUpstreamError) {
     if (reply.raw.headersSent) {
       const { kind, message } = failoverErrorPair(err);

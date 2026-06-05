@@ -42,7 +42,12 @@ import {
   runFailover,
   AllUpstreamsFailed,
   FatalUpstreamError,
+  NoOwnUpstreamError,
 } from "../runtime/failoverLoop.js";
+import {
+  noOwnUpstreamReplyBody,
+  NO_OWN_UPSTREAM_STATUS,
+} from "../runtime/noOwnUpstream.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import {
   callUpstreamResponses,
@@ -448,6 +453,12 @@ export function makeResponsesRouteHandler(
         },
       );
     } catch (err) {
+      if (err instanceof NoOwnUpstreamError) {
+        reply
+          .code(NO_OWN_UPSTREAM_STATUS)
+          .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
           error: "all_upstreams_failed",
@@ -584,6 +595,12 @@ export function makeResponsesCompactRouteHandler(
         },
       );
     } catch (err) {
+      if (err instanceof NoOwnUpstreamError) {
+        reply
+          .code(NO_OWN_UPSTREAM_STATUS)
+          .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
           error: "all_upstreams_failed",
@@ -969,6 +986,12 @@ async function runOpenaiResponsesPassthroughFailover(
       },
     );
   } catch (err) {
+    if (err instanceof NoOwnUpstreamError) {
+      reply
+        .code(NO_OWN_UPSTREAM_STATUS)
+        .send(noOwnUpstreamReplyBody(err.platform, requestId));
+      return;
+    }
     if (err instanceof AllUpstreamsFailed) {
       reply.code(503).send({
         error: "all_upstreams_failed",

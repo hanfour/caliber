@@ -13,7 +13,12 @@ import {
   runFailover,
   AllUpstreamsFailed,
   FatalUpstreamError,
+  NoOwnUpstreamError,
 } from "../runtime/failoverLoop.js";
+import {
+  noOwnUpstreamReplyBody,
+  NO_OWN_UPSTREAM_STATUS,
+} from "../runtime/noOwnUpstream.js";
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { sessionHashFromHeaders } from "../runtime/stickyKeys.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
@@ -196,6 +201,16 @@ export function makeMessagesAnthropicHandler(
       }
       if (err instanceof CapacityError) {
         reply.code(503).send({ error: "account_at_capacity" });
+        return;
+      }
+      if (err instanceof NoOwnUpstreamError) {
+        // BYOK §4.1: bare `own` key with no registered credential for the
+        // platform → clean 409 (NOT the 503 transient path).
+        // NOTE: reached only on the NON-streaming path; the streaming `.catch`
+        // handles its own errors (same pattern as the sibling CapacityError block).
+        reply
+          .code(NO_OWN_UPSTREAM_STATUS)
+          .send(noOwnUpstreamReplyBody(err.platform, requestId));
         return;
       }
       if (err instanceof AllUpstreamsFailed) {
@@ -801,6 +816,17 @@ async function runStreamingFailover(
         reply.raw.end(JSON.stringify({ error: "account_at_capacity" }));
         return;
       }
+      if (err instanceof NoOwnUpstreamError) {
+        // BYOK §4.1: thrown before any upstream bytes, so headers aren't
+        // sent — emit the 409 over the hijacked socket.
+        reply.raw.writeHead(NO_OWN_UPSTREAM_STATUS, {
+          "content-type": "application/json",
+        });
+        reply.raw.end(
+          JSON.stringify(noOwnUpstreamReplyBody(err.platform, requestId)),
+        );
+        return;
+      }
       const status = err instanceof FatalUpstreamError ? err.statusCode : 503;
       reply.raw.writeHead(status, { "content-type": "application/json" });
       const body =
@@ -1104,6 +1130,12 @@ export function makeMessagesOpenaiHandler(
         },
       );
     } catch (err) {
+      if (err instanceof NoOwnUpstreamError) {
+        reply
+          .code(NO_OWN_UPSTREAM_STATUS)
+          .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
           error: "all_upstreams_failed",

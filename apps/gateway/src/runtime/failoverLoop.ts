@@ -19,7 +19,7 @@
 // fed via `reportResult` after each attempt so subsequent decisions
 // benefit from observed reliability.
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { upstreamAccounts } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
@@ -54,6 +54,26 @@ export class FatalUpstreamError extends Error {
   ) {
     super(`fatal upstream: ${reason} (${statusCode})`);
     this.name = "FatalUpstreamError";
+  }
+}
+
+/**
+ * BYOK §4.1 existence-vs-schedulability split. Thrown by `runFailover` ONLY
+ * when `routingPolicy === "own"` AND the scheduler found no schedulable
+ * candidate AND a SEPARATE unfiltered existence check found NO non-deleted
+ * own upstream for the request's platform — i.e. the user has not registered
+ * any credential for this surface at all.
+ *
+ * Route handlers MUST map this to a CLEAN 409 `no_own_upstream` (NOT 503, and
+ * NOT a bare re-throw — the gateway has no setErrorHandler so an unmapped
+ * throw defaults to 500). It is distinct from `AllUpstreamsFailed`, which
+ * still covers the "own upstream exists but is currently unschedulable"
+ * (paused / rate-limited / overloaded / not active) transient case.
+ */
+export class NoOwnUpstreamError extends Error {
+  constructor(public readonly platform: Platform) {
+    super(`no own upstream registered for platform=${platform}`);
+    this.name = "NoOwnUpstreamError";
   }
 }
 
@@ -168,6 +188,34 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
       });
     } catch (err) {
       if (err instanceof NoSchedulableAccountsError) {
+        // BYOK §4.1 existence-vs-schedulability split. For a bare `own`
+        // key, an empty FILTERED candidate set is ambiguous: the user may
+        // have registered no credential at all for this platform, OR they
+        // have one that is simply unschedulable right now. Distinguish with
+        // a SEPARATE UNFILTERED existence check (any non-deleted own row for
+        // the platform, IGNORING schedulable/status/rate-limit filters).
+        // `own_then_pool` and `pool` are unaffected — they keep the existing
+        // transient AllUpstreamsFailed semantics.
+        if (input.routingPolicy === "own" && input.userId) {
+          const [ownRow] = await input.db
+            .select({ id: upstreamAccounts.id })
+            .from(upstreamAccounts)
+            .where(
+              and(
+                eq(upstreamAccounts.userId, input.userId),
+                eq(upstreamAccounts.platform, input.platform),
+                isNull(upstreamAccounts.deletedAt),
+              ),
+            )
+            .limit(1);
+          if (!ownRow) {
+            // No credential registered at all → clean 409 (route handlers
+            // map NoOwnUpstreamError → 409 no_own_upstream). NOT 503.
+            throw new NoOwnUpstreamError(input.platform);
+          }
+          // else: an own upstream exists but is unschedulable → fall through
+          // to the existing transient/503 no-schedulable path below.
+        }
         throw new AllUpstreamsFailed(failed);
       }
       throw err;

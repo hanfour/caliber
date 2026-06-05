@@ -17,7 +17,12 @@ import {
   runFailover,
   AllUpstreamsFailed,
   FatalUpstreamError,
+  NoOwnUpstreamError,
 } from "../runtime/failoverLoop.js";
+import {
+  noOwnUpstreamReplyBody,
+  NO_OWN_UPSTREAM_STATUS,
+} from "../runtime/noOwnUpstream.js";
 import {
   checkRouteCache,
   tryStoreOnSuccess,
@@ -351,6 +356,12 @@ export function makeChatCompletionsAnthropicHandler(
         },
       );
     } catch (err) {
+      if (err instanceof NoOwnUpstreamError) {
+        reply
+          .code(NO_OWN_UPSTREAM_STATUS)
+          .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
           error: "all_upstreams_failed",
@@ -841,6 +852,12 @@ export function makeChatCompletionsOpenaiHandler(
         },
       );
     } catch (err) {
+      if (err instanceof NoOwnUpstreamError) {
+        reply
+          .code(NO_OWN_UPSTREAM_STATUS)
+          .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
           error: "all_upstreams_failed",
