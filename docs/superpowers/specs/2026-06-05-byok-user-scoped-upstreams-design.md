@@ -212,7 +212,7 @@ the single source of truth and must be updated whenever a route is added.)
 |---|---|
 | `pool` | `user_id IS NULL` + existing group/team logic (**only change: the extra `user_id IS NULL`**) |
 | `own` | `user_id = req.userId` (ignores `group_id`; platform from §3.1; picks the caller's upstream for the request platform) |
-| `own_then_pool` | run the `own` query; only if it returns empty, run the **ungrouped org/team pool** query defined in §4.3 |
+| `own_then_pool` | run the `own` query; only if it returns empty, run the **org/team legacy-path pool** query defined in §4.3 (today's null-group path + `user_id IS NULL`) |
 
 `own` / `own_then_pool` bypass `groupDispatch` (group is a pool concept). Per invariant §1.3.3, the
 **forced/probe** path and any **sticky** hit re-validate the resolved account against the policy
@@ -250,12 +250,16 @@ For an `own` request, resolve in two steps:
 
 ### 4.3 `own_then_pool` fallback scope (pinned, no ambiguity)
 A non-pool key carries **no `group_id`** (mutual exclusion, §1.3/§1.4), so the fallback cannot
-target any *named* group. P1 defines the fallback pool explicitly as the **ungrouped org/team
-pool**: candidates with `org_id = req.orgId` **AND** the existing `teamPredicate(req.teamId)`
-(team-scoped beats org-level) **AND** `platform = <surface platform>` **AND** `user_id IS NULL`
-**AND not bound through `account_group_members`** — i.e. exactly the candidate set a `pool` key with
-a NULL `group_id` resolves today (the legacy org/team path), minus any user-owned rows. (A future
-explicit `fallback_group_id` on the key is noted as a possible enhancement but is **out of P1**.)
+target any *named* group. P1 defines the fallback as **exactly today's legacy null-group org/team
+path, plus the new `user_id IS NULL` isolation filter** — nothing more. Concretely, the candidate
+set is `teamPredicate(req.teamId)` (team-scoped beats org-level, within `org_id = req.orgId`) **AND**
+`platform = <surface platform>` **AND** the existing base conditions (schedulable / active / not
+rate-limited / not overloaded) **AND** `user_id IS NULL`. This mirrors the current legacy path at
+`apps/gateway/src/runtime/scheduler.ts:554-572`, which does **not** join `account_group_members` —
+so the fallback **does not** exclude an upstream merely because it is also a member of some group.
+The *only* delta from today's legacy null-group behaviour is the added `user_id IS NULL` filter.
+(A future explicit `fallback_group_id` on the key is noted as a possible enhancement but is **out of
+P1**.)
 
 ### 4.4 Registration input validation (no probe in P1)
 `registerOwn` does **not** probe the provider (probe is P3), and the credential is an opaque string.
@@ -292,7 +296,9 @@ dashboard is **P3**.
   - `own` **with** an own row that is paused / rate-limited / overloaded / temp-unschedulable →
     the existing **transient/503** path, **not** `409` (the §4.1 existence-vs-schedulability split);
   - `own_then_pool` with no own row but an available pool upstream → served by pool (no 409);
-  - `own_then_pool` fallback resolves to the **ungrouped org/team pool** (§4.3), never a named group.
+  - `own_then_pool` fallback resolves to the **org/team legacy-path pool** (§4.3: today's null-group
+    path + `user_id IS NULL`), never a named group; a group-bound pool upstream **is** eligible for
+    fallback (no anti-join), matching today's legacy behaviour.
 - **Surface→platform (§3.1):** `platformForGatewayRoute` returns `anthropic` for `/v1/messages` and
   `openai` for `/v1/chat/completions`, `/v1/responses`, `/v1/responses/compact`, and
   `/backend-api/codex/responses` (Codex alias + compact included).
