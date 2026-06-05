@@ -64,6 +64,20 @@ describe("useConfirm / ConfirmDialogProvider", () => {
     await waitFor(() => expect(onResult).toHaveBeenCalledWith(false));
   });
 
+  it("resolves false (no hang) if the provider unmounts while pending", async () => {
+    const user = userEvent.setup();
+    const onResult = vi.fn();
+    const { unmount } = renderProbe(onResult);
+
+    await user.click(screen.getByText("trigger"));
+    await screen.findByText("Delete X?");
+    // Dialog is open and the confirm() promise is still pending.
+    expect(onResult).not.toHaveBeenCalled();
+
+    unmount();
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith(false));
+  });
+
   it("throws when useConfirm is used outside the provider", () => {
     function Bare() {
       useConfirm();

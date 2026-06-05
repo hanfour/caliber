@@ -84,6 +84,15 @@ export function ConfirmDialogProvider({
     });
   }, []);
 
+  // If the provider unmounts with a prompt still open, settle it as cancelled
+  // so the awaiting caller never hangs and the resolver isn't leaked.
+  React.useEffect(() => {
+    return () => {
+      resolverRef.current?.(false);
+      resolverRef.current = null;
+    };
+  }, []);
+
   // Escape, overlay click, or the close button all close the dialog → cancel.
   const handleOpenChange = React.useCallback(
     (open: boolean) => {
