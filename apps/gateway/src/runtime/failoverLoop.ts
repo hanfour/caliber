@@ -58,6 +58,17 @@ export class FatalUpstreamError extends Error {
 }
 
 export interface RunFailoverInput<T> {
+  // ⚠️ BYOK ISOLATION CONTRACT (Task 9/11) — EVERY ROUTE-HANDLER CALLER
+  // MUST pass `routingPolicy` AND `userId`. They are optional on this type
+  // ONLY so the loop's own unit/integration tests (which exercise the
+  // mechanics with no inbound api-key) can omit them and fall back to the
+  // 4A `"pool"` / `null` defaults. A route handler that omits them is a
+  // SILENT own→pool isolation DOWNGRADE: a BYOK ("own") key would route as
+  // `pool`, leaking the org pool to a user-scoped key. These cannot be made
+  // required without forcing every loop-mechanics test to thread fake BYOK
+  // context, so the contract is enforced by review + the regression test in
+  // `tests/routes/responses.compact.byok.test.ts`, NOT the compiler. When
+  // adding a route callsite, copy `routingPolicy` + `userId` from a sibling.
   db: Database;
   orgId: string;
   teamId: string | null;
@@ -78,6 +89,21 @@ export interface RunFailoverInput<T> {
    * enforced via the `platform` field above either way.
    */
   groupId?: string | null;
+  /**
+   * BYOK routing policy of the inbound api-key (Task 9/11). Forwarded to
+   * `scheduler.select` so the candidate query can scope to the caller's own
+   * upstreams. Defaults to `"pool"` (legacy 4A behaviour) when omitted.
+   * ⚠️ Route handlers MUST pass `<ctx>.policy` — see the contract note at the
+   * top of this interface. Omitting it silently downgrades own→pool.
+   */
+  routingPolicy?: "pool" | "own" | "own_then_pool";
+  /**
+   * Owning user of the inbound api-key. Required (non-null) when
+   * `routingPolicy !== "pool"` so the scheduler can filter
+   * `user_id = userId`; ignored for pool keys. ⚠️ Route handlers MUST pass
+   * `req.apiKey.userId` — see the contract note at the top of this interface.
+   */
+  userId?: string | null;
   maxSwitches: number;
   attempt: (account: SelectedAccount) => Promise<T>;
   /**
@@ -134,6 +160,8 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
         teamId: input.teamId,
         groupPlatform: input.platform,
         groupId: input.groupId ?? undefined,
+        routingPolicy: input.routingPolicy ?? "pool",
+        userId: input.userId ?? null,
         previousResponseId: input.previousResponseId,
         sessionHash: input.sessionHash,
         excludedAccountIds: failedSet,

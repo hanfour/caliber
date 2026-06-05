@@ -51,6 +51,23 @@ export interface ScheduleRequest {
   groupId?: string;
   /** Group platform — bound at resolveGroupContext time (Part 8). */
   groupPlatform?: Platform;
+  /**
+   * BYOK routing policy (Task 9/11). Drives ownership filtering of the
+   * candidate query:
+   *   - `"pool"`           — org/group pool only; user-owned upstreams are
+   *                          NEVER returned (INV1).
+   *   - `"own"`            — ONLY the caller's own upstreams
+   *                          (`user_id = userId`), groups ignored (INV2).
+   *   - `"own_then_pool"`  — own upstreams if any, else fall back to the pool.
+   * Defaults to `"pool"` when omitted so every legacy callsite keeps 4A
+   * behaviour.
+   */
+  routingPolicy?: "pool" | "own" | "own_then_pool";
+  /**
+   * Owning user for `own` / `own_then_pool` selection. Required (non-null)
+   * whenever `routingPolicy !== "pool"`; ignored for pool requests.
+   */
+  userId?: string | null;
   /** Layer 1 sticky key (Codex CLI / OpenAI Responses). */
   previousResponseId?: string;
   /** Layer 2 sticky key (Claude Code / content hash). */
@@ -484,7 +501,7 @@ function teamPredicateFor(teamId: string | null) {
     : isNull(upstreamAccounts.teamId);
 }
 
-async function listSchedulableCandidates(
+export async function listSchedulableCandidates(
   db: Database,
   req: ScheduleRequest,
   excluded: ReadonlySet<string>,
@@ -506,6 +523,56 @@ async function listSchedulableCandidates(
   // from its declared platform.
   if (req.groupPlatform) {
     baseConditions.push(eq(upstreamAccounts.platform, req.groupPlatform));
+  }
+
+  // BYOK isolation core (Task 11). INV1: the pool/group AND legacy pool
+  // branches must NEVER hand a `pool` request a user-owned upstream, so we
+  // append `user_id IS NULL` to both. INV2: `own` / `own_then_pool` first
+  // run an own-only query keyed on `user_id = req.userId` and bypass groups
+  // entirely.
+  const ownershipPool = isNull(upstreamAccounts.userId);
+  const policy = req.routingPolicy ?? "pool";
+
+  if (policy === "own" || policy === "own_then_pool") {
+    if (!req.userId) {
+      // A non-pool policy with no owning user can never match an own-scoped
+      // upstream (the XOR constraint guarantees user-owned rows carry a
+      // user_id). Returning [] keeps `own` isolated; `own_then_pool` falls
+      // through to the pool path below.
+      if (policy === "own") return [];
+    } else {
+      // Own selection ignores groups entirely and mirrors the legacy ordering
+      // so failover/load-balance semantics are unchanged for owned upstreams.
+      const ownRows = await db
+        .select({
+          id: upstreamAccounts.id,
+          concurrency: upstreamAccounts.concurrency,
+          platform: upstreamAccounts.platform,
+          type: upstreamAccounts.type,
+          priority: upstreamAccounts.priority,
+        })
+        .from(upstreamAccounts)
+        .where(and(eq(upstreamAccounts.userId, req.userId), ...baseConditions))
+        .orderBy(
+          asc(upstreamAccounts.priority),
+          sql`${upstreamAccounts.lastUsedAt} ASC NULLS FIRST`,
+        );
+
+      const ownCandidates = ownRows.map((r) => ({
+        id: r.id,
+        concurrency: r.concurrency,
+        platform: r.platform,
+        type: r.type,
+        priority: r.priority,
+        groupId: null,
+      }));
+
+      // `own` returns its result even when empty (no pool leak). Only
+      // `own_then_pool` falls through to the pool path on an empty own set.
+      if (ownCandidates.length > 0 || policy === "own") {
+        return ownCandidates;
+      }
+    }
   }
 
   if (req.groupId) {
@@ -535,6 +602,8 @@ async function listSchedulableCandidates(
           eq(accountGroupMembers.groupId, req.groupId),
           eq(accountGroups.status, "active"),
           isNull(accountGroups.deletedAt),
+          // INV1: a pool/group request must never reach a user-owned upstream.
+          ownershipPool,
           ...baseConditions,
         ),
       );
@@ -562,7 +631,11 @@ async function listSchedulableCandidates(
       priority: upstreamAccounts.priority,
     })
     .from(upstreamAccounts)
-    .where(and(teamPredicateFor(req.teamId), ...baseConditions))
+    // INV1 + own_then_pool fallback: the legacy pool path also excludes
+    // user-owned upstreams. The own_then_pool fallback lands here (own set was
+    // empty), so this is today's null-group legacy branch + `user_id IS NULL`
+    // — no anti-join, matching existing behaviour.
+    .where(and(teamPredicateFor(req.teamId), ownershipPool, ...baseConditions))
     .orderBy(
       // Mirror selectAccount.ts: team-scoped (teamId IS NOT NULL) before
       // org-level, then priority asc, then NULLS-FIRST lastUsedAt.
