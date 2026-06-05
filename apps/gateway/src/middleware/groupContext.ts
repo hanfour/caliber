@@ -29,8 +29,12 @@ export const groupContextPlugin = fp(
 
       // Non-pool (BYOK) keys have no group; their platform is derived from
       // the request surface. Resolve it here (the plugin has `req`) and
-      // thread it into the resolver. For pool keys we skip this entirely so
-      // the `throw on unknown route` can't fire on non-upstream paths.
+      // thread it into the resolver. Non-pool keys are only expected on the
+      // mapped upstream routes (see ROUTE_PLATFORM); any unmapped route makes
+      // platformForGatewayRoute throw — and with no setErrorHandler that is
+      // currently a 500 — so ROUTE_PLATFORM must list every registered
+      // upstream pattern. For pool keys we skip this entirely so the
+      // `throw on unknown route` can't fire on non-upstream paths.
       const policy = req.apiKey.routingPolicy;
       const surfacePlatform =
         policy === "pool" ? undefined : platformForGatewayRoute(req);
