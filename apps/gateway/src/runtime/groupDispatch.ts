@@ -46,25 +46,71 @@ function parseRateMultiplier(raw: string): number {
   return Number.isFinite(n) && n > 0 ? n : 1.0;
 }
 
+export type RoutingPolicy = "pool" | "own" | "own_then_pool";
+
 export interface GroupContext {
-  /** Either an AccountGroups row id, or `legacy:<orgId>` for null group keys. */
-  groupId: string;
+  /**
+   * An AccountGroups row id, `legacy:<orgId>` for null-group pool keys, or
+   * `null` for a groupless BYOK (non-pool) key whose platform is derived
+   * from the request surface rather than a group.
+   */
+  groupId: string | null;
   platform: Platform;
   rateMultiplier: number;
   isExclusive: boolean;
   /** True when this is the synthetic legacy group, not a real DB row. */
   isLegacy: boolean;
+  /** The api key's routing policy (Task 9). */
+  policy: RoutingPolicy;
+  /**
+   * True for a non-pool key: there is no group, and `platform` was derived
+   * from the request surface (Task 8). The scheduler (Task 11) uses this to
+   * scope candidates to the user's own upstreams.
+   */
+  isByok: boolean;
 }
 
 export interface GroupResolveInput {
   orgId: string;
   groupId: string | null;
+  /**
+   * The api key's routing policy. `"pool"` (default for every existing key)
+   * keeps the legacy real-group / null-group-synth behaviour. Any non-pool
+   * value produces a groupless, surface-derived BYOK context.
+   */
+  policy: RoutingPolicy;
+  /**
+   * Required when `policy !== "pool"`: the platform derived from the request
+   * surface via `platformForGatewayRoute`. Ignored for pool keys.
+   */
+  surfacePlatform?: Platform;
 }
 
 export async function resolveGroupContext(
   db: Database,
   apiKey: GroupResolveInput,
 ): Promise<GroupContext | null> {
+  // Non-pool (BYOK) keys never carry a group (Task 2 DB CHECK + Task 6 API
+  // guard guarantee groupId IS NULL). The platform comes from the request
+  // surface, not a group, and we do NOT synthesise the legacy anthropic
+  // group. Layer 3 candidate scoping happens later (Task 11) keyed on isByok.
+  if (apiKey.policy !== "pool") {
+    if (!apiKey.surfacePlatform) {
+      throw new Error(
+        `resolveGroupContext: non-pool policy "${apiKey.policy}" requires a surfacePlatform`,
+      );
+    }
+    return {
+      groupId: null,
+      platform: apiKey.surfacePlatform,
+      rateMultiplier: 1.0,
+      isExclusive: false,
+      isLegacy: false,
+      policy: apiKey.policy,
+      isByok: true,
+    };
+  }
+
   if (!apiKey.groupId) {
     return {
       groupId: `legacy:${apiKey.orgId}`,
@@ -72,6 +118,8 @@ export async function resolveGroupContext(
       rateMultiplier: 1.0,
       isExclusive: false,
       isLegacy: true,
+      policy: "pool",
+      isByok: false,
     };
   }
   const row = await db
@@ -104,6 +152,8 @@ export async function resolveGroupContext(
     rateMultiplier: parseRateMultiplier(row.rateMultiplier),
     isExclusive: row.isExclusive,
     isLegacy: false,
+    policy: "pool",
+    isByok: false,
   };
 }
 

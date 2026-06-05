@@ -12,6 +12,7 @@ import {
   resolveGroupContext,
   type GroupContext,
 } from "../runtime/groupDispatch.js";
+import { platformForGatewayRoute } from "../routes/surfacePlatform.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -26,9 +27,19 @@ export const groupContextPlugin = fp(
     fastify.addHook("preHandler", async (req, reply) => {
       if (!req.apiKey) return; // public path or already-failed auth
 
+      // Non-pool (BYOK) keys have no group; their platform is derived from
+      // the request surface. Resolve it here (the plugin has `req`) and
+      // thread it into the resolver. For pool keys we skip this entirely so
+      // the `throw on unknown route` can't fire on non-upstream paths.
+      const policy = req.apiKey.routingPolicy;
+      const surfacePlatform =
+        policy === "pool" ? undefined : platformForGatewayRoute(req);
+
       const ctx = await resolveGroupContext(fastify.db, {
         orgId: req.apiKey.orgId,
         groupId: req.apiKey.groupId,
+        policy,
+        surfacePlatform,
       });
       if (!ctx) {
         reply.code(403).send({ error: "group_not_found_or_disabled" });

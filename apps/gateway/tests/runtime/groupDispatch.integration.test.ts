@@ -71,6 +71,7 @@ describe("resolveGroupContext", () => {
     });
     const ctx = await resolveGroupContext(db as never, {
       orgId,
+      policy: "pool",
       groupId: group.id,
     });
     expect(ctx).not.toBeNull();
@@ -79,11 +80,14 @@ describe("resolveGroupContext", () => {
     expect(ctx!.rateMultiplier).toBe(2.5);
     expect(ctx!.isExclusive).toBe(true);
     expect(ctx!.isLegacy).toBe(false);
+    expect(ctx!.isByok).toBe(false);
+    expect(ctx!.policy).toBe("pool");
   });
 
   it("synthesises a legacy group when groupId is null", async () => {
     const ctx = await resolveGroupContext(db as never, {
       orgId,
+      policy: "pool",
       groupId: null,
     });
     expect(ctx).not.toBeNull();
@@ -92,12 +96,54 @@ describe("resolveGroupContext", () => {
     expect(ctx!.rateMultiplier).toBe(1.0);
     expect(ctx!.isExclusive).toBe(false);
     expect(ctx!.isLegacy).toBe(true);
+    expect(ctx!.isByok).toBe(false);
+    expect(ctx!.policy).toBe("pool");
+  });
+
+  it("non-pool policy → groupless surface-derived BYOK ctx, no DB row, no legacy synth", async () => {
+    const ctx = await resolveGroupContext(db as never, {
+      orgId,
+      policy: "own",
+      groupId: null,
+      surfacePlatform: "openai",
+    });
+    expect(ctx).not.toBeNull();
+    expect(ctx!.groupId).toBeNull();
+    expect(ctx!.platform).toBe("openai");
+    expect(ctx!.rateMultiplier).toBe(1.0);
+    expect(ctx!.isExclusive).toBe(false);
+    expect(ctx!.isLegacy).toBe(false);
+    expect(ctx!.isByok).toBe(true);
+    expect(ctx!.policy).toBe("own");
+  });
+
+  it("own_then_pool policy carries the surface platform through (e.g. anthropic)", async () => {
+    const ctx = await resolveGroupContext(db as never, {
+      orgId,
+      policy: "own_then_pool",
+      groupId: null,
+      surfacePlatform: "anthropic",
+    });
+    expect(ctx!.platform).toBe("anthropic");
+    expect(ctx!.isByok).toBe(true);
+    expect(ctx!.policy).toBe("own_then_pool");
+  });
+
+  it("throws when a non-pool policy is missing a surfacePlatform", async () => {
+    await expect(
+      resolveGroupContext(db as never, {
+        orgId,
+        policy: "own",
+        groupId: null,
+      }),
+    ).rejects.toThrow(/surfacePlatform/);
   });
 
   it("returns null for a disabled group (status != active)", async () => {
     const group = await seedGroup({ status: "disabled" });
     const ctx = await resolveGroupContext(db as never, {
       orgId,
+      policy: "pool",
       groupId: group.id,
     });
     expect(ctx).toBeNull();
@@ -107,6 +153,7 @@ describe("resolveGroupContext", () => {
     const group = await seedGroup({ deletedAt: new Date() });
     const ctx = await resolveGroupContext(db as never, {
       orgId,
+      policy: "pool",
       groupId: group.id,
     });
     expect(ctx).toBeNull();
@@ -125,6 +172,7 @@ describe("resolveGroupContext", () => {
       const group = await seedGroup({ platform: "bogus_platform" });
       const ctx = await resolveGroupContext(db as never, {
         orgId,
+        policy: "pool",
         groupId: group.id,
       });
       expect(ctx).toBeNull();
@@ -146,6 +194,7 @@ describe("resolveGroupContext", () => {
     const group = await seedGroup({ rateMultiplier: "0.0000" });
     const ctx = await resolveGroupContext(db as never, {
       orgId,
+      policy: "pool",
       groupId: group.id,
     });
     expect(ctx).not.toBeNull();
@@ -157,6 +206,7 @@ describe("resolveGroupContext", () => {
     const group = await seedGroup({ rateMultiplier: "3.7500" });
     const ctx = await resolveGroupContext(db as never, {
       orgId,
+      policy: "pool",
       groupId: group.id,
     });
     expect(ctx!.rateMultiplier).toBe(3.75);
@@ -170,6 +220,7 @@ describe("resolveGroupContext", () => {
     const group = await seedGroup({ orgId: otherOrg!.id });
     const ctx = await resolveGroupContext(db as never, {
       orgId, // request scoped to the original org
+      policy: "pool",
       groupId: group.id,
     });
     expect(ctx).toBeNull();

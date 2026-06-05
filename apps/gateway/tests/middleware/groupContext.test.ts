@@ -11,6 +11,7 @@ interface FixtureKey {
   groupId: string | null;
   quotaUsd: string;
   quotaUsedUsd: string;
+  routingPolicy: "pool" | "own" | "own_then_pool";
 }
 
 interface GroupRow {
@@ -61,6 +62,9 @@ function fakeApiKeyAuth(apiKey: FixtureKey | null) {
 async function buildApp(opts: {
   apiKey: FixtureKey | null;
   groupRows: GroupRow[];
+  /** Extra upstream route(s) to register so BYOK surface-platform
+   *  resolution has a real route URL to map. */
+  routeUrl?: string;
 }) {
   const app = Fastify({ logger: false });
   const mockDb = makeMockDb(opts.groupRows);
@@ -69,10 +73,15 @@ async function buildApp(opts: {
   await app.register(fakeApiKeyAuth(opts.apiKey));
   await app.register(groupContextPlugin);
 
-  app.get("/echo", async (req) => {
+  const echo = async (req: import("fastify").FastifyRequest) => {
     const ctx = (req as unknown as { gwGroupContext: unknown }).gwGroupContext;
     return { ctx };
-  });
+  };
+
+  app.get("/echo", echo);
+  if (opts.routeUrl) {
+    app.post(opts.routeUrl, echo);
+  }
 
   return { app, mockDb };
 }
@@ -85,6 +94,7 @@ const BASE_KEY: FixtureKey = {
   groupId: "group-1",
   quotaUsd: "100",
   quotaUsedUsd: "0",
+  routingPolicy: "pool",
 };
 
 describe("groupContext middleware", () => {
@@ -158,5 +168,83 @@ describe("groupContext middleware", () => {
     expect(
       (mockDb["select"] as ReturnType<typeof vi.fn>).mock.calls,
     ).toHaveLength(0);
+  });
+
+  it("non-pool key (own, groupId=null) → groupless surface-derived ctx, no legacy synth, no DB hit", async () => {
+    const { app, mockDb } = await buildApp({
+      apiKey: { ...BASE_KEY, groupId: null, routingPolicy: "own" },
+      groupRows: [],
+      routeUrl: "/v1/chat/completions",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      ctx: {
+        groupId: null,
+        platform: "openai",
+        rateMultiplier: 1.0,
+        isExclusive: false,
+        isLegacy: false,
+        isByok: true,
+        policy: "own",
+      },
+    });
+    // No real group → no DB lookup.
+    expect(
+      (mockDb["select"] as ReturnType<typeof vi.fn>).mock.calls,
+    ).toHaveLength(0);
+  });
+
+  it("pool key (groupId=null) on an upstream route → UNCHANGED legacy synth, isByok=false", async () => {
+    const { app } = await buildApp({
+      apiKey: { ...BASE_KEY, groupId: null, routingPolicy: "pool" },
+      groupRows: [],
+      routeUrl: "/v1/chat/completions",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      ctx: {
+        groupId: "legacy:org-1",
+        platform: "anthropic",
+        isLegacy: true,
+        isByok: false,
+        policy: "pool",
+      },
+    });
+  });
+
+  it("pool key with a real group still resolves the group's platform, isByok=false", async () => {
+    const { app } = await buildApp({
+      apiKey: { ...BASE_KEY, routingPolicy: "pool" },
+      groupRows: [
+        {
+          id: "group-1",
+          platform: "gemini",
+          rateMultiplier: "1.0",
+          isExclusive: false,
+        },
+      ],
+    });
+
+    const res = await app.inject({ method: "GET", url: "/echo" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      ctx: {
+        groupId: "group-1",
+        platform: "gemini",
+        isLegacy: false,
+        isByok: false,
+        policy: "pool",
+      },
+    });
   });
 });

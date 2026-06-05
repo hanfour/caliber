@@ -28,6 +28,8 @@ const ctxAnthropic: GroupContext = {
   rateMultiplier: 1,
   isExclusive: false,
   isLegacy: false,
+  policy: "pool",
+  isByok: false,
 };
 const ctxOpenai: GroupContext = { ...ctxAnthropic, platform: "openai" };
 
