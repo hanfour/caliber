@@ -31,6 +31,7 @@ import {
   getSessionSticky,
   setSessionSticky,
 } from "../redis/sticky.js";
+import { keys as redisKeys } from "../redis/keys.js";
 
 export type ScheduleLayer =
   | "previous_response_id"
@@ -338,6 +339,14 @@ async function runLayers(
           release: noopRelease,
         };
       }
+      // Self-heal: the sticky entry pointed at an account that is now
+      // unschedulable or no longer passes ownership re-validation. Delete the
+      // stale key so subsequent requests don't repeat the Redis + DB round-trip
+      // on every call until the TTL (up to 1h) expires. Best-effort only —
+      // a redis error here must never fail the request.
+      void redis
+        .del(redisKeys.stickyResp(req.groupId, req.previousResponseId))
+        .catch(() => {});
     }
   }
 
@@ -370,6 +379,11 @@ async function runLayers(
           release: noopRelease,
         };
       }
+      // Self-heal: stale session sticky entry — delete so the next request
+      // doesn't hit Redis + DB again until TTL (up to 30m). Best-effort.
+      void redis
+        .del(redisKeys.stickySession(req.groupId, req.sessionHash))
+        .catch(() => {});
     }
   }
 
@@ -499,6 +513,36 @@ function teamPredicateFor(teamId: string | null) {
         isNull(upstreamAccounts.teamId),
       )
     : isNull(upstreamAccounts.teamId);
+}
+
+/**
+ * Ownership predicate shared by the candidate query (Task 11) and the
+ * forced/probe + sticky re-validation paths (Task 12, invariant §1.3.3).
+ *
+ *   - `pool`               — the resolved account must be a pool row
+ *                            (`user_id IS NULL`); a user-owned row is never
+ *                            honoured (INV1).
+ *   - `own` / `own_then_pool` — accept the caller's own rows
+ *                            (`user_id = req.userId`) OR a pool row reached via
+ *                            the own_then_pool fallback (`user_id IS NULL`);
+ *                            reject any OTHER user's row.
+ *
+ * `listSchedulableCandidates` enforces these as SQL predicates, but the
+ * forced/probe lookup and the Layer 1/2 sticky hits resolve an `accountId`
+ * out-of-band (the forced id comes from the caller; a sticky id comes from a
+ * Redis entry that may have been written when the account was still pooled —
+ * BEFORE it became user-owned). Those paths MUST re-validate the loaded row
+ * against this predicate before use so a stale entry can't leak across the
+ * pool/own boundary.
+ */
+function ownershipOk(
+  row: { userId: string | null },
+  req: ScheduleRequest,
+): boolean {
+  if (req.routingPolicy === "own" || req.routingPolicy === "own_then_pool") {
+    return row.userId === null || row.userId === req.userId;
+  }
+  return row.userId === null; // pool: never a user-owned row
 }
 
 export async function listSchedulableCandidates(
@@ -654,7 +698,7 @@ export async function listSchedulableCandidates(
   }));
 }
 
-async function loadSchedulableAccount(
+export async function loadSchedulableAccount(
   db: Database,
   accountId: string,
   req: ScheduleRequest,
@@ -679,6 +723,7 @@ async function loadSchedulableAccount(
         platform: upstreamAccounts.platform,
         type: upstreamAccounts.type,
         priority: upstreamAccounts.priority,
+        userId: upstreamAccounts.userId,
         groupId: accountGroupMembers.groupId,
       })
       .from(upstreamAccounts)
@@ -690,6 +735,13 @@ async function loadSchedulableAccount(
       .limit(1);
     const row = rows[0];
     if (!row) return null;
+    // Re-validate ownership (invariant §1.3.3). Sticky layers are keyed on
+    // `groupId`, so they only run for grouped/pool keys (own keys carry no
+    // group) — but a sticky row could have been written while this account
+    // was still pooled, then the account became user-owned. The forced path
+    // likewise names an arbitrary account id. Either could now violate the
+    // request's policy, so reject it here and let the caller fall through.
+    if (!ownershipOk(row, req)) return null;
     return {
       id: row.id,
       concurrency: row.concurrency,
@@ -709,12 +761,17 @@ async function loadSchedulableAccount(
       platform: upstreamAccounts.platform,
       type: upstreamAccounts.type,
       priority: upstreamAccounts.priority,
+      userId: upstreamAccounts.userId,
     })
     .from(upstreamAccounts)
     .where(and(teamPredicateFor(req.teamId), ...conditions))
     .limit(1);
   const row = rows[0];
   if (!row) return null;
+  // Re-validate ownership (invariant §1.3.3) — see the group branch above.
+  // Guards the forced/probe path (`stickyAccountId`) for legacy/no-group
+  // requests against a user-owned account leaking across the pool/own boundary.
+  if (!ownershipOk(row, req)) return null;
   return {
     id: row.id,
     concurrency: row.concurrency,
