@@ -1,6 +1,6 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { teams, accountGroups } from "@caliber/db";
+import { teams, accountGroups, organizationMembers } from "@caliber/db";
 import type { Database } from "@caliber/db";
 
 // Cross-tenant integrity guard. `api_keys.team_id` and
@@ -34,6 +34,32 @@ export async function assertTeamBelongsToOrg(
       message: "team does not belong to org",
     });
   }
+}
+
+// Resolve the primary (earliest-joined) org for a user. Used by self-service
+// mutations that don't accept an explicit orgId input. Throws NOT_FOUND if the
+// user has no org membership — which should not happen for any real user.
+//
+// KNOWN LIMITATION: Works while users belong to one org at a time. Once
+// multi-org membership lands, callers may need an explicit orgId input to
+// disambiguate.
+export async function resolveUserPrimaryOrgId(
+  db: Database,
+  userId: string,
+): Promise<string> {
+  const [row] = await db
+    .select({ orgId: organizationMembers.orgId })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.userId, userId))
+    .orderBy(asc(organizationMembers.joinedAt))
+    .limit(1);
+  if (!row) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "user has no organization membership",
+    });
+  }
+  return row.orgId;
 }
 
 // Same cross-tenant integrity guard for `api_keys.group_id` (#191). The column

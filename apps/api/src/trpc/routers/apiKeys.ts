@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { apiKeys, organizationMembers } from "@caliber/db";
 import type { Database } from "@caliber/db";
@@ -11,7 +11,7 @@ import {
   permissionProcedure,
   router,
 } from "../procedures.js";
-import { assertTeamBelongsToOrg, assertGroupBelongsToOrg } from "./_shared.js";
+import { assertTeamBelongsToOrg, assertGroupBelongsToOrg, resolveUserPrimaryOrgId } from "./_shared.js";
 import { writeAudit } from "../../services/audit.js";
 
 const uuid = z.string().uuid();
@@ -72,37 +72,6 @@ function hashRevealToken(pepperHex: string, token: string): string {
     .digest("hex");
 }
 
-/**
- * Picks the user's earliest-joined org membership as their "primary" org for
- * self-issue. Used by `issueOwn` where the org isn't part of the input (a
- * regular member doesn't pass orgId — the system picks their canonical org).
- * NOT_FOUND if the user belongs to no org (defense in depth; in production
- * all real users should belong to at least one).
- *
- * KNOWN LIMITATION: This works while users belong to one org at a time
- * (v0.2.0 invite flow). Once multi-org membership lands, "primary org"
- * becomes ambiguous — a user can't choose which org's key to issue. Consider
- * adding an `orgId` optional input on `apiKeys.issueOwn` so the caller can
- * disambiguate.
- */
-async function resolveUserPrimaryOrgId(
-  db: Database,
-  userId: string,
-): Promise<string> {
-  const [row] = await db
-    .select({ orgId: organizationMembers.orgId })
-    .from(organizationMembers)
-    .where(eq(organizationMembers.userId, userId))
-    .orderBy(asc(organizationMembers.joinedAt))
-    .limit(1);
-  if (!row) {
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: "user has no organization membership",
-    });
-  }
-  return row.orgId;
-}
 
 // Columns the API surfaces to non-admin callers. Excludes anything that
 // could leak key material or expose internal reveal-flow bookkeeping.

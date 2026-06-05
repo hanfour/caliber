@@ -2,6 +2,7 @@ import { z } from "zod";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { upstreamAccounts, credentialVault } from "@caliber/db";
+import type { Database } from "@caliber/db";
 import { encryptCredential } from "@caliber/gateway-core";
 import { can } from "@caliber/auth";
 import {
@@ -9,7 +10,7 @@ import {
   permissionProcedure,
   router,
 } from "../procedures.js";
-import { assertTeamBelongsToOrg } from "./_shared.js";
+import { assertTeamBelongsToOrg, resolveUserPrimaryOrgId } from "./_shared.js";
 import { writeAudit } from "../../services/audit.js";
 
 const uuid = z.string().uuid();
@@ -117,6 +118,7 @@ function parseOauthExpiresAt(credentialsJson: string): Date | null {
   }
   return null;
 }
+
 
 export const accountsRouter = router({
   list: permissionProcedure(
@@ -261,6 +263,77 @@ export const accountsRouter = router({
           platform: account.platform,
           type: account.type,
           teamId: account.teamId,
+        },
+      });
+
+      return account;
+    });
+
+    return insertedRow;
+  }),
+
+  /**
+   * Self-service mutation: any authenticated member can register their OWN
+   * api_key upstream credential. The row is pinned to the caller's user id
+   * and their primary org; teamId is always null (team-scope is an admin
+   * concern). OAuth is a later phase — type is fixed to "api_key" here.
+   */
+  registerOwn: permissionProcedure(
+    z.object({
+      name: z.string().min(1).max(255),
+      platform: platformEnum,
+      type: z.literal("api_key"),
+      credentials: z.string().min(1).max(100_000),
+    }),
+    () => ({ type: "account.register_own" as const }),
+  ).mutation(async ({ ctx, input }) => {
+    ensureGatewayEnabled(ctx.env);
+    const masterKeyHex = requireMasterKeyHex(ctx.env);
+    const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
+
+    const insertedRow = await ctx.db.transaction(async (tx) => {
+      const [account] = await tx
+        .insert(upstreamAccounts)
+        .values({
+          orgId,
+          userId: ctx.user.id,
+          teamId: null,
+          name: input.name,
+          platform: input.platform,
+          type: "api_key",
+        })
+        .returning();
+      if (!account) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "failed to insert upstream account",
+        });
+      }
+
+      const sealed = encryptCredential({
+        masterKeyHex,
+        accountId: account.id,
+        plaintext: buildCredentialPlaintext("api_key", input.credentials),
+      });
+
+      await tx.insert(credentialVault).values({
+        accountId: account.id,
+        nonce: sealed.nonce,
+        ciphertext: sealed.ciphertext,
+        authTag: sealed.authTag,
+        oauthExpiresAt: null,
+      });
+
+      await writeAudit(tx, {
+        actorUserId: ctx.user.id,
+        action: "account.registered_own",
+        targetType: "upstream_account",
+        targetId: account.id,
+        orgId: account.orgId,
+        metadata: {
+          name: account.name,
+          platform: account.platform,
+          type: account.type,
         },
       });
 
