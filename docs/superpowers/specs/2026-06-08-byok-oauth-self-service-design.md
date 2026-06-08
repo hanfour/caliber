@@ -130,6 +130,7 @@
 | flow.userId ≠ caller | `FORBIDDEN` |
 | exchangeCode 失敗（碼無效/過期） | `BAD_REQUEST`「授權碼無效或已過期」 |
 | 重新授權目標非本人 oauth 上游 | `FORBIDDEN` |
+| 重新授權目標 platform 與 flow.platform 不符 | `BAD_REQUEST` |
 | anthropic 但 flag 關 | `NOT_FOUND`（功能未啟用） |
 
 flow-state 於**成功與終局失敗皆刪除**；user-friendly 訊息；不洩漏 token 或內部細節。
