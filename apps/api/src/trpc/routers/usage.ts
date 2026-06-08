@@ -288,4 +288,47 @@ export const usageRouter = router({
         totalCount: countRow?.totalCount ?? 0,
       };
     }),
+
+  // Error-rate counters over a window for the caller's OWN requests. Powers the
+  // self-service status dashboard (P3). own-only by design: the input refuses
+  // user/team/org scope, so the row set is locked to the caller via
+  // scopeWhere(own). status_code is NOT NULL, so every row lands in exactly
+  // one FILTER bucket or none. Authorization boundary is (a) protectedProcedure,
+  // (b) own-only input + scopeWhere, (c) ensureGatewayEnabled — NOT RBAC
+  // (usage.read_own returns true for every authenticated user).
+  errorSummary: protectedProcedure
+    .input(
+      z.object({
+        scope: z.object({ type: z.literal("own") }),
+        from: isoDateTime.optional(),
+        to: isoDateTime.optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      ensureGatewayEnabled(ctx.env);
+
+      const { from, to } = resolveWindow(input.from, input.to);
+      const where = and(
+        ...scopeWhere(input.scope, ctx.user.id),
+        gte(usageLogs.createdAt, from),
+        lte(usageLogs.createdAt, to),
+      );
+
+      const [row] = await ctx.db
+        .select({
+          totalRequests: sql<number>`COUNT(*)::int`,
+          errorRequests: sql<number>`COUNT(*) FILTER (WHERE ${usageLogs.statusCode} >= 400)::int`,
+          count429: sql<number>`COUNT(*) FILTER (WHERE ${usageLogs.statusCode} = 429)::int`,
+          count5xx: sql<number>`COUNT(*) FILTER (WHERE ${usageLogs.statusCode} >= 500)::int`,
+        })
+        .from(usageLogs)
+        .where(where);
+
+      return {
+        totalRequests: row?.totalRequests ?? 0,
+        errorRequests: row?.errorRequests ?? 0,
+        count429: row?.count429 ?? 0,
+        count5xx: row?.count5xx ?? 0,
+      };
+    }),
 });
