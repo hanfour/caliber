@@ -51,7 +51,8 @@
       "invites": "Invites",
       "auditLog": "Audit Log",
       "profile": "Profile",
-      "devices": "Devices"
+      "devices": "Devices",
+      "upstreams": "My Upstreams"
     },
     "topbar": {
       "switchTheme": "Toggle theme",
@@ -490,7 +491,14 @@
       "prefixLabel": "Prefix:",
       "done": "Done",
       "copied": "Copied",
-      "copyFail": "Clipboard unavailable"
+      "copyFail": "Clipboard unavailable",
+      "routingPolicyLabel": "Upstream routing",
+      "routingPolicyPool": "Shared pool",
+      "routingPolicyPoolHint": "Use the workspace's shared upstreams (default).",
+      "routingPolicyOwn": "Only my own",
+      "routingPolicyOwnHint": "Only use upstreams I've registered myself.",
+      "routingPolicyOwnThenPool": "Mine, then shared",
+      "routingPolicyOwnThenPoolHint": "Prefer my own; fall back to the shared pool if I have none."
     },
     "adminIssueDialog": {
       "title": "Issue API key",
@@ -511,6 +519,61 @@
       "urlLabel": "One-time URL",
       "copyUrlAriaLabel": "Copy one-time URL to clipboard",
       "expireNote": "If the user doesn't claim within 24h, the URL expires and a new key must be issued."
+    }
+  },
+  "upstreams": {
+    "pageTitle": "My Upstreams",
+    "pageSubtitle": "Register and manage your own upstream API credentials. Requests from your API keys set to \"own\" route only to these.",
+    "title": "Your upstream credentials",
+    "description": "Credentials you've registered. Only you can use them.",
+    "register": "Register credential",
+    "noneHint": "You haven't registered any upstream credentials yet.",
+    "colName": "Name",
+    "colPlatform": "Platform",
+    "colType": "Type",
+    "colStatus": "Status",
+    "colPriority": "Priority",
+    "colCreated": "Created",
+    "edit": "Edit",
+    "rotate": "Rotate",
+    "delete": "Delete",
+    "editAriaLabel": "Edit {name}",
+    "rotateAriaLabel": "Rotate credential for {name}",
+    "deleteAriaLabel": "Delete {name}",
+    "confirmDelete": "Delete the upstream credential \"{name}\"? This cannot be undone.",
+    "deletedToast": "Upstream credential deleted",
+    "platformAnthropic": "Anthropic",
+    "platformOpenAI": "OpenAI",
+    "registerDialog": {
+      "title": "Register an upstream credential",
+      "description": "Add your own API key. Requests from your \"own\"-policy API keys will route to it.",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. My Anthropic key",
+      "platformLabel": "Platform",
+      "credentialsLabel": "API key",
+      "credentialsHintAnthropic": "Paste your Anthropic API key (sk-ant-…).",
+      "credentialsHintOpenAI": "Paste your OpenAI-compatible API key (sk-… / sk-proj-…).",
+      "submit": "Register",
+      "submitting": "Registering…",
+      "createdToast": "Upstream credential registered"
+    },
+    "editDialog": {
+      "title": "Edit upstream credential",
+      "nameLabel": "Name",
+      "schedulableLabel": "Enabled (available for routing)",
+      "priorityLabel": "Priority (lower is preferred)",
+      "submit": "Save",
+      "submitting": "Saving…",
+      "savedToast": "Upstream credential updated"
+    },
+    "rotateDialog": {
+      "title": "Rotate credential",
+      "description": "Replace the stored API key for \"{name}\". The account and its usage history are kept.",
+      "warning": "This replaces the stored credential immediately.",
+      "credentialsLabel": "New API key",
+      "submit": "Rotate",
+      "submitting": "Rotating…",
+      "rotatedToast": "Credential rotated"
     }
   },
   "usage": {

@@ -51,7 +51,8 @@
       "invites": "招待",
       "auditLog": "監査ログ",
       "profile": "プロフィール",
-      "devices": "デバイス"
+      "devices": "デバイス",
+      "upstreams": "マイアップストリーム"
     },
     "topbar": {
       "switchTheme": "テーマを切り替え",
@@ -490,7 +491,14 @@
       "prefixLabel": "プレフィックス:",
       "done": "完了",
       "copied": "コピーしました",
-      "copyFail": "クリップボードが利用できません"
+      "copyFail": "クリップボードが利用できません",
+      "routingPolicyLabel": "アップストリームルーティング",
+      "routingPolicyPool": "共有プール",
+      "routingPolicyPoolHint": "ワークスペースの共有アップストリームを使用します（デフォルト）。",
+      "routingPolicyOwn": "自分のみ",
+      "routingPolicyOwnHint": "自分が登録したアップストリームのみ使用します。",
+      "routingPolicyOwnThenPool": "自分優先、次に共有",
+      "routingPolicyOwnThenPoolHint": "自分のものを優先し、なければ共有プールにフォールバックします。"
     },
     "adminIssueDialog": {
       "title": "API キーを発行",
@@ -511,6 +519,61 @@
       "urlLabel": "使い切り URL",
       "copyUrlAriaLabel": "使い切り URL をクリップボードにコピー",
       "expireNote": "ユーザーが 24 時間以内に受領しない場合、URL は失効し、新しいキーを発行する必要があります。"
+    }
+  },
+  "upstreams": {
+    "pageTitle": "マイアップストリーム",
+    "pageSubtitle": "自分のアップストリーム API 認証情報を登録・管理します。「自分のみ」に設定した API キーからのリクエストはここにのみルーティングされます。",
+    "title": "あなたのアップストリーム認証情報",
+    "description": "あなたが登録した認証情報。使用できるのはあなただけです。",
+    "register": "認証情報を登録",
+    "noneHint": "まだアップストリーム認証情報が登録されていません。",
+    "colName": "名前",
+    "colPlatform": "プラットフォーム",
+    "colType": "タイプ",
+    "colStatus": "状態",
+    "colPriority": "優先度",
+    "colCreated": "作成日時",
+    "edit": "編集",
+    "rotate": "ローテート",
+    "delete": "削除",
+    "editAriaLabel": "{name} を編集",
+    "rotateAriaLabel": "{name} の認証情報をローテート",
+    "deleteAriaLabel": "{name} を削除",
+    "confirmDelete": "アップストリーム認証情報「{name}」を削除しますか？この操作は元に戻せません。",
+    "deletedToast": "アップストリーム認証情報を削除しました",
+    "platformAnthropic": "Anthropic",
+    "platformOpenAI": "OpenAI",
+    "registerDialog": {
+      "title": "アップストリーム認証情報を登録",
+      "description": "自分の API キーを追加します。「自分のみ」ポリシーの API キーからのリクエストがここにルーティングされます。",
+      "nameLabel": "名前",
+      "namePlaceholder": "例: マイ Anthropic キー",
+      "platformLabel": "プラットフォーム",
+      "credentialsLabel": "API キー",
+      "credentialsHintAnthropic": "Anthropic API キー（sk-ant-…）を貼り付けてください。",
+      "credentialsHintOpenAI": "OpenAI 互換 API キー（sk-… / sk-proj-…）を貼り付けてください。",
+      "submit": "登録",
+      "submitting": "登録中…",
+      "createdToast": "アップストリーム認証情報を登録しました"
+    },
+    "editDialog": {
+      "title": "アップストリーム認証情報を編集",
+      "nameLabel": "名前",
+      "schedulableLabel": "有効（ルーティングに使用可能）",
+      "priorityLabel": "優先度（低いほど優先）",
+      "submit": "保存",
+      "submitting": "保存中…",
+      "savedToast": "アップストリーム認証情報を更新しました"
+    },
+    "rotateDialog": {
+      "title": "認証情報をローテート",
+      "description": "「{name}」の保存された API キーを置き換えます。アカウントと使用履歴は保持されます。",
+      "warning": "これにより保存された認証情報がすぐに置き換えられます。",
+      "credentialsLabel": "新しい API キー",
+      "submit": "ローテート",
+      "submitting": "ローテート中…",
+      "rotatedToast": "認証情報をローテートしました"
     }
   },
   "usage": {

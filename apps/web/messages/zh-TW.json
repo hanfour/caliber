@@ -51,7 +51,8 @@
       "invites": "邀請",
       "auditLog": "稽核紀錄",
       "profile": "個人檔案",
-      "devices": "裝置"
+      "devices": "裝置",
+      "upstreams": "我的上游"
     },
     "topbar": {
       "switchTheme": "切換佈景主題",
@@ -490,7 +491,14 @@
       "prefixLabel": "前綴:",
       "done": "完成",
       "copied": "已複製",
-      "copyFail": "剪貼簿不可用"
+      "copyFail": "剪貼簿不可用",
+      "routingPolicyLabel": "上游路由",
+      "routingPolicyPool": "共用池",
+      "routingPolicyPoolHint": "使用工作區的共享上游（預設）。",
+      "routingPolicyOwn": "只用自己的",
+      "routingPolicyOwnHint": "只使用我自己登錄的上游。",
+      "routingPolicyOwnThenPool": "先自己，再共用",
+      "routingPolicyOwnThenPoolHint": "優先用我自己的；沒有時退回共用池。"
     },
     "adminIssueDialog": {
       "title": "簽發 API 金鑰",
@@ -511,6 +519,61 @@
       "urlLabel": "一次性 URL",
       "copyUrlAriaLabel": "複製一次性 URL 至剪貼簿",
       "expireNote": "若使用者未在 24 小時內認領,URL 將失效,需要重新簽發。"
+    }
+  },
+  "upstreams": {
+    "pageTitle": "我的上游",
+    "pageSubtitle": "登錄並管理你自己的上游 API 憑證。設為「只用自己」的 API key 只會路由到這些上游。",
+    "title": "你的上游憑證",
+    "description": "你登錄的憑證，只有你能使用。",
+    "register": "登錄憑證",
+    "noneHint": "你尚未登錄任何上游憑證。",
+    "colName": "名稱",
+    "colPlatform": "平台",
+    "colType": "類型",
+    "colStatus": "狀態",
+    "colPriority": "優先序",
+    "colCreated": "建立時間",
+    "edit": "編輯",
+    "rotate": "輪替",
+    "delete": "刪除",
+    "editAriaLabel": "編輯 {name}",
+    "rotateAriaLabel": "輪替 {name} 的憑證",
+    "deleteAriaLabel": "刪除 {name}",
+    "confirmDelete": "刪除上游憑證「{name}」？此操作無法復原。",
+    "deletedToast": "已刪除上游憑證",
+    "platformAnthropic": "Anthropic",
+    "platformOpenAI": "OpenAI",
+    "registerDialog": {
+      "title": "登錄上游憑證",
+      "description": "新增你自己的 API key。你「只用自己」策略的 API key 會路由到它。",
+      "nameLabel": "名稱",
+      "namePlaceholder": "例如：我的 Anthropic key",
+      "platformLabel": "平台",
+      "credentialsLabel": "API key",
+      "credentialsHintAnthropic": "貼上你的 Anthropic API key（sk-ant-…）。",
+      "credentialsHintOpenAI": "貼上你的 OpenAI 相容 API key（sk-… / sk-proj-…）。",
+      "submit": "登錄",
+      "submitting": "登錄中…",
+      "createdToast": "已登錄上游憑證"
+    },
+    "editDialog": {
+      "title": "編輯上游憑證",
+      "nameLabel": "名稱",
+      "schedulableLabel": "啟用（可供路由）",
+      "priorityLabel": "優先序（越小越優先）",
+      "submit": "儲存",
+      "submitting": "儲存中…",
+      "savedToast": "已更新上游憑證"
+    },
+    "rotateDialog": {
+      "title": "輪替憑證",
+      "description": "取代「{name}」儲存的 API key。帳號與使用歷史保留。",
+      "warning": "這會立即取代儲存的憑證。",
+      "credentialsLabel": "新 API key",
+      "submit": "輪替",
+      "submitting": "輪替中…",
+      "rotatedToast": "已輪替憑證"
     }
   },
   "usage": {

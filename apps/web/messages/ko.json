@@ -51,7 +51,8 @@
       "invites": "초대",
       "auditLog": "감사 로그",
       "profile": "프로필",
-      "devices": "디바이스"
+      "devices": "디바이스",
+      "upstreams": "내 업스트림"
     },
     "topbar": {
       "switchTheme": "테마 전환",
@@ -490,7 +491,14 @@
       "prefixLabel": "접두사:",
       "done": "완료",
       "copied": "복사됨",
-      "copyFail": "클립보드를 사용할 수 없습니다"
+      "copyFail": "클립보드를 사용할 수 없습니다",
+      "routingPolicyLabel": "업스트림 라우팅",
+      "routingPolicyPool": "공유 풀",
+      "routingPolicyPoolHint": "워크스페이스의 공유 업스트림을 사용합니다（기본값）。",
+      "routingPolicyOwn": "내 것만",
+      "routingPolicyOwnHint": "내가 직접 등록한 업스트림만 사용합니다.",
+      "routingPolicyOwnThenPool": "내 것 우선, 그 다음 공유",
+      "routingPolicyOwnThenPoolHint": "내 것을 우선 사용하고, 없으면 공유 풀로 폴백합니다."
     },
     "adminIssueDialog": {
       "title": "API 키 발급",
@@ -511,6 +519,61 @@
       "urlLabel": "일회용 URL",
       "copyUrlAriaLabel": "일회용 URL을 클립보드에 복사",
       "expireNote": "사용자가 24시간 이내에 수령하지 않으면 URL이 만료되고 새 키를 발급해야 합니다."
+    }
+  },
+  "upstreams": {
+    "pageTitle": "내 업스트림",
+    "pageSubtitle": "자신의 업스트림 API 자격증명을 등록하고 관리합니다. 「내 것만」으로 설정된 API 키의 요청은 여기에만 라우팅됩니다.",
+    "title": "내 업스트림 자격증명",
+    "description": "내가 등록한 자격증명. 나만 사용할 수 있습니다.",
+    "register": "자격증명 등록",
+    "noneHint": "아직 등록된 업스트림 자격증명이 없습니다.",
+    "colName": "이름",
+    "colPlatform": "플랫폼",
+    "colType": "유형",
+    "colStatus": "상태",
+    "colPriority": "우선순위",
+    "colCreated": "생성 시각",
+    "edit": "편집",
+    "rotate": "교체",
+    "delete": "삭제",
+    "editAriaLabel": "{name} 편집",
+    "rotateAriaLabel": "{name}의 자격증명 교체",
+    "deleteAriaLabel": "{name} 삭제",
+    "confirmDelete": "업스트림 자격증명 \"{name}\"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "deletedToast": "업스트림 자격증명이 삭제되었습니다",
+    "platformAnthropic": "Anthropic",
+    "platformOpenAI": "OpenAI",
+    "registerDialog": {
+      "title": "업스트림 자격증명 등록",
+      "description": "내 API 키를 추가합니다. 「내 것만」 정책의 API 키 요청이 여기로 라우팅됩니다.",
+      "nameLabel": "이름",
+      "namePlaceholder": "예: 내 Anthropic 키",
+      "platformLabel": "플랫폼",
+      "credentialsLabel": "API 키",
+      "credentialsHintAnthropic": "Anthropic API 키(sk-ant-…)를 붙여넣으세요.",
+      "credentialsHintOpenAI": "OpenAI 호환 API 키(sk-… / sk-proj-…)를 붙여넣으세요.",
+      "submit": "등록",
+      "submitting": "등록 중…",
+      "createdToast": "업스트림 자격증명이 등록되었습니다"
+    },
+    "editDialog": {
+      "title": "업스트림 자격증명 편집",
+      "nameLabel": "이름",
+      "schedulableLabel": "활성화（라우팅에 사용 가능）",
+      "priorityLabel": "우선순위（낮을수록 우선）",
+      "submit": "저장",
+      "submitting": "저장 중…",
+      "savedToast": "업스트림 자격증명이 업데이트되었습니다"
+    },
+    "rotateDialog": {
+      "title": "자격증명 교체",
+      "description": "「{name}」에 저장된 API 키를 교체합니다. 계정과 사용 기록은 유지됩니다.",
+      "warning": "저장된 자격증명이 즉시 교체됩니다.",
+      "credentialsLabel": "새 API 키",
+      "submit": "교체",
+      "submitting": "교체 중…",
+      "rotatedToast": "자격증명이 교체되었습니다"
     }
   },
   "usage": {

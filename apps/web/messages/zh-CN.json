@@ -51,7 +51,8 @@
       "invites": "邀请",
       "auditLog": "审计日志",
       "profile": "个人资料",
-      "devices": "设备"
+      "devices": "设备",
+      "upstreams": "我的上游"
     },
     "topbar": {
       "switchTheme": "切换主题",
@@ -490,7 +491,14 @@
       "prefixLabel": "前缀:",
       "done": "完成",
       "copied": "已复制",
-      "copyFail": "剪贴板不可用"
+      "copyFail": "剪贴板不可用",
+      "routingPolicyLabel": "上游路由",
+      "routingPolicyPool": "共用池",
+      "routingPolicyPoolHint": "使用工作区的共享上游（默认）。",
+      "routingPolicyOwn": "只用自己的",
+      "routingPolicyOwnHint": "只使用我自己注册的上游。",
+      "routingPolicyOwnThenPool": "先自己，再共用",
+      "routingPolicyOwnThenPoolHint": "优先用我自己的；没有时回退到共用池。"
     },
     "adminIssueDialog": {
       "title": "签发 API 密钥",
@@ -511,6 +519,61 @@
       "urlLabel": "一次性 URL",
       "copyUrlAriaLabel": "复制一次性 URL 到剪贴板",
       "expireNote": "若用户未在 24 小时内认领,URL 将失效,需要重新签发。"
+    }
+  },
+  "upstreams": {
+    "pageTitle": "我的上游",
+    "pageSubtitle": "注册并管理你自己的上游 API 凭证。设为「只用自己」的 API key 只会路由到这些上游。",
+    "title": "你的上游凭证",
+    "description": "你注册的凭证，只有你能使用。",
+    "register": "注册凭证",
+    "noneHint": "你尚未注册任何上游凭证。",
+    "colName": "名称",
+    "colPlatform": "平台",
+    "colType": "类型",
+    "colStatus": "状态",
+    "colPriority": "优先级",
+    "colCreated": "创建时间",
+    "edit": "编辑",
+    "rotate": "轮替",
+    "delete": "删除",
+    "editAriaLabel": "编辑 {name}",
+    "rotateAriaLabel": "轮替 {name} 的凭证",
+    "deleteAriaLabel": "删除 {name}",
+    "confirmDelete": "删除上游凭证「{name}」？此操作无法恢复。",
+    "deletedToast": "已删除上游凭证",
+    "platformAnthropic": "Anthropic",
+    "platformOpenAI": "OpenAI",
+    "registerDialog": {
+      "title": "注册上游凭证",
+      "description": "添加你自己的 API key。你「只用自己」策略的 API key 会路由到它。",
+      "nameLabel": "名称",
+      "namePlaceholder": "例如：我的 Anthropic key",
+      "platformLabel": "平台",
+      "credentialsLabel": "API key",
+      "credentialsHintAnthropic": "粘贴你的 Anthropic API key（sk-ant-…）。",
+      "credentialsHintOpenAI": "粘贴你的 OpenAI 兼容 API key（sk-… / sk-proj-…）。",
+      "submit": "注册",
+      "submitting": "注册中…",
+      "createdToast": "已注册上游凭证"
+    },
+    "editDialog": {
+      "title": "编辑上游凭证",
+      "nameLabel": "名称",
+      "schedulableLabel": "启用（可供路由）",
+      "priorityLabel": "优先级（越小越优先）",
+      "submit": "保存",
+      "submitting": "保存中…",
+      "savedToast": "已更新上游凭证"
+    },
+    "rotateDialog": {
+      "title": "轮替凭证",
+      "description": "替换「{name}」存储的 API key。账号与使用历史保留。",
+      "warning": "这会立即替换存储的凭证。",
+      "credentialsLabel": "新 API key",
+      "submit": "轮替",
+      "submitting": "轮替中…",
+      "rotatedToast": "已轮替凭证"
     }
   },
   "usage": {
