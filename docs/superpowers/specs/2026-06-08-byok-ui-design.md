@@ -71,10 +71,16 @@ All under `apps/web/src/components/upstreams/`.
   `inferRouterOutputs<AppRouter>["accounts"]["listOwn"][number]`.
 - Loading / error / empty states identical in shape to `DeviceList`.
 - Table columns: **name**, **platform**, **type** (render the row's actual `type` — api_key today,
-  but don't hard-assume it, so a future P2 OAuth-owned row displays correctly), **status** (active /
-  expired / disabled — from the row's `status` + `schedulable`), **priority**, **created / last used**.
-- Row actions: **Edit** (opens `UpstreamEditDialog`), **Rotate** (opens `UpstreamRotateDialog`),
-  **Delete**.
+  but don't hard-assume it, so a future P2 OAuth-owned row displays correctly), **status**, **priority**,
+  **created / last used**.
+- **Status:** reuse the existing account-status derivation rather than a reductive enum — mirror
+  `deriveAccountStatus` / `StatusBadge` (`apps/web/src/components/accounts/status.tsx`), which already
+  handles rate-limited / overloaded / paused / expired / error / active from the row's
+  `rateLimitedAt` / `overloadUntil` / `tempUnschedulableUntil` / `expiresAt` / `errorMessage` /
+  `schedulable` fields. No per-upstream detail page (P3) — just the badge.
+- Row actions: **Edit** (opens `UpstreamEditDialog`), **Rotate** (opens `UpstreamRotateDialog` —
+  **shown/enabled only for `type === "api_key"` rows**, since `rotateOwn`'s textarea flow is the
+  api_key credential path; a future OAuth-owned row must not be rotated through it), **Delete**.
 - Header button **"Register credential"** opens `UpstreamRegisterDialog`.
 - Delete: `const confirm = useConfirm()` (`@/components/ui/confirm-dialog`) →
   `await confirm({ description: t("confirmDelete", { name }), destructive: true })` →
@@ -95,6 +101,10 @@ All under `apps/web/src/components/upstreams/`.
 - Metadata-only edit for an existing own upstream. Fields: name `<Input>`,
   schedulable enable/disable (toggle/checkbox), priority `<input type=number min=0 max=1000>`.
   Prefilled from the row. **No credentials field.**
+- **Priority must coerce to a number:** a native `type=number` input yields a string via RHF, which
+  a `z.number()` schema would reject. Use `register("priority", { valueAsNumber: true })` (or
+  `z.coerce.number().int().min(0).max(1000)` in the schema) so a valid numeric input passes
+  validation.
 - Submit: `trpc.accounts.updateOwn.useMutation({ ... })` → invalidate + toast.
 
 ### 2.4 `UpstreamRotateDialog.tsx`
@@ -106,7 +116,10 @@ All under `apps/web/src/components/upstreams/`.
 
 In `apps/web/src/components/apiKeys/ApiKeyCreateDialog.tsx` (the **member self-issue** dialog,
 which calls `apiKeys.issueOwn` and has **no** group selector):
-- Add `routingPolicy: z.enum(["pool","own","own_then_pool"]).default("pool")` to the form schema.
+- Add `routingPolicy: z.enum(["pool","own","own_then_pool"]).default("pool")` to the form schema,
+  AND set it explicitly in the form's `defaultValues` / `reset({ routingPolicy: "pool", ... })` —
+  don't rely on the zod `.default()` alone (RHF needs the controlled default so the `<select>`
+  renders `pool` and resets correctly on close).
 - Render a native `<select>` (default `pool`) with a one-line helper per option:
   - **pool** — "Use the workspace's shared upstreams" (default).
   - **own** — "Only use upstreams I've registered myself."
@@ -114,6 +127,11 @@ which calls `apiKeys.issueOwn` and has **no** group selector):
 - Pass `routingPolicy` into `issueOwn.mutateAsync({ name, routingPolicy })`.
 - No mutual-exclusion concern: this dialog has no `groupId` (the DB CHECK is satisfied trivially).
 - The admin `AdminIssueDialog` is unchanged (keeps its group selector; pool routing).
+- **The api-key LIST does NOT display the routing policy of existing keys.** `apiKeys.listOwn`'s
+  projection (`apps/api/src/trpc/routers/apiKeys.ts`) does not return `routingPolicy`, so showing it
+  per-row would require an API change — out of scope for this pure-`apps/web` project. routing_policy
+  is therefore set at **issue time only**; surfacing it in the list is a noted future enhancement
+  (add `routingPolicy` to the `listOwn` projection) but NOT part of this spec.
 
 ## 4. i18n
 
@@ -138,15 +156,17 @@ sufficient guidance.
 
 ## 6. Testing
 
-- First detect whether `apps/web` has a component-test setup (vitest + @testing-library/react).
-  Check `apps/web/package.json` test script + any existing `*.test.tsx`.
-- **If a web test harness exists:** add focused tests — `UpstreamOwnList` (renders rows from a
-  mocked `listOwn`, empty state), `UpstreamRegisterDialog` (submits with `type:"api_key"` injected,
-  blocks empty credential), and the `ApiKeyCreateDialog` routing_policy selector (defaults `pool`,
-  passes the chosen value to `issueOwn`). Mock the tRPC hooks as existing web tests do.
-- **If no web component-test harness exists:** do NOT stand one up for this feature. Rely on
-  `tsc --noEmit` (typecheck) + a manual/browser smoke against the deployed app (the established
-  verification path for this web app). State this explicitly in the plan.
+`apps/web` already has a Vitest + Testing Library harness (`apps/web/package.json` test script,
+`apps/web/vitest.config.ts`, existing `*.test.tsx`). **Add focused component tests** (mirror how
+existing web tests mock the tRPC hooks):
+- `UpstreamOwnList` — renders rows from a mocked `listOwn`; empty state; the **Rotate action is
+  shown only for `type === "api_key"` rows** (guard test).
+- `UpstreamRegisterDialog` — submits with `type:"api_key"` injected; blocks empty credential.
+- `UpstreamEditDialog` — priority input round-trips as a **number** (valueAsNumber/coerce), not a
+  string that zod rejects.
+- `ApiKeyCreateDialog` routing_policy selector — defaults to `pool` and passes the chosen value to
+  `issueOwn`.
+Plus `tsc --noEmit` clean. (No need to stand up new infra — it exists.)
 
 ## 7. Patterns to mirror (file refs)
 
