@@ -32,7 +32,8 @@ The full backend already exists and is live-verified on deployed v0.8.0; this is
 ## Non-Goals
 - OAuth self-service in the UI (P2).
 - Credential health/expiry detail, probe-on-save, usage charts per upstream (P3) — the list shows
-  only the backend's existing `status` (active / expired / disabled).
+  the existing derived status badge (§2.1, reusing `deriveAccountStatus`/`StatusBadge`); no detail
+  page, no probe, no charts.
 - Admin issuing an own-policy key for another user (edge case; AdminIssueDialog keeps group binding).
 - Any backend (tRPC/gateway/DB) change — all backend is already shipped in v0.8.0.
 
@@ -88,7 +89,10 @@ All under `apps/web/src/components/upstreams/`.
 
 ### 2.2 `UpstreamRegisterDialog.tsx` (mirror `AccountCreateForm.tsx`, simplified)
 - `react-hook-form` + `useTranslatedZodResolver`. Schema:
-  `{ name: z.string().min(1,"validation.custom.shared.nameRequired").max(255), platform: z.enum(["anthropic","openai"]), credentials: z.string().min(1).max(100_000) }`.
+  `{ name: z.string().min(1,"validation.custom.shared.nameRequired").max(255), platform: z.enum(["anthropic","openai"]), credentials: z.string().min(1,"validation.custom.accounts.credentialsRequired").max(100_000) }`.
+  (Use the existing `validation.custom.accounts.credentialsRequired` key for the empty-credential
+  message so `useTranslatedZodResolver` translates it — a bare `.min(1)` would show an untranslated
+  default.)
 - Fields: name `<Input>`; platform native `<select>` (anthropic / openai) with the existing
   platform hints; credentials native `<textarea rows={6}>` with placeholder switching by platform
   (`sk-ant-…` / `sk-…`). **No `type` field** — fixed `api_key` at the mutation call.
@@ -109,8 +113,9 @@ All under `apps/web/src/components/upstreams/`.
 
 ### 2.4 `UpstreamRotateDialog.tsx`
 - Single credentials `<textarea>` (re-enter), with an amber warning row "this replaces the stored
-  credential". Submit: `trpc.accounts.rotateOwn.useMutation({ ... })` → invalidate + toast.
-  **No reveal.** Reset on close.
+  credential". Schema: `credentials: z.string().min(1,"validation.custom.accounts.credentialsRequired").max(100_000)`
+  (same translated key as register). Submit: `trpc.accounts.rotateOwn.useMutation({ ... })` →
+  invalidate + toast. **No reveal.** Reset on close.
 
 ## 3. routing_policy Selector on the member api-key dialog
 
