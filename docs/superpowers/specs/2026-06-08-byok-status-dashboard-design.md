@@ -14,7 +14,7 @@
 2. **錯誤率/速率狀態** — 自己最近請求的錯誤比例（429／5xx）與上游速率限制狀態。
 3. **即時活動/最近使用** — 自己最近的請求（次數／延遲／模型／成本）與最近 N 筆明細。
 
-所有資料一律 **以呼叫者 `userId` 為 scope**，不跨用戶、不跨租戶。
+所有資料一律 **以呼叫者本人的 `userId` 為 scope**（只回呼叫者 authored 的列）。單組織部署下即等同「只看自己」；多組織情境下語意為「自己在任何組織的請求」，但**永不含他人資料**。
 
 ### 非目標（本期不做）
 
@@ -59,7 +59,7 @@
 
 ## 3. 後端：唯一新端點 `usage.errorSummary`
 
-加在現有 `apps/api/src/trpc/routers/usage.ts` 的 `usageRouter`，**完全比照** `summary`/`list` 的既有樣式，複用同檔內的 `scopeSchema`、`scopeWhere`、`ensureCanReadScope`、`resolveWindow`、`isoDateTime`、`ensureGatewayEnabled`。
+加在現有 `apps/api/src/trpc/routers/usage.ts` 的 `usageRouter`，比照 `summary`/`list` 的既有樣式，複用同檔內的 `scopeWhere`、`resolveWindow`、`isoDateTime`、`ensureGatewayEnabled`。**差別**：本端點刻意**只接受 `own` scope**（不收 `user`/`team`/`org`），因為它是用戶自視圖；收緊 input 就從型別層關閉以特權 scope 呼叫的可能。
 
 ### 介面
 
@@ -67,18 +67,19 @@
 errorSummary: protectedProcedure
   .input(
     z.object({
-      scope: scopeSchema,           // 本頁只傳 { type: "own" }
+      // own-only：刻意只收 own。本頁是用戶自視圖，不需要也不應接受
+      // user/team/org scope。input 收緊即為授權邊界（見 §7 INV-S2）。
+      scope: z.object({ type: z.literal("own") }),
       from: isoDateTime.optional(),
       to: isoDateTime.optional(),
     }),
   )
   .query(async ({ ctx, input }) => {
-    ensureGatewayEnabled(ctx.env);
-    ensureCanReadScope(ctx.perm, input.scope);   // own → usage.read_own
+    ensureGatewayEnabled(ctx.env);   // ENABLE_GATEWAY=false → NOT_FOUND
 
     const { from, to } = resolveWindow(input.from, input.to);
     const where = and(
-      ...scopeWhere(input.scope, ctx.user.id),
+      ...scopeWhere(input.scope, ctx.user.id),   // own → userId = caller
       gte(usageLogs.createdAt, from),
       lte(usageLogs.createdAt, to),
     );
@@ -106,9 +107,9 @@ errorSummary: protectedProcedure
 
 - **錯誤率 % 由前端算**（`errorRequests / totalRequests`），避免 SQL 浮點格式化；`totalRequests = 0` 時前端顯示 `0%`。
 - **預設視窗**：`resolveWindow` 既有預設（與 `summary` 一致）。本頁前端傳「過去 24h」的 `from`，明確界定錯誤率視窗。
-- **授權**：`scope:{type:"own"}` → `usage.read_own`，由既有 `ensureCanReadScope` 把關；無權限丟 tRPC `FORBIDDEN`。
-- **scope 過濾**：既有 `scopeWhere` 對 `own` 產生 `usageLogs.userId = caller.id`，天然多租戶安全。
-- `statusCode` 為 `usage_logs` 既有欄位（nullable int）；`FILTER` 對 NULL 自動不計入，符合「未知狀態不算錯誤」語意。
+- **授權邊界**：`usage.read_own` 在 RBAC 對任何已登入用戶皆回 `true`（見 `packages/auth/src/rbac/check.ts`），因此 own-only 端點不會、也不需要產生 `FORBIDDEN`。真正的守門是 `ensureGatewayEnabled`（`ENABLE_GATEWAY=false → NOT_FOUND`）+ input 只接受 `own` 把 scope 鎖死在呼叫者本人。
+- **scope 過濾**：`scopeWhere(own)` 產生 `usageLogs.userId = caller.id`（無 orgId filter — 語意是「呼叫者本人 authored 的列」，見 §1 與 INV-S1）。
+- `statusCode` 為 `NOT NULL` 整數欄（`packages/db/src/schema/usageLogs.ts`），`FILTER` 條件對每列都成立或不成立，無 NULL 邊界。
 
 ---
 
@@ -155,12 +156,11 @@ errorSummary: protectedProcedure
 
 ### 後端 — `usage.errorSummary`（integration，比照既有 usage router 測試）
 
-- 429/5xx/4xx 計數正確：構造混合 statusCode 的 usage_logs，斷言四個計數值。
-- `scope:{type:"own"}` 只計 caller 自己的列（插入他人 userId 的列，斷言不被計入）。
-- 缺 `usage.read_own` 權限 → `FORBIDDEN`。
+- 429/5xx/4xx/2xx 計數正確：構造混合 statusCode 的 usage_logs，斷言四個計數值（含 4xx 非 429 計入 errorRequests 但不計 count429/count5xx）。
+- **用戶隔離**：`scope:{type:"own"}` 只計 caller 自己的列 — 插入他人 `userId` 的列（含錯誤狀態），斷言不被計入任何計數。
+- **gateway 守門**：`ENABLE_GATEWAY=false` → `NOT_FOUND`（`ensureGatewayEnabled`）。
 - 時間視窗過濾：視窗外的列不計入。
 - 空窗 → 全 0（不丟 null）。
-- `statusCode` 為 NULL 的列不計入 errorRequests。
 
 ### 前端（Vitest + Testing Library，`vi.mock("@/lib/trpc/client")`）
 
@@ -175,7 +175,7 @@ errorSummary: protectedProcedure
 ## 7. 不變式與安全
 
 - **INV-S1：用戶隔離** — 三區塊所有查詢一律 scope 到 `caller.userId`（① `listOwn` 的 `userId=ctx.user.id`；②③ 的 `scopeWhere(own)` = `userId=caller`）。任何區塊都不得回傳他人資料。
-- **INV-S2：授權一致** — ② 沿用 `usage.read_own`，與既有 `summary`/`list` 同一授權路徑，不另闢權限旁路。
+- **INV-S2：scope 鎖死於本人** — ② `errorSummary` 的 input 只接受 `{type:"own"}`，型別層即排除 `user`/`team`/`org` scope；`scopeWhere(own)` 再把列限制在 `userId=caller`。授權邊界靠 input 收緊 + `ensureGatewayEnabled`，而非 RBAC（`usage.read_own` 對任何登入者皆 true，無法當守門）。
 - **INV-S3：零 schema** — 不新增/改動資料表；純讀取既有 `upstream_accounts` 與 `usage_logs`。
 - 錯誤訊息不洩漏內部憑證內容或他租戶資訊。
 
