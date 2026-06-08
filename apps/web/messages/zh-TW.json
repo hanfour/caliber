@@ -52,7 +52,8 @@
       "auditLog": "稽核紀錄",
       "profile": "個人檔案",
       "devices": "裝置",
-      "upstreams": "我的上游"
+      "upstreams": "我的上游",
+      "status": "狀況"
     },
     "topbar": {
       "switchTheme": "切換佈景主題",
@@ -574,6 +575,49 @@
       "submit": "輪替",
       "submitting": "輪替中…",
       "rotatedToast": "已輪替憑證"
+    }
+  },
+  "status": {
+    "pageTitle": "狀況",
+    "pageSubtitle": "你自己的上游與使用的健康狀況與最近活動。",
+    "refresh": "重新整理",
+    "health": {
+      "title": "憑證健康",
+      "description": "你登錄的上游的狀態與到期。",
+      "empty": "你尚未登錄任何上游憑證。",
+      "manageLink": "管理上游",
+      "colName": "名稱",
+      "colStatus": "狀態",
+      "colExpiry": "到期",
+      "colError": "最後錯誤",
+      "loadError": "無法載入憑證健康，請稍後重試。"
+    },
+    "errorRate": {
+      "title": "錯誤率",
+      "description": "過去 24 小時你請求的錯誤。",
+      "rate": "錯誤率",
+      "count429": "速率限制 (429)",
+      "count5xx": "伺服器錯誤 (5xx)",
+      "loadError": "無法載入錯誤統計，請稍後重試。"
+    },
+    "activity": {
+      "title": "最近活動",
+      "description": "你最近的請求。",
+      "empty": "尚無使用紀錄。",
+      "summary": "{requests} 次請求 · {cost}",
+      "colTime": "時間",
+      "colSurface": "介面",
+      "colModel": "模型",
+      "colStatus": "狀態",
+      "colLatency": "延遲",
+      "colCost": "成本",
+      "loadError": "無法載入最近活動，請稍後重試。",
+      "summaryLoadError": "無法載入摘要。"
+    },
+    "expiry": {
+      "none": "—",
+      "expired": "已過期",
+      "days": "{days} 天"
     }
   },
   "usage": {

@@ -106,6 +106,7 @@ interface SeedRow {
   outputTokens?: number;
   cacheCreationTokens?: number;
   cacheReadTokens?: number;
+  statusCode?: number;
   createdAt?: Date;
 }
 
@@ -134,7 +135,7 @@ async function insertUsageRow(db: Database, opts: SeedRow) {
     rateMultiplier: "1.0000",
     accountRateMultiplier: "1.0000",
     stream: false,
-    statusCode: 200,
+    statusCode: opts.statusCode ?? 200,
     durationMs: 1234,
     upstreamRetries: 0,
     ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
@@ -666,5 +667,58 @@ describe("usage router", () => {
     await expect(
       caller.usage.list({ scope: { type: "own" }, pageSize: 201 }),
     ).rejects.toThrow();
+  });
+});
+
+describe("usage.errorSummary", () => {
+  it("counts 4xx/429/5xx for the caller and ignores other users", async () => {
+    const org = await makeOrg(t.db);
+    const a = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const b = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const account = await seedAccount(t.db, org.id);
+    const aKey = await seedApiKey(t.db, { userId: a.id, orgId: org.id });
+    const bKey = await seedApiKey(t.db, { userId: b.id, orgId: org.id });
+
+    // A: 200, 200, 429, 500, 403 → total 5, errors 3 (429+500+403), 429×1, 5xx×1
+    for (const code of [200, 200, 429, 500, 403]) {
+      await insertUsageRow(t.db, { userId: a.id, apiKeyId: aKey, accountId: account, orgId: org.id, statusCode: code });
+    }
+    // B: a 500 that must NOT be counted for A
+    await insertUsageRow(t.db, { userId: b.id, apiKeyId: bKey, accountId: account, orgId: org.id, statusCode: 500 });
+
+    const callerA = await callerFor({ db: t.db, userId: a.id });
+    const res = await callerA.usage.errorSummary({ scope: { type: "own" } });
+
+    expect(res.totalRequests).toBe(5);
+    expect(res.errorRequests).toBe(3);
+    expect(res.count429).toBe(1);
+    expect(res.count5xx).toBe(1);
+  });
+
+  it("returns all-zero for an empty window", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const caller = await callerFor({ db: t.db, userId: u.id });
+    const res = await caller.usage.errorSummary({ scope: { type: "own" } });
+    expect(res).toEqual({ totalRequests: 0, errorRequests: 0, count429: 0, count5xx: 0 });
+  });
+
+  it("excludes rows outside the default 30-day window", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: u.id, orgId: org.id });
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000); // 40d ago; default window is 30d
+    await insertUsageRow(t.db, { userId: u.id, apiKeyId: key, accountId: account, orgId: org.id, statusCode: 500, createdAt: old });
+    const caller = await callerFor({ db: t.db, userId: u.id });
+    const res = await caller.usage.errorSummary({ scope: { type: "own" } });
+    expect(res.totalRequests).toBe(0);
+  });
+
+  it("throws NOT_FOUND when the gateway is disabled", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const caller = await callerFor({ db: t.db, userId: u.id, env: { ...defaultTestEnv, ENABLE_GATEWAY: false } });
+    await expect(caller.usage.errorSummary({ scope: { type: "own" } })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

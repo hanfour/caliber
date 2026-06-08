@@ -52,7 +52,8 @@
       "auditLog": "审计日志",
       "profile": "个人资料",
       "devices": "设备",
-      "upstreams": "我的上游"
+      "upstreams": "我的上游",
+      "status": "状态"
     },
     "topbar": {
       "switchTheme": "切换主题",
@@ -574,6 +575,49 @@
       "submit": "轮替",
       "submitting": "轮替中…",
       "rotatedToast": "已轮替凭证"
+    }
+  },
+  "status": {
+    "pageTitle": "状态",
+    "pageSubtitle": "你自己的上游与使用的健康状况与最近活动。",
+    "refresh": "刷新",
+    "health": {
+      "title": "凭证健康",
+      "description": "你登记的上游的状态与到期。",
+      "empty": "你尚未登记任何上游凭证。",
+      "manageLink": "管理上游",
+      "colName": "名称",
+      "colStatus": "状态",
+      "colExpiry": "到期",
+      "colError": "最近错误",
+      "loadError": "无法加载凭证健康，请稍后重试。"
+    },
+    "errorRate": {
+      "title": "错误率",
+      "description": "过去 24 小时你请求的错误。",
+      "rate": "错误率",
+      "count429": "速率限制 (429)",
+      "count5xx": "服务器错误 (5xx)",
+      "loadError": "无法加载错误统计，请稍后重试。"
+    },
+    "activity": {
+      "title": "最近活动",
+      "description": "你最近的请求。",
+      "empty": "尚无使用记录。",
+      "summary": "{requests} 次请求 · {cost}",
+      "colTime": "时间",
+      "colSurface": "接口",
+      "colModel": "模型",
+      "colStatus": "状态",
+      "colLatency": "延迟",
+      "colCost": "成本",
+      "loadError": "无法加载最近活动，请稍后重试。",
+      "summaryLoadError": "无法加载摘要。"
+    },
+    "expiry": {
+      "none": "—",
+      "expired": "已过期",
+      "days": "{days} 天"
     }
   },
   "usage": {
