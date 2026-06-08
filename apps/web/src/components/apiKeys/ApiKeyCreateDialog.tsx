@@ -20,8 +20,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+// Native select styled to match the Input primitive (this app has no <Select> primitive yet).
+const SELECT_CLASS =
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+
 const schema = z.object({
   name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
+  routingPolicy: z.enum(["pool", "own", "own_then_pool"]),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -49,10 +54,11 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: useTranslatedZodResolver(schema),
-    defaultValues: { name: "" },
+    defaultValues: { name: "", routingPolicy: "pool" },
   });
 
   // Whenever the dialog closes (Cancel, X, ESC, click-outside), reset BOTH
@@ -61,7 +67,7 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
   useEffect(() => {
     if (!open) {
       setRevealed(null);
-      reset({ name: "" });
+      reset({ name: "", routingPolicy: "pool" });
     }
   }, [open, reset]);
 
@@ -89,7 +95,7 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
   };
 
   const onSubmit = (values: FormValues) => {
-    return issue.mutateAsync({ name: values.name });
+    return issue.mutateAsync({ name: values.name, routingPolicy: values.routingPolicy });
   };
 
   return (
@@ -168,6 +174,21 @@ export function ApiKeyCreateDialog({ open, onOpenChange }: Props) {
                     {errors.name.message}
                   </p>
                 )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="apiKeyRouting">{t("routingPolicyLabel")}</Label>
+                <select id="apiKeyRouting" className={SELECT_CLASS} {...register("routingPolicy")}>
+                  <option value="pool">{t("routingPolicyPool")}</option>
+                  <option value="own">{t("routingPolicyOwn")}</option>
+                  <option value="own_then_pool">{t("routingPolicyOwnThenPool")}</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {watch("routingPolicy") === "own"
+                    ? t("routingPolicyOwnHint")
+                    : watch("routingPolicy") === "own_then_pool"
+                      ? t("routingPolicyOwnThenPoolHint")
+                      : t("routingPolicyPoolHint")}
+                </p>
               </div>
               <DialogFooter>
                 <Button
