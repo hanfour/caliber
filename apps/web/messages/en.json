@@ -52,7 +52,8 @@
       "auditLog": "Audit Log",
       "profile": "Profile",
       "devices": "Devices",
-      "upstreams": "My Upstreams"
+      "upstreams": "My Upstreams",
+      "status": "Status"
     },
     "topbar": {
       "switchTheme": "Toggle theme",
@@ -574,6 +575,48 @@
       "submit": "Rotate",
       "submitting": "Rotating…",
       "rotatedToast": "Credential rotated"
+    }
+  },
+  "status": {
+    "pageTitle": "Status",
+    "pageSubtitle": "Health and recent activity for your own upstreams and usage.",
+    "refresh": "Refresh",
+    "health": {
+      "title": "Credential health",
+      "description": "Status and expiry of the upstreams you registered.",
+      "empty": "You haven't registered any upstream credentials yet.",
+      "manageLink": "Manage upstreams",
+      "colName": "Name",
+      "colStatus": "Status",
+      "colExpiry": "Expiry",
+      "colError": "Last error",
+      "loadError": "Couldn't load credential health. Please try again."
+    },
+    "errorRate": {
+      "title": "Error rate",
+      "description": "Errors across your requests in the last 24 hours.",
+      "rate": "Error rate",
+      "count429": "Rate-limited (429)",
+      "count5xx": "Server errors (5xx)",
+      "loadError": "Couldn't load error stats. Please try again."
+    },
+    "activity": {
+      "title": "Recent activity",
+      "description": "Your most recent requests.",
+      "empty": "No usage recorded yet.",
+      "summary": "{requests} requests · ${cost}",
+      "colTime": "Time",
+      "colSurface": "Surface",
+      "colModel": "Model",
+      "colStatus": "Status",
+      "colLatency": "Latency",
+      "colCost": "Cost",
+      "loadError": "Couldn't load recent activity. Please try again."
+    },
+    "expiry": {
+      "none": "—",
+      "expired": "Expired",
+      "days": "{days}d"
     }
   },
   "usage": {

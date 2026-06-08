@@ -52,7 +52,8 @@
       "auditLog": "감사 로그",
       "profile": "프로필",
       "devices": "디바이스",
-      "upstreams": "내 업스트림"
+      "upstreams": "내 업스트림",
+      "status": "상태"
     },
     "topbar": {
       "switchTheme": "테마 전환",
@@ -574,6 +575,48 @@
       "submit": "교체",
       "submitting": "교체 중…",
       "rotatedToast": "자격증명이 교체되었습니다"
+    }
+  },
+  "status": {
+    "pageTitle": "상태",
+    "pageSubtitle": "내 업스트림과 사용량의 상태 및 최근 활동.",
+    "refresh": "새로고침",
+    "health": {
+      "title": "자격 증명 상태",
+      "description": "등록한 업스트림의 상태와 만료.",
+      "empty": "아직 등록한 업스트림 자격 증명이 없습니다.",
+      "manageLink": "업스트림 관리",
+      "colName": "이름",
+      "colStatus": "상태",
+      "colExpiry": "만료",
+      "colError": "마지막 오류",
+      "loadError": "자격 증명 상태를 불러오지 못했습니다. 다시 시도해 주세요."
+    },
+    "errorRate": {
+      "title": "오류율",
+      "description": "지난 24시간 동안의 요청 오류.",
+      "rate": "오류율",
+      "count429": "속도 제한 (429)",
+      "count5xx": "서버 오류 (5xx)",
+      "loadError": "오류 통계를 불러오지 못했습니다. 다시 시도해 주세요."
+    },
+    "activity": {
+      "title": "최근 활동",
+      "description": "가장 최근 요청.",
+      "empty": "아직 사용 기록이 없습니다.",
+      "summary": "{requests}건 요청 · ${cost}",
+      "colTime": "시간",
+      "colSurface": "서피스",
+      "colModel": "모델",
+      "colStatus": "상태",
+      "colLatency": "지연",
+      "colCost": "비용",
+      "loadError": "최근 활동을 불러오지 못했습니다. 다시 시도해 주세요."
+    },
+    "expiry": {
+      "none": "—",
+      "expired": "만료됨",
+      "days": "{days}일"
     }
   },
   "usage": {

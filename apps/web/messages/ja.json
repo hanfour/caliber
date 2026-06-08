@@ -52,7 +52,8 @@
       "auditLog": "監査ログ",
       "profile": "プロフィール",
       "devices": "デバイス",
-      "upstreams": "マイアップストリーム"
+      "upstreams": "マイアップストリーム",
+      "status": "ステータス"
     },
     "topbar": {
       "switchTheme": "テーマを切り替え",
@@ -574,6 +575,48 @@
       "submit": "ローテート",
       "submitting": "ローテート中…",
       "rotatedToast": "認証情報をローテートしました"
+    }
+  },
+  "status": {
+    "pageTitle": "ステータス",
+    "pageSubtitle": "自分のアップストリームと利用状況の健全性と最近のアクティビティ。",
+    "refresh": "更新",
+    "health": {
+      "title": "認証情報の健全性",
+      "description": "登録したアップストリームのステータスと有効期限。",
+      "empty": "アップストリームの認証情報がまだ登録されていません。",
+      "manageLink": "アップストリームを管理",
+      "colName": "名前",
+      "colStatus": "ステータス",
+      "colExpiry": "有効期限",
+      "colError": "最後のエラー",
+      "loadError": "認証情報の健全性を読み込めませんでした。再試行してください。"
+    },
+    "errorRate": {
+      "title": "エラー率",
+      "description": "過去 24 時間のリクエストのエラー。",
+      "rate": "エラー率",
+      "count429": "レート制限 (429)",
+      "count5xx": "サーバーエラー (5xx)",
+      "loadError": "エラー統計を読み込めませんでした。再試行してください。"
+    },
+    "activity": {
+      "title": "最近のアクティビティ",
+      "description": "直近のリクエスト。",
+      "empty": "利用記録はまだありません。",
+      "summary": "{requests} 件のリクエスト · ${cost}",
+      "colTime": "時刻",
+      "colSurface": "サーフェス",
+      "colModel": "モデル",
+      "colStatus": "ステータス",
+      "colLatency": "レイテンシ",
+      "colCost": "コスト",
+      "loadError": "最近のアクティビティを読み込めませんでした。再試行してください。"
+    },
+    "expiry": {
+      "none": "—",
+      "expired": "期限切れ",
+      "days": "{days}日"
     }
   },
   "usage": {
