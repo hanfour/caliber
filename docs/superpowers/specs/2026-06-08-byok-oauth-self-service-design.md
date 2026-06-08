@@ -39,6 +39,7 @@
 ### 已具備
 - **OpenAI codex OAuth service 完整**（`apps/gateway/src/oauth/openai/openaiOAuthService.ts`：`generateAuthURL`/`exchangeCode`，PKCE S256）。
 - **OAuthService 介面**（`apps/gateway/src/oauth/types.ts`）：`generateAuthURL(opts:{redirectURI?}) → {authUrl,state,codeVerifier}`；`exchangeCode(opts:{code,codeVerifier,redirectURI?}) → TokenSet{accessToken,refreshToken,expiresAt,tokenType?,scope?}`。
+  - **P2 介面增修（隨 gateway-core 搬移一併做）**：`generateAuthURL` 的回傳加 `redirectURI`（service 回它實際採用的值，作為唯一真實來源，讓 initiate 存進 flow、不需自行知道每平台常數）。既有 openai service 測試同步加斷言此欄位。
 - **PKCE helpers**（`apps/gateway/src/oauth/pkce.ts`）：`generatePKCEVerifier`/`generateCodeChallenge`(S256)/`generateState` — 平台無關，可直接重用。
 - **OAuth refresh 機制對 user-owned oauth 上游透明**（`maybeRefreshOAuth` 只依 accountId 讀 vault；user_id 只是 registerOwn 的過濾條件）。
 - **Anthropic refresh policy 已定**（`apps/gateway/src/oauth/policies.ts` `ANTHROPIC_REFRESH_POLICY`）。
@@ -52,7 +53,7 @@
 
 ### Anthropic 未知常數（風險，需實測確認）
 - `authorizeEndpoint`：**未在程式碼**。最佳已知預設 `https://claude.ai/oauth/authorize`。
-- `scopes`：**未在程式碼**。最佳已知預設 `org:create_api_key user:profile user:inference`。
+- `scopes`：**未在程式碼**。最佳已知預設 **`user:profile user:inference user:sessions:claude_code`**（依 Anthropic Claude Code 官方 env docs `CLAUDE_CODE_OAUTH_SCOPES` 範例 — 對應 Claude Max / Claude Code subscription OAuth）。`org:create_api_key`（Console key creation flow）**不在本期預設**，如需可經 env override。
 - 手動 `redirectURI`（顯示 `code#state` 的回呼）：最佳已知預設 `https://console.anthropic.com/oauth/code/callback`。
 - **全部以 env 可覆寫常數 + 預設值落地，`ENABLE_ANTHROPIC_OAUTH` flag 閘住，計畫含「operator 跑一次真實 OAuth 校正常數」收尾步驟。**
 
@@ -75,8 +76,8 @@
 ### 4.2 apps/api（tRPC `accounts.ts` + 小工具）
 | 項目 | 內容 |
 |------|------|
-| `initiateOAuth`（新） | input `{ platform: enum["openai","anthropic"], targetUpstreamId?: uuid }`；`account.manage_own` 權限；`getOAuthService(platform).generateAuthURL()` → `redis.set("oauth-flow:"+state, JSON{userId,platform,codeVerifier,targetUpstreamId?,createdAt}, "EX", 600)`；回 `{ authUrl, flowId: state }` |
-| `completeOAuth`（新） | input `{ flowId: string, pastedValue: string }`；讀 `oauth-flow:<flowId>`（無→`PRECONDITION_FAILED`「授權逾時」）；用 **`parsePastedCode(pastedValue, platform)`**（§4.4）取 `{code, returnedState}`；驗 `returnedState===flowId`（不符→`BAD_REQUEST` CSRF）、`flow.userId===ctx.user.id`（不符→`FORBIDDEN`）；`exchangeCode({code,codeVerifier:flow.codeVerifier,redirectURI})`（失敗→`BAD_REQUEST`「授權碼無效」）；buildCredentialPlaintext("oauth", JSON{access_token,refresh_token,expires_at}) + encrypt；**targetUpstreamId 有**＝重新授權（擁有權檢查 user_id=caller ∧ type=oauth ∧ 未刪 → 更新 vault + rotatedAt）／**無**＝首次（insert upstream_accounts{user_id:caller,team_id:null,type:"oauth",platform,name 預設} + credential_vault）；`redis.del`；回上游 |
+| `initiateOAuth`（新） | input `{ platform: enum["openai","anthropic"], targetUpstreamId?: uuid }`；`account.manage_own` 權限；`getOAuthService(platform).generateAuthURL()` → `{authUrl,state,codeVerifier,redirectURI}`（service 回它實際使用的 redirectURI）→ `redis.set("oauth-flow:"+state, JSON{userId,platform,codeVerifier,redirectURI,targetUpstreamId?,createdAt}, "EX", 600)`；回 `{ authUrl, flowId: state }`。**redirectURI 必須一併存入** — OpenAI token exchange 要求 exchange 時的 redirect_uri 與 authorize 時一致（既有測試 pin 住），complete 用 flow 裡的值、不從當下 env/default 重推 |
+| `completeOAuth`（新） | input `{ flowId: string, pastedValue: string }`；讀 `oauth-flow:<flowId>`（無→`PRECONDITION_FAILED`「授權逾時」）；用 **`parsePastedCode(pastedValue, platform)`**（§4.4）取 `{code, returnedState}`；驗 `returnedState===flowId`（不符或 state 空→`BAD_REQUEST` CSRF）、`flow.userId===ctx.user.id`（不符→`FORBIDDEN`）；`exchangeCode({code,codeVerifier:flow.codeVerifier,redirectURI:flow.redirectURI})`（用 flow 裡的 redirectURI；失敗→`BAD_REQUEST`「授權碼無效」）；buildCredentialPlaintext("oauth", JSON{access_token,refresh_token,expires_at}) + encrypt；**targetUpstreamId 有**＝重新授權（擁有權檢查 user_id=caller ∧ type=oauth ∧ 未刪 → 更新 vault + rotatedAt **並比照既有 reonboard 重設健康欄位**：`status:"active", schedulable:true, expiresAt:<新>, oauthRefreshFailCount:0, oauthRefreshLastError:null, tempUnschedulableUntil:null, tempUnschedulableReason:null` — 否則原本因 oauth_invalid/expired 被暫停的帳號重授後仍不可排程、badge 仍錯）／**無**＝首次（insert upstream_accounts{user_id:caller,team_id:null,type:"oauth",platform,name 預設} + credential_vault）；`redis.del`；回上游 |
 | `getOAuthService`（新工具） | 依 platform 取核心服務；anthropic 受 `ctx.env.ENABLE_ANTHROPIC_OAUTH` 閘（關→`NOT_FOUND`/未啟用） |
 | `registerOwn` | **不動**（仍 api_key-only；OAuth 不經此路） |
 
@@ -85,7 +86,7 @@
 ### 4.4 貼碼格式差異（重要 — 兩平台不同）
 兩供應商在手動模式呈現授權碼的方式不同，`completeOAuth` 必須容忍兩種；解析放在 **api 層的 `parsePastedCode(pastedValue, platform)` 小工具**（驗 state 在此、exchange 收到乾淨 code）：
 - **Anthropic（Claude Max）**：授權後頁面顯示單一字串 `<code>#<state>` → `split("#")` 取 `{code, returnedState}`。
-- **OpenAI codex**：loopback 重導到 `http://localhost:1455/auth/callback?code=X&state=Y`。本機無 server，該頁不會載入屬**預期**；UI 指示用戶從**網址列**複製整個 URL（或 code）。`parsePastedCode` 對 openai：若含 `?`/`code=` 則以 URL/query 解析取 `code`+`state`；否則視為裸 code（此時 state 無法比對 → 要求貼含 state 的完整 URL，或退回 `code#state` 容忍）。
+- **OpenAI codex**：loopback 重導到 `http://localhost:1455/auth/callback?code=X&state=Y`。本機無 server，該頁不會載入屬**預期**；UI 指示用戶從**網址列**複製整個 URL。`parsePastedCode` 對 openai：以 URL/query 解析取 `code`+`state`。**裸 code（無 state）一律拒絕** — state 無法比對就破壞 INV-O2，故 `parsePastedCode` 回 state 空、completeOAuth 一律 `BAD_REQUEST`「請貼上含 state 的完整網址」。（亦容忍 `code#state` 格式作為備援。）
 - UI 文案需依 platform 給對應指示（Anthropic：「貼上畫面顯示的代碼」；OpenAI：「從網址列複製 localhost 開頭的整個網址貼上」）。
 
 ### 4.3 apps/web
@@ -147,18 +148,19 @@ flow-state 於**成功與終局失敗皆刪除**；user-friendly 訊息；不洩
 ## 8. 測試（TDD，必加，目標 80%+）
 
 ### gateway-core
-- `anthropicOAuthService.generateAuthURL`：URL 含 client_id / scopes / `code_challenge_method=S256` / state；回 `{authUrl,state,codeVerifier}`。
+- `anthropicOAuthService.generateAuthURL`：URL 含 client_id / scopes / `code_challenge_method=S256` / state；回 `{authUrl,state,codeVerifier,redirectURI}`（含實際採用的 redirectURI）。
+- openai service 搬移後，既有測試 + 新增 `generateAuthURL` 回傳含 `redirectURI` 的斷言皆綠。
 - `anthropicOAuthService.exchangeCode`：JSON body、`grant_type=authorization_code`、解析 `{access_token,refresh_token,expires_in}` → TokenSet；錯誤回應 → 拋錯。
 - 搬移後 openai 既有測試仍綠。
 
 ### apps/api — `parsePastedCode(pastedValue, platform)`（單元）
-- Anthropic：`"<code>#<state>"` → `{code,state}`；無 `#` → 視整串為 code、state 空（後續 state 比對失敗）。
-- OpenAI：`"http://localhost:1455/auth/callback?code=X&state=Y"` → `{code:"X",state:"Y"}`；裸 code 容忍。
-- 去除前後空白；畸形輸入 → 安全回傳（code 空 → completeOAuth 視為 `BAD_REQUEST`）。
+- Anthropic：`"<code>#<state>"` → `{code,state}`；無 `#` → 視整串為 code、state 空（後續 state 比對失敗 → BAD_REQUEST）。
+- OpenAI：`"http://localhost:1455/auth/callback?code=X&state=Y"` → `{code:"X",state:"Y"}`；**裸 code（無 state）→ state 空 → completeOAuth `BAD_REQUEST`（rejected，不容忍）**。
+- 去除前後空白；畸形輸入 → 安全回傳（code 或 state 空 → completeOAuth 視為 `BAD_REQUEST`）。
 
 ### apps/api（integration，比照 usage/accounts 測試）
 - `initiateOAuth`：寫入 Redis flow-state（key/TTL/payload 正確）、回 authUrl；anthropic flag 關 → `NOT_FOUND`。
-- `completeOAuth`：首次 → insert user-owned oauth 上游 + vault；重新授權（targetUpstreamId）→ 更新既有上游 vault、不新增列；flow 逾時 → `PRECONDITION_FAILED`；state 不符 → `BAD_REQUEST`；flow.userId≠caller → `FORBIDDEN`；重放（第二次同 flowId）→ 失敗；重新授權目標非本人 → `FORBIDDEN`。
+- `completeOAuth`：首次 → insert user-owned oauth 上游 + vault；重新授權（targetUpstreamId）→ 更新既有上游 vault、不新增列，**且健康欄位被重設**（前置一個 `status:"error",schedulable:false,oauthRefreshFailCount:3,tempUnschedulableUntil:<未來>` 的失效 oauth 上游，重授後斷言 `status="active",schedulable=true,oauthRefreshFailCount=0,tempUnschedulableUntil=null`）；flow 逾時 → `PRECONDITION_FAILED`；state 不符/空（含 OpenAI 裸 code）→ `BAD_REQUEST`；flow.userId≠caller → `FORBIDDEN`；重放（第二次同 flowId）→ 失敗；重新授權目標非本人 → `FORBIDDEN`；exchangeCode 用 flow 裡的 redirectURI（非當下 default）。
 - INV-O5：建立的列 `user_id=caller, team_id=null, type=oauth`。
 
 ### apps/web（Vitest + Testing Library，mock trpc）
