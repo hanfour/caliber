@@ -11,7 +11,8 @@ import {
   FileText,
   UserCircle,
   Laptop,
-  KeyRound
+  KeyRound,
+  Activity
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trpc } from '@/lib/trpc/client'
@@ -28,7 +29,7 @@ interface SessionLike {
 }
 
 type NavItemKey =
-  | 'dashboard' | 'organizations' | 'teams' | 'invites' | 'auditLog' | 'profile' | 'devices' | 'upstreams'
+  | 'dashboard' | 'organizations' | 'teams' | 'invites' | 'auditLog' | 'profile' | 'devices' | 'upstreams' | 'status'
 
 interface NavItem {
   href: string | ((p: Perm, session: SessionLike | undefined) => string | null)
@@ -61,7 +62,8 @@ const SECTIONS: NavSection[] = [
   {
     titleKey: 'overview',
     items: [
-      { href: '/dashboard', labelKey: 'dashboard', icon: LayoutDashboard, visible: () => true }
+      { href: '/dashboard', labelKey: 'dashboard', icon: LayoutDashboard, visible: () => true },
+      { href: '/dashboard/status', labelKey: 'status', icon: Activity, visible: (p) => p.hasOrg }
     ]
   },
   {
