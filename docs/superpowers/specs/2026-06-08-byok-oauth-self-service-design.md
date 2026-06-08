@@ -76,8 +76,8 @@
 ### 4.2 apps/api（tRPC `accounts.ts` + 小工具）
 | 項目 | 內容 |
 |------|------|
-| `initiateOAuth`（新） | input `{ platform: enum["openai","anthropic"], targetUpstreamId?: uuid }`；`account.manage_own` 權限；`getOAuthService(platform).generateAuthURL()` → `{authUrl,state,codeVerifier,redirectURI}`（service 回它實際使用的 redirectURI）→ `redis.set("oauth-flow:"+state, JSON{userId,platform,codeVerifier,redirectURI,targetUpstreamId?,createdAt}, "EX", 600)`；回 `{ authUrl, flowId: state }`。**redirectURI 必須一併存入** — OpenAI token exchange 要求 exchange 時的 redirect_uri 與 authorize 時一致（既有測試 pin 住），complete 用 flow 裡的值、不從當下 env/default 重推 |
-| `completeOAuth`（新） | input `{ flowId: string, pastedValue: string }`；讀 `oauth-flow:<flowId>`（無→`PRECONDITION_FAILED`「授權逾時」）；用 **`parsePastedCode(pastedValue, platform)`**（§4.4）取 `{code, returnedState}`；驗 `returnedState===flowId`（不符或 state 空→`BAD_REQUEST` CSRF）、`flow.userId===ctx.user.id`（不符→`FORBIDDEN`）；`exchangeCode({code,codeVerifier:flow.codeVerifier,redirectURI:flow.redirectURI})`（用 flow 裡的 redirectURI；失敗→`BAD_REQUEST`「授權碼無效」）；buildCredentialPlaintext("oauth", JSON{access_token,refresh_token,expires_at}) + encrypt；**targetUpstreamId 有**＝重新授權（擁有權檢查 user_id=caller ∧ type=oauth ∧ 未刪 → 更新 vault + rotatedAt **並比照既有 reonboard 重設健康欄位**：`status:"active", schedulable:true, expiresAt:<新>, oauthRefreshFailCount:0, oauthRefreshLastError:null, tempUnschedulableUntil:null, tempUnschedulableReason:null` — 否則原本因 oauth_invalid/expired 被暫停的帳號重授後仍不可排程、badge 仍錯）／**無**＝首次（insert upstream_accounts{user_id:caller,team_id:null,type:"oauth",platform,name 預設} + credential_vault）；`redis.del`；回上游 |
+| `initiateOAuth`（新） | input `{ platform: enum["openai","anthropic"], targetUpstreamId?: uuid }`；權限：外層 `account.register_own`（自助建立放行，無既有 row 可帶 owner）；**若帶 targetUpstreamId**，讀該 row → `can(account.manage_own, {ownerUserId: row.userId})` 檢查 + 驗 `row.platform===input.platform ∧ type=oauth ∧ 未刪`（fail-fast，不符→`FORBIDDEN`/`BAD_REQUEST`）；`getOAuthService(platform).generateAuthURL()` → `{authUrl,state,codeVerifier,redirectURI}`（service 回它實際使用的 redirectURI）→ `redis.set("oauth-flow:"+state, JSON{userId,platform,codeVerifier,redirectURI,targetUpstreamId?,createdAt}, "EX", 600)`；回 `{ authUrl, flowId: state }`。**redirectURI 必須一併存入** — OpenAI token exchange 要求 exchange 時的 redirect_uri 與 authorize 時一致（既有測試 pin 住），complete 用 flow 裡的值、不從當下 env/default 重推 |
+| `completeOAuth`（新） | input `{ flowId: string, pastedValue: string }`；讀 `oauth-flow:<flowId>`（無→`PRECONDITION_FAILED`「授權逾時」）；用 **`parsePastedCode(pastedValue, platform)`**（§4.4）取 `{code, returnedState}`；驗 `returnedState===flowId`（不符或 state 空→`BAD_REQUEST` CSRF）、`flow.userId===ctx.user.id`（不符→`FORBIDDEN`）；`exchangeCode({code,codeVerifier:flow.codeVerifier,redirectURI:flow.redirectURI})`（用 flow 裡的 redirectURI；失敗→`BAD_REQUEST`「授權碼無效」）；buildCredentialPlaintext("oauth", JSON{access_token,refresh_token,expires_at}) + encrypt；**targetUpstreamId 有**＝重新授權（讀 row → `can(account.manage_own,{ownerUserId:row.userId})`（不符→`FORBIDDEN`）∧ `row.type=oauth` ∧ **`row.platform===flow.platform`**（不符→`BAD_REQUEST`，避免 Anthropic 授權寫進 OpenAI row 反之）∧ 未刪 → 更新 vault + rotatedAt **並比照既有 reonboard 重設健康欄位**：`status:"active", schedulable:true, expiresAt:<新>, oauthRefreshFailCount:0, oauthRefreshLastError:null, tempUnschedulableUntil:null, tempUnschedulableReason:null` — 否則原本因 oauth_invalid/expired 被暫停的帳號重授後仍不可排程、badge 仍錯）／**無**＝首次（insert upstream_accounts{user_id:caller,team_id:null,type:"oauth",platform,name 預設} + credential_vault）；`redis.del`；回上游 |
 | `getOAuthService`（新工具） | 依 platform 取核心服務；anthropic 受 `ctx.env.ENABLE_ANTHROPIC_OAUTH` 閘（關→`NOT_FOUND`/未啟用） |
 | `registerOwn` | **不動**（仍 api_key-only；OAuth 不經此路） |
 
@@ -104,15 +104,17 @@
 ```
 [UI] 選 platform + OAuth → Connect
         │ initiateOAuth({platform, targetUpstreamId?})
-[api]  getOAuthService(platform).generateAuthURL() → {authUrl,state,codeVerifier}
-        redis SET oauth-flow:<state> {userId,platform,codeVerifier,targetUpstreamId?} EX 600
+[api]  register_own;若帶 targetUpstreamId → 讀 row + manage_own + platform 一致
+        getOAuthService(platform).generateAuthURL() → {authUrl,state,codeVerifier,redirectURI}
+        redis SET oauth-flow:<state> {userId,platform,codeVerifier,redirectURI,targetUpstreamId?} EX 600
         → {authUrl, flowId:state}
 [UI]  開 authUrl(新分頁) → 用戶在 claude.ai/openai 授權 → 供應商顯示授權碼
         (Anthropic: code#state / OpenAI: localhost?code=&state= 網址)
         用戶貼回 → completeOAuth({flowId, pastedValue})
 [api]  讀 redis flow → parsePastedCode → 驗 state==flowId & userId==caller
-        exchangeCode → TokenSet → 建 oauth 憑證 + 加密
-        targetUpstreamId? 更新該上游 vault : insert 新 user-owned oauth 上游
+        exchangeCode({...,redirectURI:flow.redirectURI}) → TokenSet → 建 oauth 憑證 + 加密
+        targetUpstreamId? 重新授權(manage_own + platform 一致 → 更新 vault + 重設健康欄位)
+                        : insert 新 user-owned oauth 上游
         redis DEL → 回上游
 [gw]   既有 refresh 機制透明續期；P1 own 路由生效
 ```
@@ -138,7 +140,7 @@ flow-state 於**成功與終局失敗皆刪除**；user-friendly 訊息；不洩
 
 - **INV-O1**：`codeVerifier` 永不離開伺服器（僅存 Redis，完全不回前端）。
 - **INV-O2**：state CSRF — completeOAuth 驗證 pastedValue 內回傳的 state 等於儲存的 flowId。
-- **INV-O3**：擁有權 — 新建/更新都綁 `ctx.user.id`；重新授權只更新「caller 擁有的 oauth 上游」；`flow.userId` 必須等於 caller。
+- **INV-O3**：擁有權 + 平台一致 — 新建綁 `ctx.user.id`（`account.register_own`）；重新授權經 `account.manage_own(row.userId)` 只更新「caller 擁有的 oauth 上游」，且 **`row.platform` 必須等於 `flow.platform`**（不讓 Anthropic 授權寫進 OpenAI row 反之）；`flow.userId` 必須等於 caller。
 - **INV-O4**：一次性 — flow-state 用後即刪，防重放。
 - **INV-O5**：產出 user-owned（`user_id` 設、`team_id` null）→ P1 隔離成立（pool 不排程 user-owned、own=self）。
 - token 經既有 `credentialCipher` 加密；流程任何環節不記錄 token/code/codeVerifier。
@@ -160,7 +162,7 @@ flow-state 於**成功與終局失敗皆刪除**；user-friendly 訊息；不洩
 
 ### apps/api（integration，比照 usage/accounts 測試）
 - `initiateOAuth`：寫入 Redis flow-state（key/TTL/payload 正確）、回 authUrl；anthropic flag 關 → `NOT_FOUND`。
-- `completeOAuth`：首次 → insert user-owned oauth 上游 + vault；重新授權（targetUpstreamId）→ 更新既有上游 vault、不新增列，**且健康欄位被重設**（前置一個 `status:"error",schedulable:false,oauthRefreshFailCount:3,tempUnschedulableUntil:<未來>` 的失效 oauth 上游，重授後斷言 `status="active",schedulable=true,oauthRefreshFailCount=0,tempUnschedulableUntil=null`）；flow 逾時 → `PRECONDITION_FAILED`；state 不符/空（含 OpenAI 裸 code）→ `BAD_REQUEST`；flow.userId≠caller → `FORBIDDEN`；重放（第二次同 flowId）→ 失敗；重新授權目標非本人 → `FORBIDDEN`；exchangeCode 用 flow 裡的 redirectURI（非當下 default）。
+- `completeOAuth`：首次 → insert user-owned oauth 上游 + vault；重新授權（targetUpstreamId）→ 更新既有上游 vault、不新增列，**且健康欄位被重設**（前置一個 `status:"error",schedulable:false,oauthRefreshFailCount:3,tempUnschedulableUntil:<未來>` 的失效 oauth 上游，重授後斷言 `status="active",schedulable=true,oauthRefreshFailCount=0,tempUnschedulableUntil=null`）；flow 逾時 → `PRECONDITION_FAILED`；state 不符/空（含 OpenAI 裸 code）→ `BAD_REQUEST`；flow.userId≠caller → `FORBIDDEN`；重放（第二次同 flowId）→ 失敗；重新授權目標非本人 → `FORBIDDEN`；**重新授權目標 platform 與 flow.platform 不符（OpenAI target + Anthropic flow）→ `BAD_REQUEST`**；exchangeCode 用 flow 裡的 redirectURI（非當下 default）。
 - INV-O5：建立的列 `user_id=caller, team_id=null, type=oauth`。
 
 ### apps/web（Vitest + Testing Library，mock trpc）
