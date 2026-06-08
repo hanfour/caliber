@@ -60,4 +60,13 @@ describe("RecentActivitySection", () => {
     render(<RecentActivitySection />);
     expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
+
+  it("shows a summary error message (not the bar) when the summary query errors, while the list still renders", () => {
+    summaryQuery.mockReturnValue({ data: undefined, isLoading: false, error: { message: "boom" } });
+    listQuery.mockReturnValue({ data: { items: [listRow], page: 1, pageSize: 10, totalCount: 1 }, isLoading: false, error: null });
+    render(<RecentActivitySection />);
+    expect(screen.getByText("Couldn't load the summary.")).toBeInTheDocument();
+    // The list/table is independent and still renders.
+    expect(screen.getByText("claude-sonnet-4-5")).toBeInTheDocument();
+  });
 });

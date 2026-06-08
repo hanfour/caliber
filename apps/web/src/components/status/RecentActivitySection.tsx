@@ -32,7 +32,9 @@ export function RecentActivitySection() {
         <p className="mt-1 text-xs text-muted-foreground">{t("description")}</p>
       </CardHeader>
       <CardContent>
-        {summary.data ? (
+        {summary.error ? (
+          <p className="mb-3 text-xs text-destructive">{t("summaryLoadError")}</p>
+        ) : summary.data ? (
           <p className="mb-3 text-xs text-muted-foreground">
             {t("summary", { requests: summary.data.totalRequests, cost: formatUsd(summary.data.totalCostUsd) })}
           </p>

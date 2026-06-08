@@ -611,7 +611,8 @@
       "colStatus": "Status",
       "colLatency": "Latency",
       "colCost": "Cost",
-      "loadError": "Couldn't load recent activity. Please try again."
+      "loadError": "Couldn't load recent activity. Please try again.",
+      "summaryLoadError": "Couldn't load the summary."
     },
     "expiry": {
       "none": "—",

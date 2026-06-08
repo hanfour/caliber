@@ -1,15 +1,20 @@
 "use client";
 
-import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-// Start of the 24h error-rate window, as an ISO string. Must be memoized at the
-// call site: react-query keys on the input, and a fresh millisecond timestamp
-// each render would change the key every render → refetch churn (staleTime=0).
-function since24h(): string {
-  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+const HOUR_MS = 60 * 60 * 1000;
+
+// Start of the 24h error-rate window, as an ISO string. Floored to the current
+// hour on purpose: react-query keys on this value, so a raw millisecond
+// timestamp would change every render → refetch churn (staleTime=0). Hour-
+// flooring makes it stable within the hour (no churn) yet still advance over
+// time and on Refresh — unlike a frozen mount-time value, which would leave a
+// long-open page fetching a stale window.
+function windowStart(): string {
+  const flooredNow = Math.floor(Date.now() / HOUR_MS) * HOUR_MS;
+  return new Date(flooredNow - 24 * HOUR_MS).toISOString();
 }
 
 function pct(errorRequests: number, totalRequests: number): string {
@@ -20,11 +25,11 @@ function pct(errorRequests: number, totalRequests: number): string {
 export function ErrorRateSection() {
   const t = useTranslations("status.errorRate");
   const tCommon = useTranslations("common");
-  // Compute the window start once per mount so the query key stays stable.
-  const from = useMemo(() => since24h(), []);
+  // Hour-floored so the query key is stable within the hour (no per-render
+  // refetch) yet stays current across refreshes / long sessions.
   const { data, isLoading, error } = trpc.usage.errorSummary.useQuery({
     scope: { type: "own" },
-    from,
+    from: windowStart(),
   });
 
   return (

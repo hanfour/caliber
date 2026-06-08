@@ -611,7 +611,8 @@
       "colStatus": "상태",
       "colLatency": "지연",
       "colCost": "비용",
-      "loadError": "최근 활동을 불러오지 못했습니다. 다시 시도해 주세요."
+      "loadError": "최근 활동을 불러오지 못했습니다. 다시 시도해 주세요.",
+      "summaryLoadError": "요약을 불러오지 못했습니다."
     },
     "expiry": {
       "none": "—",
