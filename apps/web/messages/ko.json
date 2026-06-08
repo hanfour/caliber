@@ -604,7 +604,7 @@
       "title": "최근 활동",
       "description": "가장 최근 요청.",
       "empty": "아직 사용 기록이 없습니다.",
-      "summary": "{requests}건 요청 · ${cost}",
+      "summary": "{requests}건 요청 · {cost}",
       "colTime": "시간",
       "colSurface": "서피스",
       "colModel": "모델",

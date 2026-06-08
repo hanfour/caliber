@@ -604,7 +604,7 @@
       "title": "最近活动",
       "description": "你最近的请求。",
       "empty": "尚无使用记录。",
-      "summary": "{requests} 次请求 · ${cost}",
+      "summary": "{requests} 次请求 · {cost}",
       "colTime": "时间",
       "colSurface": "接口",
       "colModel": "模型",

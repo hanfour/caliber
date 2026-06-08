@@ -604,7 +604,7 @@
       "title": "最近活動",
       "description": "你最近的請求。",
       "empty": "尚無使用紀錄。",
-      "summary": "{requests} 次請求 · ${cost}",
+      "summary": "{requests} 次請求 · {cost}",
       "colTime": "時間",
       "colSurface": "介面",
       "colModel": "模型",
