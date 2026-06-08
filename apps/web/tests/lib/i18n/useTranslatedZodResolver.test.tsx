@@ -154,6 +154,65 @@ function RubricProbe({ onError, onSubmitRef }: RubricProbeProps) {
   return <span data-testid="rubric-ready">1</span>;
 }
 
+// Schema with a z.array() field — exercises the array-recursion branch in
+// translateNode (previously skipped, leaving validation.* keys untranslated
+// in useFieldArray / array-of-objects error trees).
+const arraySchema = z.object({
+  items: z.array(
+    z.object({
+      label: z.string().min(1, "validation.custom.shared.nameRequired"),
+    }),
+  ),
+});
+type ArrayValues = z.infer<typeof arraySchema>;
+
+interface ArrayProbeProps {
+  onError: (msg: string | undefined) => void;
+  onSubmitRef: { current: (() => void) | null };
+}
+
+function ArrayProbe({ onError, onSubmitRef }: ArrayProbeProps) {
+  const resolver = useTranslatedZodResolver(arraySchema);
+  const { handleSubmit } = useForm<ArrayValues>({
+    resolver,
+    defaultValues: { items: [{ label: "" }] },
+  });
+  const submit = useRef<() => void>(() => undefined);
+  submit.current = () => {
+    void handleSubmit(
+      () => undefined,
+      (errs) => {
+        // errs.items is an array; grab the first element's label message.
+        const first = errs.items?.[0];
+        onError(first?.label?.message as string | undefined);
+      },
+    )();
+  };
+  useEffect(() => {
+    onSubmitRef.current = () => submit.current?.();
+  }, [onSubmitRef]);
+  return <span data-testid="array-ready">1</span>;
+}
+
+describe("useTranslatedZodResolver with z.array()", () => {
+  it("translates validation.* keys nested inside an array error node", async () => {
+    await loadValidationMessages("en");
+    let captured: string | undefined;
+    const onSubmitRef: { current: (() => void) | null } = { current: null };
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages as Record<string, unknown>}>
+        <ArrayProbe
+          onError={(m) => {
+            captured = m;
+          }}
+          onSubmitRef={onSubmitRef}
+        />
+      </NextIntlClientProvider>,
+    );
+    await pollUntilTranslated(() => captured, onSubmitRef, "Name is required");
+  });
+});
+
 describe("useTranslatedZodResolver with runtime params", () => {
   it("translates a key carrying {detail} into zh-TW with interpolation", async () => {
     await loadValidationMessages("zh-TW");

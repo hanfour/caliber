@@ -86,6 +86,16 @@ function translateFieldErrors(
 
 function translateNode(node: unknown, messages: ValidationMessages): unknown {
   if (node === null || typeof node !== "object") return node;
+  // Arrays arise from z.array() / useFieldArray error trees — recurse into each element.
+  if (Array.isArray(node)) {
+    return node.map((item) => translateNode(item, messages));
+  }
+  // Guard against DOM nodes and other non-plain objects (e.g. HTMLTextAreaElement)
+  // whose enumerable properties form circular structures that overflow the stack.
+  // react-hook-form FieldErrors trees contain plain objects and arrays; any node
+  // whose prototype is not Object.prototype (and is not an array, handled above)
+  // can be returned as-is.
+  if (Object.getPrototypeOf(node) !== Object.prototype) return node;
   const obj = node as Record<string, unknown>;
   const next: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
