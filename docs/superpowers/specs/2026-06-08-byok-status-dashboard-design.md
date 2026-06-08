@@ -107,7 +107,11 @@ errorSummary: protectedProcedure
 
 - **錯誤率 % 由前端算**（`errorRequests / totalRequests`），避免 SQL 浮點格式化；`totalRequests = 0` 時前端顯示 `0%`。
 - **預設視窗**：`resolveWindow` 既有預設（與 `summary` 一致）。本頁前端傳「過去 24h」的 `from`，明確界定錯誤率視窗。
-- **授權邊界**：`usage.read_own` 在 RBAC 對任何已登入用戶皆回 `true`（見 `packages/auth/src/rbac/check.ts`），因此 own-only 端點不會、也不需要產生 `FORBIDDEN`。真正的守門是 `ensureGatewayEnabled`（`ENABLE_GATEWAY=false → NOT_FOUND`）+ input 只接受 `own` 把 scope 鎖死在呼叫者本人。
+- **三層邊界**（取代單一「授權」概念）：
+  - **authenticated boundary** = `protectedProcedure`（未登入即擋下）。
+  - **data boundary** = own-only input（`{type:"own"}`）+ `scopeWhere(own)`（列鎖死在 `userId=caller`）。
+  - **gateway feature gate** = `ensureGatewayEnabled`（`ENABLE_GATEWAY=false → NOT_FOUND`）。
+  - 注意 RBAC `usage.read_own` 對任何已登入用戶皆回 `true`（見 `packages/auth/src/rbac/check.ts`），故**不**靠它當守門、也不會產生 `FORBIDDEN`。
 - **scope 過濾**：`scopeWhere(own)` 產生 `usageLogs.userId = caller.id`（無 orgId filter — 語意是「呼叫者本人 authored 的列」，見 §1 與 INV-S1）。
 - `statusCode` 為 `NOT NULL` 整數欄（`packages/db/src/schema/usageLogs.ts`），`FILTER` 條件對每列都成立或不成立，無 NULL 邊界。
 
