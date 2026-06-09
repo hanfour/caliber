@@ -163,6 +163,17 @@ export const serverEnvSchema = z
       z.coerce.number().int().min(0).default(3600),
     ),
     GATEWAY_TRUSTED_PROXIES: emptyAsUndefined(z.string().default("")),
+    TUNNEL_TOKEN: emptyAsUndefined(z.string().optional()),
+    GATEWAY_ALERT_WEBHOOK_URL: emptyAsUndefined(z.string().url().optional()),
+    GATEWAY_AUTH_FAIL_MAX: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(10),
+    ),
+    GATEWAY_AUTH_FAIL_WINDOW_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(300),
+    ),
+    GATEWAY_AUTH_FAIL_BLOCK_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(900),
+    ),
     GATEWAY_OAUTH_REFRESH_LEAD_MIN: emptyAsUndefined(
       z.coerce.number().int().min(1).default(10),
     ),
