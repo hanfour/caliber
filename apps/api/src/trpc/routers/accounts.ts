@@ -125,6 +125,17 @@ function parseOauthExpiresAt(credentialsJson: string): Date | null {
 }
 
 
+// Shape of the ephemeral OAuth flow-state stored in Redis by initiateOAuth.
+// Parsed (not blindly cast) when read back in completeOAuth — Redis is an
+// external boundary, so validate per the project coding-style rules.
+const oauthFlowSchema = z.object({
+  userId: z.string(),
+  platform: z.enum(["openai", "anthropic"]),
+  codeVerifier: z.string(),
+  redirectURI: z.string(),
+  targetUpstreamId: z.string().nullable(),
+});
+
 export const accountsRouter = router({
   list: permissionProcedure(
     // Optional `platform` narrows server-side so callers like
@@ -962,5 +973,148 @@ export const accountsRouter = router({
       });
       await ctx.redis.set(`oauth-flow:${state}`, payload, "EX", 600);
       return { authUrl, flowId: state };
+    }),
+
+  /**
+   * Self-service OAuth — step 2 of the manual-paste flow. Reads the redis
+   * flow-state, validates the pasted code/state (CSRF), exchanges the code
+   * for a TokenSet, and (first-connect) inserts a NEW user-owned oauth
+   * upstream + credential_vault row. The re-authorize branch (re-using an
+   * existing upstream pointed at by flow.targetUpstreamId) is added in Task 11.
+   */
+  completeOAuth: protectedProcedure
+    .input(
+      z.object({
+        flowId: z.string().min(1).max(64),
+        pastedValue: z.string().min(1).max(10_000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      ensureGatewayEnabled(ctx.env);
+      const masterKeyHex = requireMasterKeyHex(ctx.env);
+
+      const raw = await ctx.redis.get(`oauth-flow:${input.flowId}`);
+      if (!raw) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "oauth flow expired — please start again",
+        });
+      }
+      const flowParsed = oauthFlowSchema.safeParse(
+        ((): unknown => {
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return null;
+          }
+        })(),
+      );
+      if (!flowParsed.success) {
+        // Corrupt / unexpected payload — treat like an expired flow.
+        await ctx.redis.del(`oauth-flow:${input.flowId}`);
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "oauth flow expired — please start again",
+        });
+      }
+      const flow = flowParsed.data;
+      if (flow.userId !== ctx.user.id) {
+        // Not the caller's flow — do NOT delete it (avoid griefing the real
+        // owner's in-flight flow).
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      const { code, state } = parsePastedCode(input.pastedValue, flow.platform);
+      if (!code || state !== input.flowId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "invalid authorization code or state",
+        });
+      }
+
+      let service;
+      try {
+        service = resolveOAuthService(flow.platform, ctx.env);
+      } catch (err) {
+        if (err instanceof OAuthServiceUnavailableError) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        throw err;
+      }
+
+      let tokens;
+      try {
+        tokens = await service.exchangeCode({
+          code,
+          codeVerifier: flow.codeVerifier,
+          redirectURI: flow.redirectURI,
+        });
+      } catch (err) {
+        // Terminal failure: the authorization code is single-use at the
+        // provider, so this flow can't succeed on retry — consume the
+        // flow-state to close any replay window. Log for diagnosis (the
+        // provider error body is never surfaced to the client).
+        ctx.logger.warn({ err }, "oauth exchangeCode failed");
+        await ctx.redis.del(`oauth-flow:${input.flowId}`);
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "authorization code invalid or expired",
+        });
+      }
+
+      const credentialsJson = JSON.stringify({
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken,
+        expires_at: tokens.expiresAt.toISOString(),
+      });
+      const oauthExpiresAt = parseOauthExpiresAt(credentialsJson);
+      const plaintext = buildCredentialPlaintext("oauth", credentialsJson);
+
+      // (Task 11 inserts the re-auth branch here, before first-connect.)
+
+      const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
+      const account = await ctx.db.transaction(async (tx) => {
+        const [acct] = await tx
+          .insert(upstreamAccounts)
+          .values({
+            orgId,
+            userId: ctx.user.id,
+            teamId: null,
+            name: `${flow.platform} OAuth`,
+            platform: flow.platform,
+            type: "oauth",
+          })
+          .returning();
+        if (!acct) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "failed to insert upstream account",
+          });
+        }
+        const sealed = encryptCredential({
+          masterKeyHex,
+          accountId: acct.id,
+          plaintext,
+        });
+        await tx.insert(credentialVault).values({
+          accountId: acct.id,
+          nonce: sealed.nonce,
+          ciphertext: sealed.ciphertext,
+          authTag: sealed.authTag,
+          oauthExpiresAt,
+        });
+        await writeAudit(tx, {
+          actorUserId: ctx.user.id,
+          action: "account.oauth_connected",
+          targetType: "upstream_account",
+          targetId: acct.id,
+          orgId: acct.orgId,
+          metadata: { platform: acct.platform },
+        });
+        return acct;
+      });
+
+      await ctx.redis.del(`oauth-flow:${input.flowId}`);
+      return account;
     }),
 });

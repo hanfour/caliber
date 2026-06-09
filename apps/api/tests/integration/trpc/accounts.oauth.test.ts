@@ -1,4 +1,41 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+
+// Mock ONLY the network-touching exchange/build, but PRESERVE the anthropic
+// flag-gate (so Task 9's "anthropic disabled -> NOT_FOUND" test still holds)
+// and emit a VALID 22-char base64url state (so Task 9's flowId regex holds).
+vi.mock("@caliber/gateway-core/oauth", async (orig) => {
+  const actual = await orig<typeof import("@caliber/gateway-core/oauth")>();
+  return {
+    ...actual,
+    resolveOAuthService: (
+      platform: "openai" | "anthropic",
+      env: { ENABLE_ANTHROPIC_OAUTH: boolean },
+    ) => {
+      if (platform === "anthropic" && !env.ENABLE_ANTHROPIC_OAUTH) {
+        throw new actual.OAuthServiceUnavailableError("anthropic");
+      }
+      return {
+        platform,
+        async generateAuthURL() {
+          return {
+            authUrl: "https://auth.openai.com/oauth/authorize?x=1",
+            state: "AbCdEfGhIjKlMnOpQrStUv",
+            codeVerifier: "verifier",
+            redirectURI: "http://localhost:1455/auth/callback",
+          };
+        },
+        async exchangeCode() {
+          return {
+            accessToken: "atk",
+            refreshToken: "rtk",
+            expiresAt: new Date("2030-01-01T00:00:00.000Z"),
+          };
+        },
+      };
+    },
+  };
+});
+
 import { upstreamAccounts } from "@caliber/db";
 import { eq } from "drizzle-orm";
 import { resolvePermissions } from "@caliber/auth";
@@ -79,5 +116,58 @@ describe("accounts.initiateOAuth", () => {
     await expect(
       caller.accounts.initiateOAuth({ platform: "openai", targetUpstreamId: row!.id }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("accounts.completeOAuth (first-connect)", () => {
+  it("exchanges the code and inserts a user-owned oauth upstream", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const redis = fakeRedis();
+    const caller = await callerFor({ db: t.db, userId: u.id, redis });
+    const init = await caller.accounts.initiateOAuth({ platform: "openai" });
+    // mock generateAuthURL fixed state -> mirror it into the pasted URL
+    const flowId = init.flowId;
+    const pasted = `http://localhost:1455/auth/callback?code=THECODE&state=${flowId}`;
+    const acct = await caller.accounts.completeOAuth({ flowId, pastedValue: pasted });
+    expect(acct.type).toBe("oauth");
+    expect(acct.userId).toBe(u.id);
+    expect(acct.platform).toBe("openai");
+    // flow-state consumed
+    expect((redis as any).store.get(`oauth-flow:${flowId}`)).toBeUndefined();
+    // row really exists
+    const [row] = await t.db.select().from(upstreamAccounts).where(eq(upstreamAccounts.id, acct.id));
+    expect(row!.type).toBe("oauth");
+  });
+
+  it("rejects when state in pastedValue != flowId (CSRF / bare code)", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const redis = fakeRedis();
+    const caller = await callerFor({ db: t.db, userId: u.id, redis });
+    const init = await caller.accounts.initiateOAuth({ platform: "openai" });
+    await expect(caller.accounts.completeOAuth({ flowId: init.flowId, pastedValue: "http://localhost:1455/auth/callback?code=THECODE&state=WRONG" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("PRECONDITION_FAILED when flow expired/missing", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const caller = await callerFor({ db: t.db, userId: u.id, redis: fakeRedis() });
+    await expect(caller.accounts.completeOAuth({ flowId: "nonexistent", pastedValue: "x#nonexistent" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
+
+  it("FORBIDDEN when another user submits someone else's flowId", async () => {
+    const org = await makeOrg(t.db);
+    const a = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const b = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const redis = fakeRedis(); // shared so B can see A's flow-state
+    const callerA = await callerFor({ db: t.db, userId: a.id, redis });
+    const init = await callerA.accounts.initiateOAuth({ platform: "openai" });
+    const callerB = await callerFor({ db: t.db, userId: b.id, redis });
+    await expect(
+      callerB.accounts.completeOAuth({ flowId: init.flowId, pastedValue: `x?code=C&state=${init.flowId}` }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // A's flow-state must remain (not griefed by B's attempt)
+    expect((redis as any).store.get(`oauth-flow:${init.flowId}`)).toBeDefined();
   });
 });
