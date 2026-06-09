@@ -34,6 +34,7 @@ import {
   type LlmCallParams,
 } from "@caliber/evaluator";
 
+import type { BudgetAlertEvent } from "./budgetAlertWebhook.js";
 import { createBudgetDeps } from "./budgetDeps.js";
 import { createFacetCacheReader } from "./facetCache.js";
 import { createFacetLlmClient } from "./facetLlmClient.js";
@@ -68,6 +69,8 @@ export interface RunFacetExtractionInput {
   fetchImpl?: typeof fetch;
   /** Subset of GatewayMetrics needed by the facet pipeline. */
   metrics?: FacetMetrics;
+  /** Optional sink for budget warn/exceeded webhook alerts (Plan P4). */
+  onBudgetEvent?: (e: BudgetAlertEvent) => void;
 }
 
 export interface RunFacetExtractionResult {
@@ -144,10 +147,14 @@ export async function runFacetExtraction(
   const budgetDeps = createBudgetDeps(input.db);
   const enforceBudgetFn: (orgId: string, est: number) => Promise<void> =
     input.metrics
-      ? wrapEnforceBudget(budgetDeps, {
-          gwLlmBudgetWarnTotal: input.metrics.gwLlmBudgetWarnTotal,
-          gwLlmBudgetExceededTotal: input.metrics.gwLlmBudgetExceededTotal,
-        })
+      ? wrapEnforceBudget(
+          budgetDeps,
+          {
+            gwLlmBudgetWarnTotal: input.metrics.gwLlmBudgetWarnTotal,
+            gwLlmBudgetExceededTotal: input.metrics.gwLlmBudgetExceededTotal,
+          },
+          input.onBudgetEvent,
+        )
       : (orgId, est) => enforceBudgetCore(orgId, est, budgetDeps);
 
   const insertLedger = createLedgerWriter(

@@ -31,6 +31,7 @@ import {
   BudgetExceededHalt,
 } from "@caliber/evaluator";
 import type { GatewayMetrics } from "../../plugins/metrics.js";
+import type { BudgetAlertEvent } from "./budgetAlertWebhook.js";
 
 const WARNING_THRESHOLD = 0.8;
 
@@ -49,6 +50,7 @@ export function wrapEnforceBudget(
     GatewayMetrics,
     "gwLlmBudgetWarnTotal" | "gwLlmBudgetExceededTotal"
   >,
+  onBudgetEvent?: (e: BudgetAlertEvent) => void,
 ): (orgId: string, estimatedCost: number) => Promise<void> {
   return async (orgId, estimatedCost) => {
     try {
@@ -66,6 +68,12 @@ export function wrapEnforceBudget(
         );
         if (monthSpend >= org.llm_monthly_budget_usd * WARNING_THRESHOLD) {
           metrics.gwLlmBudgetWarnTotal.inc({ org_id: orgId });
+          onBudgetEvent?.({
+            orgId,
+            event: "warn",
+            monthToDate: String(monthSpend),
+            budget: String(org.llm_monthly_budget_usd),
+          });
         }
       }
     } catch (err) {
@@ -74,11 +82,13 @@ export function wrapEnforceBudget(
           org_id: orgId,
           behavior: "degrade",
         });
+        onBudgetEvent?.({ orgId, event: "exceeded", monthToDate: "", budget: "", behavior: "degrade" });
       } else if (err instanceof BudgetExceededHalt) {
         metrics.gwLlmBudgetExceededTotal.inc({
           org_id: orgId,
           behavior: "halt",
         });
+        onBudgetEvent?.({ orgId, event: "exceeded", monthToDate: "", budget: "", behavior: "halt" });
       }
       throw err;
     }

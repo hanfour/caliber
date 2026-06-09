@@ -15,6 +15,7 @@
 import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
 import type { Rubric } from "@caliber/evaluator";
+import type { BudgetAlertEvent } from "./budgetAlertWebhook.js";
 import {
   runRuleBased,
   upsertEvaluationReport,
@@ -67,6 +68,8 @@ export interface RunEvaluationInput {
   sleepMs?: (ms: number) => Promise<void>;
   /** For metric emission (test injection). */
   metrics?: EvaluationMetrics;
+  /** Optional sink for budget warn/exceeded webhook alerts (Plan P4). */
+  onBudgetEvent?: (e: BudgetAlertEvent) => void;
 }
 
 export interface RunEvaluationResult {
@@ -122,6 +125,7 @@ export async function runEvaluation(
         bodies: rb.bodies,
         fetchImpl: input.fetchImpl,
         metrics: extractFacetMetrics(input.metrics),
+        onBudgetEvent: input.onBudgetEvent,
       });
     } catch {
       // runFacetExtraction is itself fail-soft; this is belt-and-suspenders.

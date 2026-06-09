@@ -21,6 +21,7 @@ import {
 } from "./queue.js";
 import { runEvaluation, type EvaluationMetrics } from "./runEvaluation.js";
 import { createRubricResolver } from "./rubricResolver.js";
+import type { BudgetAlertEvent } from "./budgetAlertWebhook.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ export interface CreateEvaluatorWorkerOptions {
   gatewayBaseUrl: string;
   concurrency?: number;
   metrics?: EvaluationMetrics;
+  /** Optional sink for budget warn/exceeded webhook alerts (Plan P4). */
+  onBudgetEvent?: (e: BudgetAlertEvent) => void;
 }
 
 // ── Factory ──────────────────────────────────────────────────────────────────
@@ -89,6 +92,7 @@ export function createEvaluatorWorker(
         triggeredByUser: payload.triggeredByUser,
         llmEvalEnabled: org?.llmEvalEnabled ?? false,
         metrics: opts.metrics,
+        onBudgetEvent: opts.onBudgetEvent,
       });
     },
     {

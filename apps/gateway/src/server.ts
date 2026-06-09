@@ -32,6 +32,7 @@ import {
   type EvaluatorJobPayload,
 } from "./workers/evaluator/queue.js";
 import { createEvaluatorWorker } from "./workers/evaluator/worker.js";
+import { maybeSendBudgetAlert } from "./workers/evaluator/budgetAlertWebhook.js";
 import { UsageLogWorker } from "./workers/usageLogWorker.js";
 import { BillingAudit } from "./workers/billingAudit.js";
 import {
@@ -525,12 +526,30 @@ async function wireEvaluatorPipeline(
 
   const queue = createEvaluatorQueue({ connection: bullmqRedis });
 
+  // Active webhook alerting for org budget warn/exceeded (Plan P4). Only wired
+  // when GATEWAY_ALERT_WEBHOOK_URL is set; the sink is fire-and-forget (voided).
+  const onBudgetEvent = env.GATEWAY_ALERT_WEBHOOK_URL
+    ? (e: Parameters<typeof maybeSendBudgetAlert>[1]) => {
+        void maybeSendBudgetAlert(
+          {
+            redis: workerRedis,
+            fetch: globalThis.fetch,
+            webhookUrl: env.GATEWAY_ALERT_WEBHOOK_URL,
+            logger: app.log,
+            now: () => new Date(),
+          },
+          e,
+        );
+      }
+    : undefined;
+
   const worker = createEvaluatorWorker({
     connection: bullmqRedis,
     db: app.db,
     redis: workerRedis,
     masterKeyHex: credentialEncryptionKey,
     gatewayBaseUrl: env.GATEWAY_LOCAL_BASE_URL,
+    onBudgetEvent,
   });
 
   app.decorate("evaluatorQueue", queue);

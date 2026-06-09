@@ -143,4 +143,63 @@ describe("wrapEnforceBudget", () => {
     expect(metrics.gwLlmBudgetWarnTotal.inc).not.toHaveBeenCalled();
     expect(metrics.gwLlmBudgetExceededTotal.inc).not.toHaveBeenCalled();
   });
+
+  // ── onBudgetEvent callback tests ─────────────────────────────────────────
+
+  it("calls onBudgetEvent with warn event when spend >= 80% threshold", async () => {
+    const deps = makeDeps({ budget: 100, monthSpend: 85 });
+    const onBudgetEvent = vi.fn();
+    const wrapped = wrapEnforceBudget(deps, metrics as never, onBudgetEvent);
+
+    await expect(wrapped("org-1", 1)).resolves.toBeUndefined();
+
+    expect(onBudgetEvent).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const call = onBudgetEvent.mock.calls[0]![0];
+    expect(call.event).toBe("warn");
+    expect(call.orgId).toBe("org-1");
+    expect(typeof call.monthToDate).toBe("string");
+    expect(call.monthToDate.length).toBeGreaterThan(0);
+    expect(typeof call.budget).toBe("string");
+    expect(call.budget.length).toBeGreaterThan(0);
+  });
+
+  it("calls onBudgetEvent with exceeded+halt event on BudgetExceededHalt", async () => {
+    const deps = makeDeps({ budget: 100, monthSpend: 99, behavior: "halt" });
+    const onBudgetEvent = vi.fn();
+    const wrapped = wrapEnforceBudget(deps, metrics as never, onBudgetEvent);
+
+    await expect(wrapped("org-1", 10)).rejects.toBeInstanceOf(BudgetExceededHalt);
+
+    expect(onBudgetEvent).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const call = onBudgetEvent.mock.calls[0]![0];
+    expect(call.event).toBe("exceeded");
+    expect(call.orgId).toBe("org-1");
+    expect(call.behavior).toBe("halt");
+  });
+
+  it("calls onBudgetEvent with exceeded+degrade event on BudgetExceededDegrade", async () => {
+    const deps = makeDeps({ budget: 100, monthSpend: 99, behavior: "degrade" });
+    const onBudgetEvent = vi.fn();
+    const wrapped = wrapEnforceBudget(deps, metrics as never, onBudgetEvent);
+
+    await expect(wrapped("org-1", 10)).rejects.toBeInstanceOf(BudgetExceededDegrade);
+
+    expect(onBudgetEvent).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const call = onBudgetEvent.mock.calls[0]![0];
+    expect(call.event).toBe("exceeded");
+    expect(call.orgId).toBe("org-1");
+    expect(call.behavior).toBe("degrade");
+  });
+
+  it("omitting onBudgetEvent leaves existing behavior unchanged (no throw)", async () => {
+    // When onBudgetEvent is not provided, the warn path must still work normally.
+    const deps = makeDeps({ budget: 100, monthSpend: 90 });
+    const wrapped = wrapEnforceBudget(deps, metrics as never);
+
+    await expect(wrapped("org-1", 1)).resolves.toBeUndefined();
+    expect(metrics.gwLlmBudgetWarnTotal.inc).toHaveBeenCalledTimes(1);
+  });
 });
