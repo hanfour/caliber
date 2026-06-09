@@ -187,23 +187,36 @@ In short: same-LAN is a brittle path. Use it for quick tests when you
 control the router; **default to Tailscale** for anything you actually
 rely on.
 
-### 2.3 Public URL: Cloudflare Tunnel / ngrok
+### 2.3 Public URL: Cloudflare named tunnel (recommended for permanent public access)
 
-For sharing with a device you can't put on your Tailnet (a friend's
-machine, a CI runner, a webhook source):
+The compose stack ships a `tunnel` profile that runs `cloudflared` as a
+sidecar and routes public HTTPS traffic to the gateway over a dedicated
+Docker network. This replaces ad-hoc `cloudflared tunnel --url` one-liners
+with a stable, TLS-terminated hostname you control — no VPN required on
+any client device.
+
+See [§6](#6-cloudflare-named-tunnel-public-access) for the full setup runbook,
+env knobs, and the brute-force throttle / budget-webhook controls that ship
+with it.
+
+**Quick caveat** (expanded in §6): the public hostname is reachable by
+anyone. Issue short-TTL keys, monitor `/dashboard/status` and
+`gw_llm_*` Prometheus metrics, and revoke leaked keys immediately.
+
+### 2.4 Alternative: quick ephemeral URL (testing only)
+
+For a throwaway URL during local testing:
 
 ```bash
 brew install cloudflared
 cloudflared tunnel --url http://localhost:3002
-# emits an https://xxx.trycloudflare.com URL with TLS
+# emits a one-time https://xxx.trycloudflare.com URL; gone when the process stops
 ```
 
-**Caveat**: that URL is publicly reachable. Anyone holding a valid
-`ak_...` can hit your subscription quota. Treat it like a public API
-endpoint — short TTL keys, monitor usage, revoke quickly if the key
-leaks.
+Use this for quick smoke tests only — the URL changes every run and there
+is no brute-force protection.
 
-### 2.4 Real on-prem: TLS + reverse proxy + DNS
+### 2.5 Real on-prem: TLS + reverse proxy + DNS
 
 For a proper internal-network deployment with a domain name, see
 [`LOCAL_DEPLOY.md`](./LOCAL_DEPLOY.md#mode-3--on-prem-production)
@@ -310,7 +323,184 @@ Same pattern for `openai` SDK against the OpenAI-compat path with
 
 ---
 
-## 5. Known limitations
+## 5. Cloudflare named tunnel (public access)
+
+Use this when you want a permanent public HTTPS hostname that BYOK users —
+or your own remote devices — can reach without installing a VPN. The compose
+`tunnel` profile runs `cloudflared` as a sidecar and routes traffic through
+a Cloudflare named tunnel directly to the gateway container.
+
+### 5.1 Create the tunnel in Cloudflare Zero Trust
+
+1. Open **Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel**.
+2. Give it a name (e.g. `caliber-gateway`), choose **Cloudflared** as the
+   connector type.
+3. Cloudflare shows a connector token — **copy it** (you'll paste it into
+   `.env` in §5.2).
+4. Add a **Public Hostname** for the tunnel:
+   - **Subdomain / domain** — whatever public hostname you want, e.g.
+     `gateway.yourdomain.com`
+   - **Service → URL**: `http://gateway-tunnel:3002`
+     This is the Docker compose network alias the gateway container answers
+     on inside the dedicated `tunnel` bridge network. Do not use `localhost`
+     here — `cloudflared` runs in its own container and resolves the alias
+     over the shared Docker network.
+5. Save. The tunnel status will show **Inactive** until the stack is running.
+
+### 5.2 Set environment variables
+
+In `docker/.env` (or your deploy env file):
+
+```dotenv
+# Required: the connector token from step §5.1.3
+TUNNEL_TOKEN=<connector token>
+
+# Public URL users will point their SDK at — must match the hostname
+# you configured in the CF dashboard.
+GATEWAY_BASE_URL=https://gateway.yourdomain.com
+
+# CIDR of the Docker tunnel network — tells the gateway which peers are
+# trusted to set CF-Connecting-IP / X-Forwarded-For.
+# See §5.2a below for how to find this value after first start.
+GATEWAY_TRUSTED_PROXIES=172.20.0.0/16
+```
+
+**Why `GATEWAY_TRUSTED_PROXIES` matters.**
+The gateway honours the `CF-Connecting-IP` header (the real client IP from
+Cloudflare) **only** when the socket peer is inside a trusted proxy CIDR.
+Set it to the tunnel network's subnet — **not** the broad Docker default
+`172.17.0.0/16` — so:
+
+- `cloudflared` (inside that subnet) can forward the real client IP.
+- A direct LAN request arriving on a different network can never spoof
+  `CF-Connecting-IP` by injecting a header.
+- Per-IP brute-force throttle (§5.5) and per-key IP allow/deny lists
+  (§4.3 in `GATEWAY.md`) see the real internet IP, not the tunnel's
+  container IP.
+
+**Finding the tunnel network CIDR after first start:**
+
+```bash
+docker network inspect docker_tunnel \
+  --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+# → e.g. 172.20.0.0/16
+# The network is named <compose-project>_tunnel; the project dir is
+# docker/, so the default project name is "docker" → docker_tunnel.
+```
+
+Run this after `docker compose ... up -d` and update `.env` if the actual
+subnet differs from what you pre-set.
+
+### 5.3 Start with the tunnel profile
+
+```bash
+cd docker
+docker compose --profile gateway --profile tunnel up -d
+```
+
+This starts `gateway`, `cloudflared`, and all supporting services
+(`postgres`, `redis`, `api`, `web`).
+
+**Check the `cloudflare/cloudflared` image tag before first deploy.**
+The tag is pinned in `docker/docker-compose.yml`; it may be stale by the
+time you read this. Verify the current stable release at
+<https://github.com/cloudflare/cloudflared/releases> and bump the tag in the
+compose file if needed.
+
+Confirm the tunnel came up:
+
+```bash
+docker compose logs cloudflared --tail=20
+# Should show: "Registered tunnel connection" with tunnelID
+```
+
+Then check the public endpoint from any device:
+
+```bash
+curl -sS https://gateway.yourdomain.com/health
+# → {"status":"ok"}
+```
+
+### 5.4 API-key hygiene for a public endpoint
+
+Once the gateway is reachable from the internet, key hygiene matters more:
+
+- **Short TTL.** Set `expires_at` when issuing keys — 7–30 days is a
+  sensible default. Renew via **Profile → New key** and revoke the old one.
+- **Per-device keys.** One `ak_...` per device; revoke individually on loss.
+- **Monitor usage.** The `/dashboard/status` page shows your credential
+  health, error rates, and recent activity in one view.
+- **Prometheus alerts.** The `gw_llm_*` metrics family (request count,
+  token throughput, upstream latency) are good signals for anomalous usage
+  spikes — set an alert in Grafana or your preferred alerting stack.
+- **Revoke quickly.** The gateway does not cache auth; revocation takes
+  effect on the next request.
+
+### 5.5 Brute-force throttle knobs
+
+The gateway includes a **per-IP auth-failure limiter** that blocks IPs
+hammering bad keys before they hit the upstream scheduler. It is backed by
+Redis; if Redis is unavailable the limiter **fails open** (requests proceed
+normally) so a Redis outage doesn't lock out legitimate clients.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `GATEWAY_AUTH_FAIL_MAX` | `10` | Auth failures within the window before the IP is blocked. **Set to `0` to disable the throttle entirely.** |
+| `GATEWAY_AUTH_FAIL_WINDOW_SEC` | `300` | Sliding window length (seconds) over which failures are counted. |
+| `GATEWAY_AUTH_FAIL_BLOCK_SEC` | `900` | How long a blocked IP is rejected. Blocked requests receive `HTTP 429` + `Retry-After: <unblock-timestamp>`. |
+
+Metric: `gw_auth_fail_throttle_total` — increments each time an IP is
+blocked (i.e. the threshold is tripped). Alert on this counter to detect
+credential-stuffing attempts.
+
+Example hardened config for a public tunnel:
+
+```dotenv
+GATEWAY_AUTH_FAIL_MAX=5
+GATEWAY_AUTH_FAIL_WINDOW_SEC=120
+GATEWAY_AUTH_FAIL_BLOCK_SEC=3600
+```
+
+### 5.6 Budget webhook alerting
+
+Set `GATEWAY_ALERT_WEBHOOK_URL` to receive HTTP POST alerts when an org's
+spend approaches or exceeds its monthly budget:
+
+```dotenv
+GATEWAY_ALERT_WEBHOOK_URL=https://hooks.example.com/caliber-alerts
+```
+
+The gateway fires the webhook on two events — **warn** (≥ 80 % of budget
+consumed) and **exceeded** (budget crossed). Webhooks are fire-and-forget
+and deduplicated per org + calendar month so you won't get a flood of
+repeated alerts.
+
+**Payload shape:**
+
+```json
+{
+  "event": "warn",
+  "orgId": "org_01abc...",
+  "monthToDate": "8.42",
+  "budget": "10.00",
+  "behavior": "degrade",
+  "ts": "2026-06-09T14:32:00.000Z"
+}
+```
+
+On `exceeded` events, `monthToDate` and `budget` are empty strings (the
+event itself conveys that the limit was crossed; amounts are in the `warn`
+payload you received earlier).
+
+> **Slack / Discord note.** Both services expect their own JSON envelope
+> (`{"text": "..."}` for Slack, `{"content": "..."}` for Discord). The
+> gateway posts its own schema — you will need a small adapter (e.g. a
+> Cloudflare Worker, AWS Lambda, or a service like Make / n8n) to reshape
+> the payload before forwarding to your Slack/Discord incoming webhook URL.
+
+---
+
+## 6. Known limitations
 
 These are issues we hit walking through this workflow against
 v0.4.2 — fix candidates filed but not yet shipped:

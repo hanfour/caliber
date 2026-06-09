@@ -104,6 +104,12 @@ rejection, so a misconfigured container never accepts traffic.
 | `GATEWAY_CACHE_TTL_SEC` |  | `0` | Response cache TTL for non-streaming /v1/* endpoints. **0 = OFF (default)**. When >0, identical `(orgId, endpoint, body)` tuples within the TTL window short-circuit upstream. Cached payloads contain model output (not prompts); confirm data classification permits it before enabling. Sets `x-cache: hit\|miss` headers when enabled. |
 | `UPSTREAM_ANTHROPIC_BASE_URL` |  | `https://api.anthropic.com` | Override for staging / fake upstream in tests. |
 | `UPSTREAM_OPENAI_BASE_URL` |  | `https://api.openai.com` | Override for staging / fake upstream in tests. |
+| `TUNNEL_TOKEN` | `tunnel` compose profile | — | Cloudflare named-tunnel connector token. Required when running `--profile tunnel`. See [`MULTI_DEVICE.md §5`](./MULTI_DEVICE.md#5-cloudflare-named-tunnel-public-access). |
+| `GATEWAY_TRUSTED_PROXIES` |  | `""` | CIDR(s) whose socket peers may set `CF-Connecting-IP` / `X-Forwarded-For`. Set to the `docker_tunnel` network subnet when using the named-tunnel profile so per-IP throttle and IP allow/deny lists see the real client IP. Empty = trust socket only. |
+| `GATEWAY_AUTH_FAIL_MAX` |  | `10` | Max auth failures per IP within the window before the IP is blocked with HTTP 429 + `Retry-After`. Set `0` to disable. Fail-open if Redis is unavailable. |
+| `GATEWAY_AUTH_FAIL_WINDOW_SEC` |  | `300` | Sliding window (seconds) for the per-IP auth-failure counter. |
+| `GATEWAY_AUTH_FAIL_BLOCK_SEC` |  | `900` | Block duration (seconds) for IPs that trip `GATEWAY_AUTH_FAIL_MAX`. Metric: `gw_auth_fail_throttle_total`. |
+| `GATEWAY_ALERT_WEBHOOK_URL` |  | — | When set, the gateway POSTs JSON alerts to this URL on org budget warn (≥ 80 %) and exceeded events. Fire-and-forget, deduplicated per org + month. Payload: `{ event, orgId, monthToDate, budget, behavior?, ts }`. |
 
 **Secrets posture.** `CREDENTIAL_ENCRYPTION_KEY` and `API_KEY_HASH_PEPPER`
 should never appear in `.env` checked into a repo, logs, or stack traces.
@@ -251,9 +257,11 @@ At request time the gateway (`apps/gateway/src/middleware/apiKeyAuth.ts`):
    IP comes from the socket unless the source is listed in
    `GATEWAY_TRUSTED_PROXIES`, in which case `X-Forwarded-For` is honoured.
 
-Per-IP auth-failure brute-force throttling (design §6.7) is planned but not
-wired in 4A — put a request-rate limit in your reverse proxy if you need it
-now.
+Per-IP auth-failure brute-force throttling ships with the P4 Cloudflare
+named-tunnel feature. Configure it via `GATEWAY_AUTH_FAIL_MAX`,
+`GATEWAY_AUTH_FAIL_WINDOW_SEC`, and `GATEWAY_AUTH_FAIL_BLOCK_SEC` (see
+[§2 Configuration](#2-configuration) and
+[`MULTI_DEVICE.md §5.5`](./MULTI_DEVICE.md#55-brute-force-throttle-knobs)).
 
 ### 4.4 Revocation
 
