@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createOpenAITokenRefresher } from "../../../src/oauth/openai/openaiTokenRefresher.js";
-import { OPENAI_CODEX_OAUTH } from "../../../src/oauth/openai/codexConstants.js";
+import { OPENAI_CODEX_OAUTH } from "@caliber/gateway-core/oauth";
 import {
   OAuthRefreshError,
   OAuthRefreshTokenInvalid,

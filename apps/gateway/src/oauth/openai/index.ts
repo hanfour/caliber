@@ -10,7 +10,7 @@
 
 import type { OAuthRegistry } from "../registry.js";
 import type { RefreshApiLike } from "../types.js";
-import { createOpenAIOAuthService } from "./openaiOAuthService.js";
+import { createOpenAIOAuthService } from "@caliber/gateway-core/oauth";
 import { createOpenAITokenProvider } from "./openaiTokenProvider.js";
 import { createOpenAITokenRefresher } from "./openaiTokenRefresher.js";
 
@@ -50,12 +50,12 @@ export function registerOpenAIOAuth(
 }
 
 export {
-  createOpenAIOAuthService,
   createOpenAITokenProvider,
   createOpenAITokenRefresher,
 };
+export { createOpenAIOAuthService } from "@caliber/gateway-core/oauth";
 export {
   OPENAI_CODEX_OAUTH,
   OPENAI_API_BASE,
   CHATGPT_BACKEND_API,
-} from "./codexConstants.js";
+} from "@caliber/gateway-core/oauth";
