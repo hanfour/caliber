@@ -5,6 +5,12 @@ import { hashApiKey } from "@caliber/gateway-core";
 import { apiKeys, users, organizations } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import type { ServerEnv } from "@caliber/config";
+import { resolveClientIp } from "./resolveClientIp.js";
+import {
+  checkIpBlocked,
+  recordAuthFailure,
+  type AuthThrottleConfig,
+} from "../redis/ipAuthThrottle.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -57,14 +63,74 @@ async function pluginBody(
   fastify.decorateRequest("gwUser", null);
   fastify.decorateRequest("gwOrg", null);
 
+  const throttleCfg: AuthThrottleConfig = {
+    max: opts.env.GATEWAY_AUTH_FAIL_MAX ?? 10,
+    windowSec: opts.env.GATEWAY_AUTH_FAIL_WINDOW_SEC ?? 300,
+    blockSec: opts.env.GATEWAY_AUTH_FAIL_BLOCK_SEC ?? 900,
+  };
+  const trustedProxies = (opts.env.GATEWAY_TRUSTED_PROXIES ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Centralised auth-failure handler: runs the per-IP brute-force throttle
+  // (Redis), returns 429 when blocked/just-blocked, else the original error.
+  // Fail-open on Redis errors (availability > brute-force defence).
+  async function failAuth(
+    req: import("fastify").FastifyRequest,
+    reply: import("fastify").FastifyReply,
+    ip: string,
+    status: number,
+    errCode: string,
+  ): Promise<import("fastify").FastifyReply> {
+    if (throttleCfg.max <= 0) {
+      // throttle disabled → no Redis work, original error verbatim
+      return reply.code(status).send({ error: errCode });
+    }
+    // fastify.redis is typed non-null (redisPlugin decorates it), but test
+    // harnesses build a bare fastify without registering redisPlugin. Widen to
+    // include undefined and treat a missing client as fail-open (original error).
+    const redisClient: import("ioredis").Redis | undefined = fastify.redis;
+    if (!redisClient) {
+      return reply.code(status).send({ error: errCode });
+    }
+    try {
+      const blocked = await checkIpBlocked(redisClient, ip);
+      if (blocked.blocked) {
+        fastify.gwMetrics?.gwAuthFailThrottleTotal.inc();
+        return reply
+          .code(429)
+          .header("retry-after", String(blocked.retryAfterSec))
+          .send({ error: "rate_limited" });
+      }
+      const rec = await recordAuthFailure(redisClient, ip, throttleCfg);
+      if (rec.justBlocked) {
+        fastify.gwMetrics?.gwAuthFailThrottleTotal.inc();
+        return reply
+          .code(429)
+          .header("retry-after", String(rec.retryAfterSec))
+          .send({ error: "rate_limited" });
+      }
+    } catch (err) {
+      req.log.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "auth_throttle_check_failed",
+      );
+      fastify.gwMetrics?.redisErrorTotal.inc({ op: "auth_throttle" });
+      // fail-open → fall through to the original error below
+    }
+    return reply.code(status).send({ error: errCode });
+  }
+
   fastify.addHook("preHandler", async (req, reply) => {
     const path = (req.url ?? "").split("?", 1)[0] ?? "";
     if (PUBLIC_PATHS.has(path)) return;
 
+    const ip = resolveClientIp(req, trustedProxies);
+
     const raw = extractKey(req.headers);
     if (!raw) {
-      reply.code(401).send({ error: "missing_api_key" });
-      return reply;
+      return failAuth(req, reply, ip, 401, "missing_api_key");
     }
 
     const pepper = opts.env.API_KEY_HASH_PEPPER;
@@ -93,42 +159,30 @@ async function pluginBody(
       .then((r) => r[0]);
 
     if (!row) {
-      reply.code(401).send({ error: "key_invalid" });
-      return reply;
+      return failAuth(req, reply, ip, 401, "key_invalid");
     }
 
     if (row.apiKey.revokedAt !== null) {
-      reply.code(401).send({ error: "key_revoked" });
-      return reply;
+      return failAuth(req, reply, ip, 401, "key_revoked");
     }
 
     if (row.apiKey.expiresAt !== null && row.apiKey.expiresAt <= new Date()) {
-      reply.code(401).send({ error: "key_expired" });
-      return reply;
+      return failAuth(req, reply, ip, 401, "key_expired");
     }
 
     if (row.apiKey.revealTokenHash !== null && row.apiKey.revealedAt === null) {
-      reply.code(401).send({ error: "key_not_yet_revealed" });
-      return reply;
+      return failAuth(req, reply, ip, 401, "key_not_yet_revealed");
     }
 
-    // req.ip is Fastify-resolved: when GATEWAY_TRUSTED_PROXIES is non-empty
-    // and the socket peer matches the configured CIDR(s), Fastify pulls the
-    // client IP from X-Forwarded-For. Operators behind an L7 proxy must
-    // configure that env or per-key IP allow/deny lists silently fall back
-    // to gating on the proxy's IP.
-    const ip = req.ip;
     const blacklist = row.apiKey.ipBlacklist ?? [];
     const whitelist = row.apiKey.ipWhitelist ?? [];
 
     if (blacklist.length > 0 && matchesAny(ip, blacklist)) {
-      reply.code(403).send({ error: "ip_not_allowed" });
-      return reply;
+      return failAuth(req, reply, ip, 403, "ip_not_allowed");
     }
 
     if (whitelist.length > 0 && !matchesAny(ip, whitelist)) {
-      reply.code(403).send({ error: "ip_not_allowed" });
-      return reply;
+      return failAuth(req, reply, ip, 403, "ip_not_allowed");
     }
 
     req.apiKey = {
