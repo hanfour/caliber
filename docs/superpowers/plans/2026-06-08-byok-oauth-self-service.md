@@ -1406,14 +1406,18 @@ describe("accounts.completeOAuth (re-authorize)", () => {
             ),
           )
           .limit(1);
-        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        // Collapse missing-row + not-owner into NOT_FOUND so a caller can't
+        // enumerate other users' upstream IDs (matches Task 9 + the router's
+        // anti-enumeration convention). The platform/type BAD_REQUEST below
+        // only runs on rows the caller owns, so it leaks nothing cross-user.
         if (
+          !row ||
           !can(ctx.perm, {
             type: "account.manage_own",
             ownerUserId: row.userId ?? "",
           })
         ) {
-          throw new TRPCError({ code: "FORBIDDEN" });
+          throw new TRPCError({ code: "NOT_FOUND" });
         }
         if (row.type !== "oauth" || row.platform !== flow.platform) {
           throw new TRPCError({
