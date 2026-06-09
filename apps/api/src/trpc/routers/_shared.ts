@@ -3,6 +3,15 @@ import { TRPCError } from "@trpc/server";
 import { teams, accountGroups, organizationMembers } from "@caliber/db";
 import type { Database } from "@caliber/db";
 
+// Gateway feature-gate. Every accounts mutation/query is hidden (NOT_FOUND,
+// not FORBIDDEN) when the gateway is disabled so the surface doesn't leak its
+// existence to deployments that never enabled it.
+export function ensureGatewayEnabled(env: { ENABLE_GATEWAY: boolean }): void {
+  if (!env.ENABLE_GATEWAY) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+}
+
 // Cross-tenant integrity guard. `api_keys.team_id` and
 // `upstream_accounts.team_id` are independent FKs to the `teams` table — the
 // schema does NOT enforce that the row's `org_id` matches the team's
