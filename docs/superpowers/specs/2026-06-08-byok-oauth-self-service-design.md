@@ -133,7 +133,7 @@
 | 重新授權目標 platform 與 flow.platform 不符 | `BAD_REQUEST` |
 | anthropic 但 flag 關 | `NOT_FOUND`（功能未啟用） |
 
-flow-state 於**成功與終局失敗皆刪除**；user-friendly 訊息；不洩漏 token 或內部細節。
+flow-state 刪除策略：**成功**、**exchange 失敗**（授權碼單次性、終局）、**payload 損毀**皆 `redis.del`（防重放）；**CSRF/貼錯碼**不刪（可重試）、**flow.userId≠caller**不刪（避免 grief 真正擁有者的 in-flight flow）。Redis 讀回的 flow-state 以 zod 解析（不盲信 `as`，邊界驗證）。user-friendly 訊息；不洩漏 token 或內部細節。
 
 ---
 
