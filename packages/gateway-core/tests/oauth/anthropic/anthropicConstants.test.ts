@@ -10,9 +10,7 @@ describe("resolveAnthropicConstants", () => {
     expect(c.clientId).toBe("9d1c250a-e61b-44d9-88ed-5944d1962f5e");
     expect(c.authorizeEndpoint).toBe("https://claude.ai/oauth/authorize");
     expect(c.tokenEndpoint).toBe("https://console.anthropic.com/v1/oauth/token");
-    expect(c.defaultRedirectURI).toBe(
-      "https://console.anthropic.com/oauth/code/callback",
-    );
+    expect(c.defaultRedirectURI).toBe("http://localhost:54545/callback");
     expect(c.scopes).toEqual([
       "org:create_api_key",
       "user:profile",

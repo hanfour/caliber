@@ -16,7 +16,14 @@ export const ANTHROPIC_OAUTH_DEFAULTS: AnthropicOAuthConstants = {
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   authorizeEndpoint: "https://claude.ai/oauth/authorize",
   tokenEndpoint: "https://console.anthropic.com/v1/oauth/token",
-  defaultRedirectURI: "https://console.anthropic.com/oauth/code/callback",
+  // Loopback redirect (like the OpenAI codex flow + the official Claude Code
+  // CLI). The non-loopback console/platform callbacks hit claude.ai's
+  // console.anthropic.com→platform.claude.com remap, which breaks the token
+  // exchange's redirect_uri match (http_400). A loopback URI is never remapped,
+  // so authorize and exchange agree. No local server runs — claude.ai redirects
+  // here, the browser shows "connection refused", and the user copies the URL
+  // (code+state) from the address bar. Override via ANTHROPIC_OAUTH_REDIRECT_URI.
+  defaultRedirectURI: "http://localhost:54545/callback",
   // Match Claude Code's scope set exactly. claude.ai grants against the
   // client's registered scopes; the full set is what the official CLI requests
   // and is confirmed to grant (live OAuth 2026-06-09). Override via

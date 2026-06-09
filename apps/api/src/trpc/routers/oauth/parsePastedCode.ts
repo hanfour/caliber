@@ -1,14 +1,17 @@
-// Manual-paste parsing. Anthropic shows "<code>#<state>"; OpenAI codex
-// loopback redirects to "http://localhost:1455/auth/callback?code=X&state=Y"
-// (no local server runs — the user copies the URL from the address bar).
+// Manual-paste parsing. Both platforms use a loopback redirect
+// ("http://localhost:<port>/callback?code=X&state=Y") — no local server runs,
+// so the user copies the URL from the address bar after the "connection
+// refused" page. Anthropic also accepts the console "<code>#<state>" form (the
+// callback page that displays the code), so the #-split is kept as a fallback.
 // A bare value with no state yields state:"" so completeOAuth rejects it
 // (state CSRF check would fail anyway — see INV-O2).
 export function parsePastedCode(
   pastedValue: string,
-  platform: "openai" | "anthropic",
+  _platform: "openai" | "anthropic",
 ): { code: string; state: string } {
   const v = pastedValue.trim();
-  if (platform === "openai" && /[?&]code=/.test(v)) {
+  // A pasted callback URL takes precedence for either platform.
+  if (/[?&]code=/.test(v)) {
     try {
       const u = new URL(v);
       return {
