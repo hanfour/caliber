@@ -54,4 +54,11 @@ describe("maybeSendBudgetAlert", () => {
     await maybeSendBudgetAlert(deps({ redis }), { orgId: "o1", event: "exceeded", monthToDate: "11", budget: "10", behavior: "halt" });
     expect(await redis.get("alert-sent:exceeded:o1:2026-06:halt")).toBe("1");
   });
+  it("releases the in-flight lock even when fetch throws (no 30s stranded lock)", async () => {
+    const redis = new RedisMock();
+    const fetch = vi.fn().mockRejectedValue(new Error("boom"));
+    await maybeSendBudgetAlert(deps({ redis, fetch }), evt);
+    expect(await redis.get("alert-sent:warn:o1:2026-06:lock")).toBeNull();
+    expect(await redis.get("alert-sent:warn:o1:2026-06")).toBeNull(); // not marked (no 2xx)
+  });
 });

@@ -44,9 +44,17 @@ export async function recordAuthFailure(
   if (cfg.max <= 0) return { justBlocked: false, retryAfterSec: 0 };
   const k = failKey(ip);
   const count = await redis.incr(k);
-  if (count === 1) await redis.expire(k, cfg.windowSec);
+  // Refresh the window TTL on EVERY failure, not just the first. A bare
+  // `if (count === 1)` would strand a TTL-less counter forever if that single
+  // `expire` ever failed (transient Redis error) — the IP would then keep
+  // accumulating and get permanently re-blocked. Unconditional expire self-heals
+  // on the next failure and makes the window slide with activity.
+  await redis.expire(k, cfg.windowSec);
   if (count >= cfg.max) {
     await redis.set(blockKey(ip), "1", "EX", cfg.blockSec);
+    // Clear the counter so that when the block lapses the IP starts from a
+    // clean window instead of being immediately re-blocked by a stale count.
+    await redis.del(k);
     return { justBlocked: true, retryAfterSec: cfg.blockSec };
   }
   return { justBlocked: false, retryAfterSec: 0 };

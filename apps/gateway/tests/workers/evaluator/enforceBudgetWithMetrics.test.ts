@@ -177,6 +177,9 @@ describe("wrapEnforceBudget", () => {
     expect(call.event).toBe("exceeded");
     expect(call.orgId).toBe("org-1");
     expect(call.behavior).toBe("halt");
+    // real numbers from the breach error, not empty strings
+    expect(call.monthToDate).toBe("99");
+    expect(call.budget).toBe("100");
   });
 
   it("calls onBudgetEvent with exceeded+degrade event on BudgetExceededDegrade", async () => {
@@ -192,6 +195,8 @@ describe("wrapEnforceBudget", () => {
     expect(call.event).toBe("exceeded");
     expect(call.orgId).toBe("org-1");
     expect(call.behavior).toBe("degrade");
+    expect(call.monthToDate).toBe("99");
+    expect(call.budget).toBe("100");
   });
 
   it("omitting onBudgetEvent leaves existing behavior unchanged (no throw)", async () => {

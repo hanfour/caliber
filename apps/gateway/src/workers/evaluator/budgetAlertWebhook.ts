@@ -47,25 +47,31 @@ export async function maybeSendBudgetAlert(
     const lock = await deps.redis.set(`${dk}:lock`, "1", "EX", INFLIGHT_TTL_SEC, "NX");
     if (lock === null) return;
 
-    const res = await deps.fetch(deps.webhookUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        event: e.event,
-        orgId: e.orgId,
-        monthToDate: e.monthToDate,
-        budget: e.budget,
-        ...(e.behavior ? { behavior: e.behavior } : {}),
-        ts: deps.now().toISOString(),
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      await deps.redis.set(dk, "1", "EX", ALERT_TTL_SEC); // mark only on success
-    } else {
-      deps.logger.warn({ status: res.status, orgId: e.orgId }, "budget_alert_webhook_non_2xx");
+    // Release the lock in `finally` so a slow/failed POST or a failed dedup
+    // write doesn't strand it for the full INFLIGHT_TTL_SEC. The del is
+    // best-effort — never let lock cleanup mask the original error.
+    try {
+      const res = await deps.fetch(deps.webhookUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          event: e.event,
+          orgId: e.orgId,
+          monthToDate: e.monthToDate,
+          budget: e.budget,
+          ...(e.behavior ? { behavior: e.behavior } : {}),
+          ts: deps.now().toISOString(),
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        await deps.redis.set(dk, "1", "EX", ALERT_TTL_SEC); // mark only on success
+      } else {
+        deps.logger.warn({ status: res.status, orgId: e.orgId }, "budget_alert_webhook_non_2xx");
+      }
+    } finally {
+      await deps.redis.del(`${dk}:lock`).catch(() => undefined);
     }
-    await deps.redis.del(`${dk}:lock`);
   } catch (err) {
     deps.logger.warn(
       { err: err instanceof Error ? err.message : String(err), orgId: e.orgId },

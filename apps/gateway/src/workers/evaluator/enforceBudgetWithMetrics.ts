@@ -82,13 +82,27 @@ export function wrapEnforceBudget(
           org_id: orgId,
           behavior: "degrade",
         });
-        onBudgetEvent?.({ orgId, event: "exceeded", monthToDate: "", budget: "", behavior: "degrade" });
+        // The breach error carries the real numbers — surface them so the
+        // webhook tells the operator how far over budget the org is.
+        onBudgetEvent?.({
+          orgId,
+          event: "exceeded",
+          monthToDate: String(err.currentSpend),
+          budget: String(err.budget),
+          behavior: "degrade",
+        });
       } else if (err instanceof BudgetExceededHalt) {
         metrics.gwLlmBudgetExceededTotal.inc({
           org_id: orgId,
           behavior: "halt",
         });
-        onBudgetEvent?.({ orgId, event: "exceeded", monthToDate: "", budget: "", behavior: "halt" });
+        onBudgetEvent?.({
+          orgId,
+          event: "exceeded",
+          monthToDate: String(err.currentSpend),
+          budget: String(err.budget),
+          behavior: "halt",
+        });
       }
       throw err;
     }
