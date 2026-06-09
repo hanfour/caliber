@@ -575,6 +575,21 @@
       "submit": "輪替",
       "submitting": "輪替中…",
       "rotatedToast": "已輪替憑證"
+    },
+    "oauth": {
+      "method": "憑證方式",
+      "methodApiKey": "貼上 API key",
+      "methodOAuth": "透過 OAuth 連結",
+      "connect": "連結",
+      "codeLabel": "授權碼",
+      "pasteHintAnthropic": "授權後，貼上頁面顯示的代碼。",
+      "pasteHintOpenAI": "授權後，從網址列複製 localhost 開頭的整個網址貼上。",
+      "submit": "完成連結",
+      "connectedToast": "OAuth 憑證已連結",
+      "anthropicDisabled": "Anthropic OAuth 尚未啟用。",
+      "reauthorize": "重新授權",
+      "reauthAriaLabel": "重新授權 {name}",
+      "reauthTitle": "重新授權 {name}"
     }
   },
   "status": {

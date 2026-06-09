@@ -1,9 +1,5 @@
-import type {
-  OAuthService,
-  Platform,
-  TokenProvider,
-  TokenRefresher,
-} from "./types.js";
+import type { OAuthService } from "@caliber/gateway-core/oauth";
+import type { Platform, TokenProvider, TokenRefresher } from "./types.js";
 
 // Plan 5A §7.3 — per-platform DI registry.  Each platform implementation
 // (PR 5 OpenAI, 5B Gemini, 5C Antigravity) registers its 4-piece triple

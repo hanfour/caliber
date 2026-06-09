@@ -60,7 +60,7 @@ export function createOpenAIOAuthService(
         OPENAI_CODEX_OAUTH.pkceMethod,
       );
 
-      return { authUrl: url.toString(), state, codeVerifier };
+      return { authUrl: url.toString(), state, codeVerifier, redirectURI };
     },
 
     async exchangeCode(opts) {

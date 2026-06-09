@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createOpenAIOAuthService } from "../../../src/oauth/openai/openaiOAuthService.js";
 import { parseTokenResponse } from "../../../src/oauth/openai/openaiTokenParser.js";
 import { OPENAI_CODEX_OAUTH } from "../../../src/oauth/openai/codexConstants.js";
@@ -72,6 +72,15 @@ describe("openaiOAuthService.generateAuthURL", () => {
     const b = await svc.generateAuthURL({});
     expect(a.state).not.toBe(b.state);
     expect(a.codeVerifier).not.toBe(b.codeVerifier);
+  });
+
+  it("generateAuthURL returns the default redirectURI when none given", async () => {
+    const svc = createOpenAIOAuthService({ fetch: makeFakeFetch([]).fakeFetch });
+    const auth = await svc.generateAuthURL({});
+    expect(auth.redirectURI).toBe("http://localhost:1455/auth/callback");
+    expect(new URL(auth.authUrl).searchParams.get("redirect_uri")).toBe(
+      "http://localhost:1455/auth/callback",
+    );
   });
 });
 
@@ -172,6 +181,7 @@ describe("openaiOAuthService.exchangeCode", () => {
     expect(new URL(auth.authUrl).searchParams.get("redirect_uri")).toBe(
       customURI,
     );
+    expect(auth.redirectURI).toBe(customURI);
 
     await svc.exchangeCode({
       code: "c",

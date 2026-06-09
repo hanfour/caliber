@@ -9,35 +9,20 @@
 // existing monolithic `apps/gateway/src/runtime/oauthRefresh.ts` until
 // 5D refactors it into the same shape (decision A11).
 
-export type Platform = "anthropic" | "openai" | "gemini" | "antigravity";
-
-/** TokenSet = the canonical shape returned by exchangeCode + refresh. */
-export interface TokenSet {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: Date;
-  /** Optional, e.g. "Bearer".  Defaults to "Bearer" at use sites. */
-  tokenType?: string;
-  /** Space-separated scopes when present. */
-  scope?: string;
-}
-
-/**
- * 1. OAuthService — interactive flow (admin-side, account creation /
- * re-authorisation).  Generates the auth URL and exchanges the
- * authorisation code for the initial token set.
- */
-export interface OAuthService {
-  platform: Platform;
-  generateAuthURL(opts: {
-    redirectURI?: string;
-  }): Promise<{ authUrl: string; state: string; codeVerifier: string }>;
-  exchangeCode(opts: {
-    code: string;
-    codeVerifier: string;
-    redirectURI?: string;
-  }): Promise<TokenSet>;
-}
+// The interactive-flow contracts now live in gateway-core/oauth; re-export
+// them so existing gateway consumers (refresher / refreshApi / runtime)
+// keep importing from "../types.js" unchanged.
+export {
+  type Platform,
+  type TokenSet,
+  type OAuthService,
+  OAuthRefreshError,
+  OAuthRefreshTokenInvalid,
+} from "@caliber/gateway-core/oauth";
+import type { Platform, TokenSet } from "@caliber/gateway-core/oauth";
+// `OAuthLockTimeoutError` (below) extends `OAuthRefreshError`, so we also
+// need it as a local value binding — a re-export alone is not in scope here.
+import { OAuthRefreshError } from "@caliber/gateway-core/oauth";
 
 /**
  * 2. TokenProvider — hot-path access-token fetcher.  Called from request
@@ -91,31 +76,13 @@ export interface RefreshPolicy {
 
 // ── Error classes ────────────────────────────────────────────────────────────
 //
-// Each platform's TokenRefresher MUST throw `OAuthRefreshTokenInvalid` when
-// the upstream returns an `invalid_grant` (or platform equivalent) — this
-// is the only error that `OAuthRefreshAPI` always propagates regardless of
+// `OAuthRefreshError` / `OAuthRefreshTokenInvalid` now live in
+// gateway-core/oauth and are re-exported at the top of this file.  Each
+// platform's TokenRefresher MUST throw `OAuthRefreshTokenInvalid` when the
+// upstream returns an `invalid_grant` (or platform equivalent) — this is
+// the only error that `OAuthRefreshAPI` always propagates regardless of
 // `RefreshPolicy.onRefreshError`, so the account can be marked
 // `oauth_invalid` and operators alerted.
-
-export class OAuthRefreshError extends Error {
-  constructor(
-    message: string,
-    public readonly platform?: Platform,
-  ) {
-    super(message);
-    this.name = "OAuthRefreshError";
-  }
-}
-
-export class OAuthRefreshTokenInvalid extends OAuthRefreshError {
-  constructor(
-    message: string,
-    public readonly platform: Platform,
-  ) {
-    super(message, platform);
-    this.name = "OAuthRefreshTokenInvalid";
-  }
-}
 
 /**
  * Subset of `OAuthRefreshAPI` that `TokenProvider` implementations need.

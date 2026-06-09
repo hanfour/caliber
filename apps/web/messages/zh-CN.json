@@ -575,6 +575,21 @@
       "submit": "轮替",
       "submitting": "轮替中…",
       "rotatedToast": "已轮替凭证"
+    },
+    "oauth": {
+      "method": "凭证方式",
+      "methodApiKey": "粘贴 API key",
+      "methodOAuth": "通过 OAuth 连接",
+      "connect": "连接",
+      "codeLabel": "授权码",
+      "pasteHintAnthropic": "授权后，粘贴页面显示的代码。",
+      "pasteHintOpenAI": "授权后，从地址栏复制 localhost 开头的整个网址粘贴。",
+      "submit": "完成连接",
+      "connectedToast": "OAuth 凭证已连接",
+      "anthropicDisabled": "Anthropic OAuth 尚未启用。",
+      "reauthorize": "重新授权",
+      "reauthAriaLabel": "重新授权 {name}",
+      "reauthTitle": "重新授权 {name}"
     }
   },
   "status": {

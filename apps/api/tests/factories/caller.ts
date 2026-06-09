@@ -55,6 +55,7 @@ export const defaultTestEnv: ServerEnv = {
   TEST_SEED_TOKEN: undefined,
 
   ENABLE_GATEWAY: true,
+  ENABLE_ANTHROPIC_OAUTH: false,
   GATEWAY_PORT: 3002,
   GATEWAY_BASE_URL: "http://localhost:3002",
   REDIS_URL: "redis://localhost:6379",

@@ -575,6 +575,21 @@
       "submit": "Rotate",
       "submitting": "Rotating…",
       "rotatedToast": "Credential rotated"
+    },
+    "oauth": {
+      "method": "Credential method",
+      "methodApiKey": "Paste API key",
+      "methodOAuth": "Connect via OAuth",
+      "connect": "Connect",
+      "codeLabel": "Authorization code",
+      "pasteHintAnthropic": "After authorizing, paste the code shown on the page.",
+      "pasteHintOpenAI": "After authorizing, copy the full localhost URL from the address bar and paste it here.",
+      "submit": "Finish connecting",
+      "connectedToast": "OAuth credential connected",
+      "anthropicDisabled": "Anthropic OAuth is not enabled.",
+      "reauthorize": "Re-authorize",
+      "reauthAriaLabel": "Re-authorize {name}",
+      "reauthTitle": "Re-authorize {name}"
     }
   },
   "status": {

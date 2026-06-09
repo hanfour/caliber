@@ -575,6 +575,21 @@
       "submit": "교체",
       "submitting": "교체 중…",
       "rotatedToast": "자격증명이 교체되었습니다"
+    },
+    "oauth": {
+      "method": "자격 증명 방식",
+      "methodApiKey": "API 키 붙여넣기",
+      "methodOAuth": "OAuth로 연결",
+      "connect": "연결",
+      "codeLabel": "인증 코드",
+      "pasteHintAnthropic": "승인 후 페이지에 표시된 코드를 붙여넣으세요.",
+      "pasteHintOpenAI": "승인 후 주소창의 localhost로 시작하는 전체 URL을 복사해 붙여넣으세요.",
+      "submit": "연결 완료",
+      "connectedToast": "OAuth 자격 증명이 연결되었습니다",
+      "anthropicDisabled": "Anthropic OAuth가 활성화되지 않았습니다.",
+      "reauthorize": "재승인",
+      "reauthAriaLabel": "{name} 재승인",
+      "reauthTitle": "{name} 재승인"
     }
   },
   "status": {

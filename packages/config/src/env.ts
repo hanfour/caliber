@@ -75,6 +75,11 @@ export const serverEnvSchema = z
 
     // Gateway vars
     ENABLE_GATEWAY: booleanUnion.default(false),
+    ENABLE_ANTHROPIC_OAUTH: booleanUnion.default(false),
+    ANTHROPIC_OAUTH_AUTHORIZE_URL: emptyAsUndefined(z.string().url().optional()),
+    ANTHROPIC_OAUTH_TOKEN_URL: emptyAsUndefined(z.string().url().optional()),
+    ANTHROPIC_OAUTH_REDIRECT_URI: emptyAsUndefined(z.string().url().optional()),
+    ANTHROPIC_OAUTH_SCOPES: emptyAsUndefined(z.string().optional()),
     GATEWAY_PORT: z.coerce.number().int().min(1).max(65535).default(3002),
     GATEWAY_BASE_URL: z.string().url().optional(),
     GATEWAY_LOCAL_BASE_URL: z.string().url().default("http://localhost:3002"),

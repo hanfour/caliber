@@ -575,6 +575,21 @@
       "submit": "ローテート",
       "submitting": "ローテート中…",
       "rotatedToast": "認証情報をローテートしました"
+    },
+    "oauth": {
+      "method": "認証情報の方式",
+      "methodApiKey": "API キーを貼り付け",
+      "methodOAuth": "OAuth で接続",
+      "connect": "接続",
+      "codeLabel": "認可コード",
+      "pasteHintAnthropic": "認可後、画面に表示されたコードを貼り付けてください。",
+      "pasteHintOpenAI": "認可後、アドレスバーの localhost で始まる URL 全体をコピーして貼り付けてください。",
+      "submit": "接続を完了",
+      "connectedToast": "OAuth 認証情報を接続しました",
+      "anthropicDisabled": "Anthropic OAuth は有効になっていません。",
+      "reauthorize": "再認可",
+      "reauthAriaLabel": "{name} を再認可",
+      "reauthTitle": "{name} を再認可"
     }
   },
   "status": {

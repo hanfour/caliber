@@ -3,8 +3,10 @@ import {
   OAuthRefreshTokenInvalid,
   type TokenRefresher,
 } from "../types.js";
-import { OPENAI_CODEX_OAUTH } from "./codexConstants.js";
-import { parseTokenResponse } from "./openaiTokenParser.js";
+import {
+  OPENAI_CODEX_OAUTH,
+  parseTokenResponse,
+} from "@caliber/gateway-core/oauth";
 
 // Plan 5A §6.5 — OpenAI Codex token refresher.  Implements the
 // TokenRefresher interface for use by `OAuthRefreshAPI`.
