@@ -120,6 +120,7 @@ export function UpstreamOwnList() {
                             </Button>
                           )}
                           {row.type === "oauth" &&
+                            (row.platform === "openai" || row.platform === "anthropic") &&
                             ["expired", "error"].includes(deriveAccountStatus(row)) && (
                               <Button
                                 variant="ghost"

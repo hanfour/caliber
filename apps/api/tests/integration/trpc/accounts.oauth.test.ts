@@ -148,6 +148,8 @@ describe("accounts.completeOAuth (first-connect)", () => {
     const caller = await callerFor({ db: t.db, userId: u.id, redis });
     const init = await caller.accounts.initiateOAuth({ platform: "openai" });
     await expect(caller.accounts.completeOAuth({ flowId: init.flowId, pastedValue: "http://localhost:1455/auth/callback?code=THECODE&state=WRONG" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // INV-O4: a bad paste is recoverable — flow-state must survive for retry
+    expect((redis as any).store.get(`oauth-flow:${init.flowId}`)).toBeDefined();
   });
 
   it("PRECONDITION_FAILED when flow expired/missing", async () => {

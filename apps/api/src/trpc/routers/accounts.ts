@@ -1163,6 +1163,10 @@ export const accountsRouter = router({
             name: `${flow.platform} OAuth`,
             platform: flow.platform,
             type: "oauth",
+            // Denormalized expiry drives deriveAccountStatus("expired") in the
+            // UI — mirror the admin `register` path so self-service oauth rows
+            // surface their token lifetime + re-auth prompt symmetrically.
+            expiresAt: oauthExpiresAt,
           })
           .returning();
         if (!acct) {
