@@ -46,14 +46,16 @@ describe("anthropicOAuthService", () => {
       { status: 200, body: { access_token: "atk", refresh_token: "rtk", expires_in: 3600 } },
     ]);
     const svc = createAnthropicOAuthService({ constants: ANTHROPIC_OAUTH_DEFAULTS, fetch: fn, now: () => 1000 });
-    const ts = await svc.exchangeCode({ code: "c", codeVerifier: "v", redirectURI: "https://x/cb" });
+    const ts = await svc.exchangeCode({ code: "c", codeVerifier: "v", redirectURI: "https://x/cb", state: "st8" });
     expect(ts.accessToken).toBe("atk");
     expect(ts.refreshToken).toBe("rtk");
     expect(ts.expiresAt).toEqual(new Date(1000 + 3600 * 1000));
     const init = calls[0]!.init!;
     expect((init.headers as Record<string, string>)["content-type"]).toBe("application/json");
     const body = JSON.parse(init.body as string);
-    expect(body).toMatchObject({ grant_type: "authorization_code", code: "c", code_verifier: "v", redirect_uri: "https://x/cb", client_id: ANTHROPIC_OAUTH_DEFAULTS.clientId });
+    // `state` MUST be echoed in the token body — Claude Code's non-standard
+    // token endpoint rejects ("Invalid request format") without it.
+    expect(body).toMatchObject({ grant_type: "authorization_code", code: "c", code_verifier: "v", redirect_uri: "https://x/cb", client_id: ANTHROPIC_OAUTH_DEFAULTS.clientId, state: "st8" });
   });
 
   it("exchangeCode throws on non-2xx", async () => {

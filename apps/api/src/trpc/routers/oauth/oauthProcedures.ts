@@ -183,6 +183,10 @@ export const oauthProcedures = {
           code,
           codeVerifier: flow.codeVerifier,
           redirectURI: flow.redirectURI,
+          // Echo the original state — required by Anthropic's (Claude Code)
+          // token endpoint. `state` here already equals input.flowId (the CSRF
+          // check above enforces it), which is the state minted in initiateOAuth.
+          state,
         });
       } catch (err) {
         // Terminal failure: the authorization code is single-use at the

@@ -28,6 +28,11 @@ export interface OAuthService {
     code: string;
     codeVerifier: string;
     redirectURI?: string;
+    // Anthropic's (Claude Code) token endpoint is non-standard: it requires the
+    // original `state` echoed back in the token-exchange body, or it rejects
+    // with "Invalid request format". Optional here so the OpenAI flow (which
+    // follows the standard, stateless token exchange) is unaffected.
+    state?: string;
   }): Promise<TokenSet>;
 }
 

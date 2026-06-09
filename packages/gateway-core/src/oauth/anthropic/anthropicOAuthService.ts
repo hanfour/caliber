@@ -59,6 +59,11 @@ export function createAnthropicOAuthService(
             grant_type: "authorization_code",
             client_id: c.clientId,
             code: opts.code,
+            // Claude Code's token endpoint requires the original `state`
+            // echoed back here, unlike a standard OAuth token exchange.
+            // Omitting it returns "Invalid request format" (confirmed live
+            // 2026-06-09: adding state flipped http_400 → 200).
+            ...(opts.state ? { state: opts.state } : {}),
             redirect_uri: redirectURI,
             code_verifier: opts.codeVerifier,
           }),
