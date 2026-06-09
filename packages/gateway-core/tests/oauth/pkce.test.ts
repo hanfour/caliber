@@ -19,8 +19,11 @@ describe("pkce", () => {
       /^[A-Za-z0-9_-]{43}$/,
     );
   });
-  it("state is 22-char base64url (16 bytes)", () => {
-    expect(generateState()).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  it("state is 43-char base64url (32 bytes)", () => {
+    // Claude Code's OAuth (claude.ai) rejects shorter states at the grant step
+    // with "Invalid request format" — confirmed via live OAuth 2026-06-09 that
+    // a 16-byte (22-char) state fails while a 32-byte (43-char) state succeeds.
+    expect(generateState()).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
   it("two consecutive verifiers are distinct (CSPRNG entropy sanity)", () => {
     expect(generatePKCEVerifier()).not.toBe(generatePKCEVerifier());

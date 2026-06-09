@@ -12,6 +12,10 @@ export function generateCodeChallenge(verifier: string): string {
   return sha256Base64Url(verifier);
 }
 
+// 32 bytes (43-char base64url) to match Claude Code. claude.ai's OAuth grant
+// step rejects shorter states with "Invalid request format" (confirmed via
+// live OAuth 2026-06-09: a 16-byte state failed, 32-byte succeeded). 32 bytes
+// is also fine for the OpenAI flow, which treats state as opaque.
 export function generateState(): string {
-  return randomBytes(16).toString("base64url");
+  return randomBytes(32).toString("base64url");
 }
