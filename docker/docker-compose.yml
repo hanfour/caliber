@@ -219,7 +219,7 @@ services:
     # VPN. Origin is configured (in the CF dashboard) to http://gateway-tunnel:3002
     # so traffic always reaches the gateway over the dedicated `tunnel` network.
     profiles: [tunnel]
-    image: cloudflare/cloudflared:2025.11.1
+    image: cloudflare/cloudflared:2026.5.2
     restart: unless-stopped
     command: ["tunnel", "--no-autoupdate", "run", "--token", "${TUNNEL_TOKEN:-}"]
     depends_on:
