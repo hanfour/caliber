@@ -32,6 +32,7 @@ export interface GatewayMetrics {
   // rate limiting is silently disabled; pair with the existing
   // `gw_redis_latency_seconds` to root-cause.
   gwRateLimitFailOpenTotal: Counter<string>;
+  gwAuthFailThrottleTotal: Counter<string>;
   redisLatencySeconds: Histogram<string>;
   upstreamDurationSeconds: Histogram<string>;
   pricingMissTotal: Counter<"model">;
@@ -156,6 +157,12 @@ async function metricsPluginBody(
   const gwRateLimitFailOpenTotal = new Counter({
     name: "gw_rate_limit_fail_open_total",
     help: "Per-apiKey rate-limit checks that hit the fail-open path due to Redis errors",
+    registers: [register],
+  });
+
+  const gwAuthFailThrottleTotal = new Counter({
+    name: "gw_auth_fail_throttle_total",
+    help: "Auth failures that were rate-limited (429) by the per-IP brute-force throttle",
     registers: [register],
   });
 
@@ -450,6 +457,7 @@ async function metricsPluginBody(
   gwCacheTotal.inc({ result: "hit" }, 0);
   gwCacheTotal.inc({ result: "miss" }, 0);
   gwRateLimitFailOpenTotal.inc(0);
+  gwAuthFailThrottleTotal.inc(0);
   // Pre-init the known op label values so each series shows in scrape output.
   for (const op of [
     "rate_limit",
@@ -471,6 +479,7 @@ async function metricsPluginBody(
     idempotencyRecordsPurgedTotal,
     gwCacheTotal,
     gwRateLimitFailOpenTotal,
+    gwAuthFailThrottleTotal,
     redisLatencySeconds,
     upstreamDurationSeconds,
     pricingMissTotal,
