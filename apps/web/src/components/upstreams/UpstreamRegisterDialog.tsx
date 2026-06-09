@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslatedZodResolver } from "@/lib/i18n/useTranslatedZodResolver";
 import { z } from "zod";
@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { OAuthConnectWizard } from "./OAuthConnectWizard";
 
 // Copied from AccountCreateForm — the app has no <Select>/<Textarea> primitive yet.
 const SELECT_CLASS =
@@ -40,9 +41,13 @@ export function UpstreamRegisterDialog({ open, onOpenChange }: Props) {
     defaultValues: { name: "", platform: "anthropic", credentials: "" },
   });
   const platform = watch("platform");
+  const [method, setMethod] = useState<"api_key" | "oauth">("api_key");
 
   useEffect(() => {
-    if (!open) reset({ name: "", platform: "anthropic", credentials: "" });
+    if (!open) {
+      reset({ name: "", platform: "anthropic", credentials: "" });
+      setMethod("api_key");
+    }
   }, [open, reset]);
 
   const registerOwn = trpc.accounts.registerOwn.useMutation({
@@ -81,23 +86,47 @@ export function UpstreamRegisterDialog({ open, onOpenChange }: Props) {
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="upCred">{t("credentialsLabel")}</Label>
-            <textarea
-              id="upCred" rows={6} className={TEXTAREA_CLASS} autoComplete="off"
-              placeholder={platform === "openai" ? "sk-proj-…" : "sk-ant-…"}
-              {...register("credentials")}
-            />
-            <p className="text-xs text-muted-foreground">
-              {platform === "openai" ? t("credentialsHintOpenAI") : t("credentialsHintAnthropic")}
-            </p>
-            {errors.credentials && <p className="text-xs text-destructive">{errors.credentials.message}</p>}
+            <Label htmlFor="upMethod">{tu("oauth.method")}</Label>
+            <select
+              id="upMethod"
+              className={SELECT_CLASS}
+              value={method}
+              onChange={(e) => setMethod(e.target.value as "api_key" | "oauth")}
+            >
+              <option value="api_key">{tu("oauth.methodApiKey")}</option>
+              <option value="oauth">{tu("oauth.methodOAuth")}</option>
+            </select>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{tCommon("cancel")}</Button>
-            <Button type="submit" disabled={registerOwn.isPending}>
-              {registerOwn.isPending ? t("submitting") : t("submit")}
-            </Button>
-          </DialogFooter>
+          {method === "oauth" ? (
+            <OAuthConnectWizard
+              platform={platform as "openai" | "anthropic"}
+              onDone={() => {
+                utils.accounts.listOwn.invalidate();
+                onOpenChange(false);
+              }}
+            />
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="upCred">{t("credentialsLabel")}</Label>
+                <textarea
+                  id="upCred" rows={6} className={TEXTAREA_CLASS} autoComplete="off"
+                  placeholder={platform === "openai" ? "sk-proj-…" : "sk-ant-…"}
+                  {...register("credentials")}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {platform === "openai" ? t("credentialsHintOpenAI") : t("credentialsHintAnthropic")}
+                </p>
+                {errors.credentials && <p className="text-xs text-destructive">{errors.credentials.message}</p>}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{tCommon("cancel")}</Button>
+                <Button type="submit" disabled={registerOwn.isPending}>
+                  {registerOwn.isPending ? t("submitting") : t("submit")}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </form>
       </DialogContent>
     </Dialog>

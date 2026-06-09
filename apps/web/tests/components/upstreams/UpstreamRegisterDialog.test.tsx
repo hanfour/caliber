@@ -6,7 +6,11 @@ const invalidate = vi.fn();
 vi.mock("@/lib/trpc/client", () => ({
   trpc: {
     useUtils: () => ({ accounts: { listOwn: { invalidate } } }),
-    accounts: { registerOwn: { useMutation: vi.fn() } },
+    accounts: {
+      registerOwn: { useMutation: vi.fn() },
+      initiateOAuth: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
+      completeOAuth: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
+    },
   },
 }));
 
@@ -37,5 +41,13 @@ describe("UpstreamRegisterDialog", () => {
     await user.click(screen.getByRole("button", { name: "Register" }));
     await waitFor(() => expect(screen.getByText(/credentials are required/i)).toBeInTheDocument());
     expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("shows the OAuth wizard when the OAuth method is selected", async () => {
+    const user = userEvent.setup();
+    useMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    render(<UpstreamRegisterDialog open onOpenChange={() => {}} />);
+    await user.selectOptions(screen.getByLabelText("Credential method"), "oauth");
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
   });
 });

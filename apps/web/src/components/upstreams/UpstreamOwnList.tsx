@@ -12,9 +12,16 @@ import { toDate } from "@/lib/time";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { deriveAccountStatus, StatusBadge } from "@/components/accounts/status";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { UpstreamRegisterDialog } from "./UpstreamRegisterDialog";
 import { UpstreamEditDialog } from "./UpstreamEditDialog";
 import { UpstreamRotateDialog } from "./UpstreamRotateDialog";
+import { OAuthConnectWizard } from "./OAuthConnectWizard";
 
 type UpstreamRow = inferRouterOutputs<AppRouter>["accounts"]["listOwn"][number];
 
@@ -31,6 +38,7 @@ export function UpstreamOwnList() {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [editRow, setEditRow] = useState<UpstreamRow | null>(null);
   const [rotateRow, setRotateRow] = useState<UpstreamRow | null>(null);
+  const [reauthRow, setReauthRow] = useState<UpstreamRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data, isLoading, error } = trpc.accounts.listOwn.useQuery();
@@ -111,6 +119,18 @@ export function UpstreamOwnList() {
                               <RefreshCw className="h-4 w-4" />
                             </Button>
                           )}
+                          {row.type === "oauth" &&
+                            ["expired", "error"].includes(deriveAccountStatus(row)) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => setReauthRow(row)}
+                                aria-label={t("oauth.reauthAriaLabel", { name: row.name })}
+                              >
+                                <RefreshCw className="h-4 w-4" />
+                              </Button>
+                            )}
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={deletingId === row.id} aria-label={t("deleteAriaLabel", { name: row.name })}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -127,6 +147,22 @@ export function UpstreamOwnList() {
       <UpstreamRegisterDialog open={registerOpen} onOpenChange={setRegisterOpen} />
       <UpstreamEditDialog open={editRow !== null} account={editRow} onOpenChange={(o) => !o && setEditRow(null)} />
       <UpstreamRotateDialog open={rotateRow !== null} account={rotateRow} onOpenChange={(o) => !o && setRotateRow(null)} />
+      <Dialog open={reauthRow !== null} onOpenChange={(o) => !o && setReauthRow(null)}>
+        <DialogContent>
+          {reauthRow && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{t("oauth.reauthTitle", { name: reauthRow.name })}</DialogTitle>
+              </DialogHeader>
+              <OAuthConnectWizard
+                platform={reauthRow.platform as "openai" | "anthropic"}
+                targetUpstreamId={reauthRow.id}
+                onDone={() => { utils.accounts.listOwn.invalidate(); setReauthRow(null); }}
+              />
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
