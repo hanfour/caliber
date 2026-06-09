@@ -6,3 +6,4 @@ export * from "./openai/openaiOAuthService.js";
 export * from "./anthropic/anthropicConstants.js";
 export * from "./anthropic/anthropicTokenParser.js";
 export * from "./anthropic/anthropicOAuthService.js";
+export * from "./serviceRegistry.js";
