@@ -55,37 +55,38 @@
 ### 4.1 cloudflared 管理 tunnel
 | 項目 | 內容 |
 |------|------|
-| `docker/docker-compose.yml`（改） | 加 `cloudflared` 服務，`profiles: [tunnel]`（與 `gateway` 並列）；`image: cloudflare/cloudflared:2026.x.x`（pin 一個明確 tag，實作時取當時最新穩定版並寫死，不用 `latest`）；`command: ["tunnel","--no-autoupdate","run","--token","${TUNNEL_TOKEN}"]`；`depends_on: gateway`；`restart: unless-stopped`；接內網（無 ports 發佈，CF 從容器內連出）|
+| `docker/docker-compose.yml`（改） | 加 `cloudflared` 服務，`profiles: [tunnel]`（與 `gateway` 並列）；`image: cloudflare/cloudflared:2026.x.x`（pin 一個明確 tag，實作時取當時最新穩定版並寫死，不用 `latest`）；`command: ["tunnel","--no-autoupdate","run","--token","${TUNNEL_TOKEN}"]`；`restart: unless-stopped`；接**專屬 `tunnel` network**（無 ports 發佈，CF 從容器內連出）|
+| `docker/docker-compose.yml` — **新 network** | 新增 `networks.tunnel`（internal bridge）。**只有 `gateway` 與 `cloudflared` 同時接 `tunnel` network**；其他容器（postgres/redis/web/api）不接。如此 gateway 在 `tunnel` 網段上的對等只可能是 cloudflared，杜絕同 default 網段任意容器偽造 `X-Forwarded-*` |
 | `packages/config/src/env.ts`（改） | 新 env `TUNNEL_TOKEN`（`emptyAsUndefined(z.string().optional())`）；節流 3 個 env（§4.2）；`GATEWAY_ALERT_WEBHOOK_URL`（§4.3）|
-| 部署 | operator 在 CF Zero Trust 建 named tunnel（public hostname → `http://gateway:3002`），取 token 設 `TUNNEL_TOKEN`，設 `GATEWAY_BASE_URL=https://<hostname>`，並把 cloudflared 容器來源納入 `GATEWAY_TRUSTED_PROXIES`（runbook §4.4 寫明）|
+| 部署 | operator 在 CF Zero Trust 建 named tunnel（public hostname → `http://gateway:3002`），取 token 設 `TUNNEL_TOKEN`，設 `GATEWAY_BASE_URL=https://<hostname>`，並把 **cloudflared 在 `tunnel` network 上的固定 IP/該 network CIDR** 設入 `GATEWAY_TRUSTED_PROXIES`（**不可**用整個 default compose / Docker CIDR）|
 
-> CF 將真實 client IP 放 `CF-Connecting-IP` + `X-Forwarded-For`。cloudflared→gateway 為同 compose 網段，gateway 看到 cloudflared 容器 IP 為 socket peer；`GATEWAY_TRUSTED_PROXIES` 納入該網段後，Fastify 由 `X-Forwarded-For` 取真實 IP → 節流 + 每 key IP 白名單正確 key 在用戶 IP。
+> **真實 client IP 來源（INV-P2）**：Cloudflare 在受信 hop 帶 `CF-Connecting-IP`（單一權威值）+ `X-Forwarded-For`（chain）。`GATEWAY_TRUSTED_PROXIES` **只信任 cloudflared 對等**（專屬 network），Fastify 才會採信前述 header。**client IP 解析優先用受信 peer 傳來的 `CF-Connecting-IP`**（單一來源、不可被多 hop XFF 注入污染）；無該 header 時退回 Fastify `req.ip`（trustProxy 解析的 XFF）。節流 + 每 key IP 白名單都用此解析出的真實 IP。> 為此 apiKeyAuth/節流改用一個小工具 `resolveClientIp(req)`（CF-Connecting-IP 優先、否則 req.ip），取代直接 `req.ip`。
 
 ### 4.2 每 IP 認證失敗節流（gateway）
 | 項目 | 內容 |
 |------|------|
 | `apps/gateway/src/middleware/ipAuthThrottle.ts`（新） | 純函式 + Redis：`checkIpBlocked(redis, ip)` / `recordAuthFailure(redis, ip, cfg)`。key `auth-fail:<ip>`（窗 TTL）、`auth-fail-block:<ip>`（封鎖 TTL）|
-| `apps/gateway/src/middleware/apiKeyAuth.ts`（改） | key 查詢**先做**；**有效 → 放行（不計、不擋）**；無效路徑（回 401 前）→ 若 `checkIpBlocked` 命中 → **429 + `Retry-After`**（封鎖剩餘秒）並 return；否則 `recordAuthFailure` → 若跨門檻設 block → 本次回 429，否則維持原 401。|
+| `apps/gateway/src/middleware/apiKeyAuth.ts`（改） | 見下演算法。**「認證成功」= key 狀態有效（非 revoked/expired/not-revealed）∧ 通過 IP allow/deny policy**；任何失敗（含 `ip_not_allowed`、無 key header）皆「認證失敗」並計入節流。|
 | env | `GATEWAY_AUTH_FAIL_MAX`（int，預設 10）、`GATEWAY_AUTH_FAIL_WINDOW_SEC`（預設 300）、`GATEWAY_AUTH_FAIL_BLOCK_SEC`（預設 900）。三者皆 `0` 視為停用節流。|
-| metric | 新 `gw_auth_fail_throttle_total`（被節流的 401 次數，counter）。沿用既有 `gw_rate_limit_fail_open_total` 概念於 Redis 錯誤時 fail-open（記 metric、不擋）。|
+| metric | 新 `gw_auth_fail_throttle_total`（counter，被節流而回 429 的次數）。Redis 錯誤 fail-open 時記 **`gw_redis_error_total.inc({op:"auth_throttle"})`**（沿用既有 op-label counter，非無 label 的 `gw_rate_limit_fail_open_total`）。|
 
-**演算法（lenient，DB 友善）**：
-1. extractKey → **無 key header → 視為認證失敗**（與 key 無效同路徑，計入節流；防無 header 洗流量），跳到步驟 3。
-2. lookup key_hash。**命中且有效 → 正常路徑（永不節流）**。
-3. 命中但 revoked/expired/not-revealed，或未命中，或無 key header → 即「認證失敗」：
+**演算法（lenient）**：
+1. **無 key header / malformed key（明顯非合法格式，無需查 DB）→ 認證失敗的 pre-DB fast path**：先 `checkIpBlocked(ip)`，blocked → 429（不查 DB）；否則 `recordAuthFailure` 後回 401/429。**此路徑不打 Postgres。**
+2. 格式合法的 key → lookup `key_hash`。**命中、狀態有效、且通過 IP policy → 認證成功（永不節流、永不計數）**。
+3. 命中但 revoked/expired/not-revealed，或 `ip_not_allowed`（IP policy 不過），或未命中 → 「認證失敗」：
    a. `checkIpBlocked(ip)`：blocked → 429 + Retry-After（block 剩餘），`gw_auth_fail_throttle_total.inc()`，return。
-   b. 否則 `recordAuthFailure(ip)`：`INCR auth-fail:<ip>`（首次設窗 TTL）；若 `>= MAX` → `SET auth-fail-block:<ip> 1 EX BLOCK_SEC`，本次回 429 + Retry-After；否則回原本的 401 錯誤碼。
-4. Redis 任一步錯 → **fail-open**：略過節流、走原 401，`gw_rate_limit_fail_open_total.inc({op:"auth_throttle"})`。
+   b. 否則 `recordAuthFailure(ip)`：`INCR auth-fail:<ip>`（首次設窗 TTL）；若 `>= MAX` → `SET auth-fail-block:<ip> 1 EX BLOCK_SEC`，本次回 429 + Retry-After + `gw_auth_fail_throttle_total.inc()`；否則回原本的 401/403 錯誤碼。
+4. Redis 任一步錯 → **fail-open**：略過節流、走原 401/403，`gw_redis_error_total.inc({op:"auth_throttle"})`。
 
-> 無 key header 的請求：計入節流（防無 header 洗流量），與「key 無效」同視為認證失敗。
+> **DB-負載 tradeoff（誠實聲明）**：本節流主要保護「response semantics + 下游路由/upstream 資源」與防止泄漏 key 從錯 IP 無限打。**格式合法但無效的 key 仍會做一次 O(1) 索引 lookup + HMAC 才被擋**（無法不查就判定有效性）；blocked IP 持續送隨機合法格式 key 仍每次查一次 DB（cheap、indexed）。無 key header / malformed key 則 pre-DB fast-path 直接擋、不查 DB。整體前緣另有 Cloudflare edge 速率限制兜底。`ip`＝`resolveClientIp(req)`（§4.1，CF-Connecting-IP 優先）。
 
 ### 4.3 webhook 預算告警（gateway worker）
 | 項目 | 內容 |
 |------|------|
-| `apps/gateway/src/workers/evaluator/budgetAlertWebhook.ts`（新） | `maybeSendBudgetAlert(deps, {orgId, event, monthToDate, budget, behavior})`：去重後 fire-and-forget POST |
+| `apps/gateway/src/workers/evaluator/budgetAlertWebhook.ts`（新） | `maybeSendBudgetAlert(deps, {orgId, event, monthToDate, budget, behavior})`：**送成功才月度去重**（見下） |
 | `apps/gateway/src/workers/evaluator/enforceBudgetWithMetrics.ts`（改） | 在發 `gw_llm_budget_warn_total` / `gw_llm_budget_exceeded_total` 的同處，呼叫 `maybeSendBudgetAlert`（注入 redis/fetch/webhookUrl/logger）|
 | env | `GATEWAY_ALERT_WEBHOOK_URL`（`emptyAsUndefined(z.string().url().optional())`）。未設 → 整段 no-op |
-| 去重 | warn：`alert-sent:warn:<orgId>:<YYYY-MM>`（`SET NX EX` 到月底約 ~35 天）；exceeded：`alert-sent:exceeded:<orgId>:<YYYY-MM>`。已存在 → 不重送 |
+| **去重（send-then-mark，避免失敗永久壓掉告警）** | dedup key：warn=`alert-sent:warn:<orgId>:<YYYY-MM>`、exceeded=`alert-sent:exceeded:<orgId>:<YYYY-MM>:<behavior>`（**含 behavior**，degrade→halt 行為變更不被舊 alert 壓掉）。流程：① 若 dedup key 已存在 → skip；② 取短 TTL in-flight lock `alert-lock:<同 key>`（`SET NX EX 30`）防併發重送，取不到 → skip；③ POST webhook；④ **僅 2xx 才 `SET dedup-key 1 EX <到月底~35天>`**；非 2xx/逾時 → 不寫 dedup（記 log，下次可重試）；⑤ 釋放 in-flight lock |
 | payload | `{ "event": "warn"\|"exceeded", "orgId", "monthToDate": "<decimal string>", "budget": "<decimal string>", "behavior"?, "ts": "<ISO>" }`。**無任何 api key / token / 憑證** |
 | 行為 | fire-and-forget（`AbortSignal.timeout(5000)`）；任何錯誤 `logger.warn` 不拋；**絕不阻斷或失敗呼叫者的請求/worker** |
 
@@ -99,10 +100,10 @@
 ```
 用戶 SDK → https://<cf-hostname>（公開）→ Cloudflare edge → cloudflared(容器)
        → gateway:3002（內網）→ apiKeyAuth
-            ├ 真實 client IP（CF-Connecting-IP / X-Forwarded-For，trustProxy 信任 cloudflared 網段）
-            ├ key 有效 → 正常路由（永不節流）
-            └ key 無效 → 每 IP 節流（blocked→429 / 累計→封鎖→429 / 否則 401）
-budget worker → wrapEnforceBudget → warn(≥80%)/exceeded → maybeSendBudgetAlert →（Redis 去重）→ webhook POST
+            ├ 真實 client IP = resolveClientIp（CF-Connecting-IP 優先；trustProxy 只信 cloudflared 對等）
+            ├ key 有效 ∧ 通過 IP policy → 正常路由（永不節流）
+            └ 認證失敗（無效/ip_not_allowed/無 key）→ 每 IP 節流（blocked→429 / 累計→封鎖→429 / 否則 401/403）
+budget worker → wrapEnforceBudget → warn(≥80%)/exceeded → maybeSendBudgetAlert →（send-then-mark 去重）→ webhook POST
 ```
 
 ---
@@ -112,7 +113,7 @@ budget worker → wrapEnforceBudget → warn(≥80%)/exceeded → maybeSendBudge
 | 情況 | 結果 |
 |------|------|
 | tunnel 掛 | gateway 仍可經 VPN/LAN（profile 加法，既有存取不變） |
-| Redis 掛（節流） | **fail-open**：略過節流、走原 401，`gw_rate_limit_fail_open_total.inc({op:"auth_throttle"})` |
+| Redis 掛（節流） | **fail-open**：略過節流、走原 401/403，`gw_redis_error_total.inc({op:"auth_throttle"})` |
 | webhook 不通/逾時 | `logger.warn` 記錄、非致命、不阻斷請求/worker |
 | `TUNNEL_TOKEN` 未設 | cloudflared 服務只在 `--profile tunnel` 啟用；未啟用＝零影響 |
 | `GATEWAY_ALERT_WEBHOOK_URL` 未設 | 告警整段 no-op |
@@ -121,8 +122,8 @@ budget worker → wrapEnforceBudget → warn(≥80%)/exceeded → maybeSendBudge
 
 ## 7. 安全 / 不變式
 
-- **INV-P1**：有效 key 永不被暴力節流（只有「認證失敗 / 無 key」路徑計數與封鎖）。
-- **INV-P2**：節流 + 每 key IP 白名單都 key 在**真實 client IP**（CF-Connecting-IP via trustProxy），非 tunnel/proxy IP。
+- **INV-P1**：認證成功（key 狀態有效 ∧ 通過 IP policy）的請求永不被暴力節流；只有認證失敗（key 無效/`ip_not_allowed`/無 key）才計數與封鎖。
+- **INV-P2**：節流 + 每 key IP 白名單都 key 在 `resolveClientIp(req)` 解出的**真實 client IP**（受信 cloudflared 對等帶來的 CF-Connecting-IP 優先），非 tunnel/proxy IP；`GATEWAY_TRUSTED_PROXIES` **只信 cloudflared 對等（專屬 `tunnel` network）**，不信整個 compose CIDR。
 - **INV-P3**：webhook fire-and-forget、不阻斷或失敗呼叫者、payload **無任何秘密**（無 api key/token/憑證）。
 - **INV-P4**：tunnel 純加法 — 啟用不改動/弱化既有 VPN/LAN 存取或驗證。
 - **INV-P5**：Redis 故障時節流 fail-open（可用性優先於暴力防護，與既有 rate-limit 一致）。
@@ -141,16 +142,20 @@ budget worker → wrapEnforceBudget → warn(≥80%)/exceeded → maybeSendBudge
 ### gateway — apiKeyAuth 整合（比照既有 apiKeyAuth 測試）
 - **有效 key 從「已封鎖 IP」仍 200**（INV-P1：valid 不受節流）。
 - 同 IP 連續無效 key：達門檻後回 **429 + Retry-After**（先前回 401）。
+- **`ip_not_allowed`（有效 key 但 IP 不過 policy）計入節流** — 同 IP 連續從錯 IP 打有效 key，達門檻後回 429（防泄漏 key 無限打 403）。
+- **無 key header / malformed key 走 pre-DB fast path**：被節流時不觸發 DB lookup（以 spy/mock db 斷言 query 未被呼叫）。
+- `resolveClientIp`：帶 `CF-Connecting-IP` header（且 socket peer 受信）時，節流/IP policy 用該 IP，而非 XFF 末端或 socket peer。
 - 無 key header 計入節流。
 - Redis-down → 仍回原 401（fail-open，不誤 429）。
 - 節流 metric `gw_auth_fail_throttle_total` 遞增。
 
 ### gateway — `budgetAlertWebhook`（單元，fake fetch + Redis）
-- warn 首次 → POST 一次、payload shape 正確、無秘密欄位。
-- 同 org 同月第二次 warn → **不再 POST**（去重）。
-- exceeded → POST（含 behavior）。
+- warn 首次（webhook 2xx）→ POST 一次、payload shape 正確、無秘密欄位、**dedup key 寫入**。
+- 同 org 同月第二次 warn → **不再 POST**（dedup 命中）。
+- exceeded → POST（含 behavior）；**dedup key 含 behavior** → behavior 從 degrade→halt 時仍會再送一次。
 - `GATEWAY_ALERT_WEBHOOK_URL` 未設 → 不 POST、不拋。
-- webhook 回 500 / 逾時 → 不拋、記 log（呼叫者不受影響）。
+- **webhook 回 500 / 逾時 → 不拋、記 log、且 dedup key 未寫入**（send-then-mark）→ 下次同事件**會重試**（不被永久壓掉）。
+- in-flight lock：併發兩次同事件，只有一次 POST。
 
 ### config（單元）
 - 新 env 預設：`TUNNEL_TOKEN`/`GATEWAY_ALERT_WEBHOOK_URL` 預設 undefined；`GATEWAY_AUTH_FAIL_MAX/WINDOW_SEC/BLOCK_SEC` 預設 10/300/900；型別正確。
