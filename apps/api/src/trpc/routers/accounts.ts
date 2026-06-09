@@ -6,10 +6,15 @@ import type { Database } from "@caliber/db";
 import { encryptCredential } from "@caliber/gateway-core";
 import { can } from "@caliber/auth";
 import {
+  resolveOAuthService,
+  OAuthServiceUnavailableError,
+} from "@caliber/gateway-core/oauth";
+import {
   protectedProcedure,
   permissionProcedure,
   router,
 } from "../procedures.js";
+import { parsePastedCode } from "./oauth/parsePastedCode.js";
 import { assertTeamBelongsToOrg, resolveUserPrimaryOrgId } from "./_shared.js";
 import { writeAudit } from "../../services/audit.js";
 
@@ -873,5 +878,89 @@ export const accountsRouter = router({
       });
 
       return { ok: true as const };
+    }),
+
+  /**
+   * Self-service OAuth — step 1 of the manual-paste flow. Generates a
+   * platform auth URL (PKCE) and stashes the flow-state in redis keyed by
+   * the opaque `state` so completeOAuth (step 2) can finish the exchange
+   * with the SAME codeVerifier / redirectURI.
+   *
+   * RBAC is conditional (hence protectedProcedure, not permissionProcedure):
+   * - self-create needs `account.register_own`;
+   * - re-authorize (targetUpstreamId given) additionally requires
+   *   `account.manage_own` over that row, plus platform/type/not-deleted
+   *   consistency checked up-front (fail fast).
+   */
+  initiateOAuth: protectedProcedure
+    .input(
+      z.object({
+        platform: z.enum(["openai", "anthropic"]),
+        targetUpstreamId: uuid.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      ensureGatewayEnabled(ctx.env);
+      if (!can(ctx.perm, { type: "account.register_own" })) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      // Re-auth: validate target ownership + platform up-front (fail fast).
+      if (input.targetUpstreamId) {
+        const [row] = await ctx.db
+          .select({
+            id: upstreamAccounts.id,
+            userId: upstreamAccounts.userId,
+            platform: upstreamAccounts.platform,
+            type: upstreamAccounts.type,
+          })
+          .from(upstreamAccounts)
+          .where(
+            and(
+              eq(upstreamAccounts.id, input.targetUpstreamId),
+              isNull(upstreamAccounts.deletedAt),
+            ),
+          )
+          .limit(1);
+        // Collapse missing-row and not-owner into a single NOT_FOUND so a
+        // caller can't enumerate other users' upstream IDs (matches the
+        // anti-enumeration posture elsewhere in this router). The platform/
+        // type BAD_REQUEST below only runs on rows the caller owns, so it
+        // leaks nothing cross-user.
+        if (
+          !row ||
+          !can(ctx.perm, {
+            type: "account.manage_own",
+            ownerUserId: row.userId ?? "",
+          })
+        ) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        if (row.type !== "oauth" || row.platform !== input.platform) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "target is not an oauth upstream of this platform",
+          });
+        }
+      }
+      let service;
+      try {
+        service = resolveOAuthService(input.platform, ctx.env);
+      } catch (err) {
+        if (err instanceof OAuthServiceUnavailableError) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        throw err;
+      }
+      const { authUrl, state, codeVerifier, redirectURI } =
+        await service.generateAuthURL({});
+      const payload = JSON.stringify({
+        userId: ctx.user.id,
+        platform: input.platform,
+        codeVerifier,
+        redirectURI,
+        targetUpstreamId: input.targetUpstreamId ?? null,
+      });
+      await ctx.redis.set(`oauth-flow:${state}`, payload, "EX", 600);
+      return { authUrl, flowId: state };
     }),
 });
