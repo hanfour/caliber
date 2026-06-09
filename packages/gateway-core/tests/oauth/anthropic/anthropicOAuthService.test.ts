@@ -35,7 +35,7 @@ describe("anthropicOAuthService", () => {
     );
     expect(u.searchParams.get("code_challenge_method")).toBe("S256");
     expect(u.searchParams.get("scope")).toBe(
-      "user:profile user:inference user:sessions:claude_code",
+      "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
     );
     expect(u.searchParams.get("state")).toBe(auth.state);
     expect(auth.redirectURI).toBe(ANTHROPIC_OAUTH_DEFAULTS.defaultRedirectURI);

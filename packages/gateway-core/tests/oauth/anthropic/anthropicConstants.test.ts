@@ -14,9 +14,12 @@ describe("resolveAnthropicConstants", () => {
       "https://console.anthropic.com/oauth/code/callback",
     );
     expect(c.scopes).toEqual([
+      "org:create_api_key",
       "user:profile",
       "user:inference",
       "user:sessions:claude_code",
+      "user:mcp_servers",
+      "user:file_upload",
     ]);
   });
   it("env overrides authorize/redirect/scopes (scopes split on whitespace)", () => {

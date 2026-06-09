@@ -17,7 +17,18 @@ export const ANTHROPIC_OAUTH_DEFAULTS: AnthropicOAuthConstants = {
   authorizeEndpoint: "https://claude.ai/oauth/authorize",
   tokenEndpoint: "https://console.anthropic.com/v1/oauth/token",
   defaultRedirectURI: "https://console.anthropic.com/oauth/code/callback",
-  scopes: ["user:profile", "user:inference", "user:sessions:claude_code"],
+  // Match Claude Code's scope set exactly. claude.ai grants against the
+  // client's registered scopes; the full set is what the official CLI requests
+  // and is confirmed to grant (live OAuth 2026-06-09). Override via
+  // ANTHROPIC_OAUTH_SCOPES to trim if a narrower set is desired.
+  scopes: [
+    "org:create_api_key",
+    "user:profile",
+    "user:inference",
+    "user:sessions:claude_code",
+    "user:mcp_servers",
+    "user:file_upload",
+  ],
   pkceMethod: "S256",
 };
 
