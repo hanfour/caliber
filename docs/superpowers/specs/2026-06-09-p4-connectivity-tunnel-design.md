@@ -55,12 +55,12 @@
 ### 4.1 cloudflared 管理 tunnel
 | 項目 | 內容 |
 |------|------|
-| `docker/docker-compose.yml`（改） | 加 `cloudflared` 服務，`profiles: [tunnel]`（與 `gateway` 並列）；`image: cloudflare/cloudflared:2026.x.x`（pin 一個明確 tag，實作時取當時最新穩定版並寫死，不用 `latest`）；`command: ["tunnel","--no-autoupdate","run","--token","${TUNNEL_TOKEN}"]`；`restart: unless-stopped`；接**專屬 `tunnel` network**（無 ports 發佈，CF 從容器內連出）|
-| `docker/docker-compose.yml` — **新 network** | 新增 `networks.tunnel`（internal bridge）。**只有 `gateway` 與 `cloudflared` 同時接 `tunnel` network**；其他容器（postgres/redis/web/api）不接。如此 gateway 在 `tunnel` 網段上的對等只可能是 cloudflared，杜絕同 default 網段任意容器偽造 `X-Forwarded-*` |
+| `docker/docker-compose.yml`（改） | 加 `cloudflared` 服務，`profiles: [tunnel]`（與 `gateway` 並列）；`image: cloudflare/cloudflared:2026.x.x`（pin 明確 tag，不用 `latest`）；`command: ["tunnel","--no-autoupdate","run","--token","${TUNNEL_TOKEN}"]`；`restart: unless-stopped`；**只接 `tunnel` network**（無 ports 發佈）|
+| `docker/docker-compose.yml` — **新 network**（重要落地） | 新增 `networks.tunnel` = **一般 bridge（NOT `internal`）**。`internal: true` 會切斷對外 → cloudflared 連不到 Cloudflare；一般 bridge 經 Docker NAT 仍有 egress，cloudflared 只接它即可同時「連 CF（egress）」+「連 origin（gateway）」。**只有 `gateway` 與 `cloudflared` 接 `tunnel`**（postgres/redis/web/api 不接），故 gateway 在此網段的對等只可能是 cloudflared。`gateway` **同時**接既有 app/default network（供 web/api/db/redis）+ `tunnel`。為**消除 origin 目標歧義**（`gateway:3002` 可能解到 default 或 tunnel 網段），gateway 在 `tunnel` 上設**專屬 alias `gateway-tunnel`**；**CF public hostname 的 origin 指向 `http://gateway-tunnel:3002`**（tunnel-only），確保 cloudflared→gateway 一定走 tunnel 網段。|
 | `packages/config/src/env.ts`（改） | 新 env `TUNNEL_TOKEN`（`emptyAsUndefined(z.string().optional())`）；節流 3 個 env（§4.2）；`GATEWAY_ALERT_WEBHOOK_URL`（§4.3）|
-| 部署 | operator 在 CF Zero Trust 建 named tunnel（public hostname → `http://gateway:3002`），取 token 設 `TUNNEL_TOKEN`，設 `GATEWAY_BASE_URL=https://<hostname>`，並把 **cloudflared 在 `tunnel` network 上的固定 IP/該 network CIDR** 設入 `GATEWAY_TRUSTED_PROXIES`（**不可**用整個 default compose / Docker CIDR）|
+| 部署 | operator 在 CF Zero Trust 建 named tunnel，**origin = `http://gateway-tunnel:3002`**，取 token 設 `TUNNEL_TOKEN`，設 `GATEWAY_BASE_URL=https://<hostname>`，並把 **`tunnel` network CIDR（只含 gateway+cloudflared）或 cloudflared 固定 IP** 設入 `GATEWAY_TRUSTED_PROXIES`（**不可**用 default compose CIDR）|
 
-> **真實 client IP 來源（INV-P2）**：Cloudflare 在受信 hop 帶 `CF-Connecting-IP`（單一權威值）+ `X-Forwarded-For`（chain）。`GATEWAY_TRUSTED_PROXIES` **只信任 cloudflared 對等**（專屬 network），Fastify 才會採信前述 header。**client IP 解析優先用受信 peer 傳來的 `CF-Connecting-IP`**（單一來源、不可被多 hop XFF 注入污染）；無該 header 時退回 Fastify `req.ip`（trustProxy 解析的 XFF）。節流 + 每 key IP 白名單都用此解析出的真實 IP。> 為此 apiKeyAuth/節流改用一個小工具 `resolveClientIp(req)`（CF-Connecting-IP 優先、否則 req.ip），取代直接 `req.ip`。
+> **真實 client IP（INV-P2）— socket-peer 驗證為核心**：tunnel 是純加法、gateway 仍 publish `:3002`，所以 **LAN/VPN/直連客戶端能偽造 `CF-Connecting-IP` header**；Fastify `trustProxy` 只影響 `req.ip`，不會自動阻止你讀 raw header。因此新工具 **`resolveClientIp(req, trustedProxies)`**：① 取 socket peer `req.raw.socket.remoteAddress`；② **只有 peer ∈ `GATEWAY_TRUSTED_PROXIES`（即經 cloudflared 進來）時，才採信 `CF-Connecting-IP`**（單一權威值，優於多 hop XFF）；③ 否則**忽略 `CF-Connecting-IP`**，用 `req.ip`/socket IP。apiKeyAuth/節流一律改用 `resolveClientIp`，取代直接 `req.ip`。如此偽造 header 對非受信來源無效。
 
 ### 4.2 每 IP 認證失敗節流（gateway）
 | 項目 | 內容 |
@@ -91,7 +91,7 @@
 | 行為 | fire-and-forget（`AbortSignal.timeout(5000)`）；任何錯誤 `logger.warn` 不拋；**絕不阻斷或失敗呼叫者的請求/worker** |
 
 ### 4.4 docs runbook
-- `docs/` 新 runbook（或擴充 `MULTI_DEVICE.md`）：CF named-tunnel 建置步驟（建 tunnel、public hostname→`http://gateway:3002`、取 token）、`TUNNEL_TOKEN`/`GATEWAY_BASE_URL`/`GATEWAY_TRUSTED_PROXIES`（納入 cloudflared 網段）設定、key 衛生（短 TTL/撤銷/監控用量）、節流 env 旋鈕說明、webhook payload 格式 + 範例接收端（curl/Slack）。
+- `docs/` 新 runbook（或擴充 `MULTI_DEVICE.md`）：CF named-tunnel 建置步驟（建 tunnel、public hostname origin→**`http://gateway-tunnel:3002`**、取 token）、`TUNNEL_TOKEN`/`GATEWAY_BASE_URL`/`GATEWAY_TRUSTED_PROXIES`（納入 cloudflared 網段）設定、key 衛生（短 TTL/撤銷/監控用量）、節流 env 旋鈕說明、webhook payload 格式 + 範例接收端（curl/Slack）。
 
 ---
 
@@ -99,7 +99,7 @@
 
 ```
 用戶 SDK → https://<cf-hostname>（公開）→ Cloudflare edge → cloudflared(容器)
-       → gateway:3002（內網）→ apiKeyAuth
+       → gateway-tunnel:3002（tunnel network，內網）→ apiKeyAuth
             ├ 真實 client IP = resolveClientIp（CF-Connecting-IP 優先；trustProxy 只信 cloudflared 對等）
             ├ key 有效 ∧ 通過 IP policy → 正常路由（永不節流）
             └ 認證失敗（無效/ip_not_allowed/無 key）→ 每 IP 節流（blocked→429 / 累計→封鎖→429 / 否則 401/403）
@@ -144,7 +144,11 @@ budget worker → wrapEnforceBudget → warn(≥80%)/exceeded → maybeSendBudge
 - 同 IP 連續無效 key：達門檻後回 **429 + Retry-After**（先前回 401）。
 - **`ip_not_allowed`（有效 key 但 IP 不過 policy）計入節流** — 同 IP 連續從錯 IP 打有效 key，達門檻後回 429（防泄漏 key 無限打 403）。
 - **無 key header / malformed key 走 pre-DB fast path**：被節流時不觸發 DB lookup（以 spy/mock db 斷言 query 未被呼叫）。
-- `resolveClientIp`：帶 `CF-Connecting-IP` header（且 socket peer 受信）時，節流/IP policy 用該 IP，而非 XFF 末端或 socket peer。
+### gateway — `resolveClientIp(req, trustedProxies)`（單元）
+- socket peer ∈ trustedProxies（經 cloudflared）+ 有 `CF-Connecting-IP` → 回該 header IP。
+- **socket peer ∉ trustedProxies（直連/LAN/VPN）+ 偽造 `CF-Connecting-IP` → 忽略 header，回 socket/`req.ip`**（INV-P2 防偽造）。
+- 受信 peer 但無 `CF-Connecting-IP` → 退回 `req.ip`。
+- `trustedProxies` 空 → 一律用 `req.ip`（不採信 header）。
 - 無 key header 計入節流。
 - Redis-down → 仍回原 401（fail-open，不誤 429）。
 - 節流 metric `gw_auth_fail_throttle_total` 遞增。
@@ -169,4 +173,4 @@ budget worker → wrapEnforceBudget → warn(≥80%)/exceeded → maybeSendBudge
 - 新 env：`TUNNEL_TOKEN`、`GATEWAY_ALERT_WEBHOOK_URL`、`GATEWAY_AUTH_FAIL_MAX/WINDOW_SEC/BLOCK_SEC`（皆選用/有預設）。
 - **零 schema / 零 migration**（節流 + 告警去重在 Redis；無新表）。
 - 影響 image：gateway（節流 + webhook）+ config 變動 → gateway/api/web 重建；cloudflared 為外部 image（無需自建）。
-- 啟用 tunnel：CF 建 named tunnel → 設 `TUNNEL_TOKEN`/`GATEWAY_BASE_URL`/`GATEWAY_TRUSTED_PROXIES` → `--profile gateway --profile tunnel up -d`。
+- 啟用 tunnel：CF 建 named tunnel（origin=`http://gateway-tunnel:3002`）→ 設 `TUNNEL_TOKEN`/`GATEWAY_BASE_URL`/`GATEWAY_TRUSTED_PROXIES`(=`tunnel` net CIDR) → `--profile gateway --profile tunnel up -d`。
