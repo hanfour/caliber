@@ -32,6 +32,12 @@ export function createAnthropicOAuthService(
       const state = generateState();
       const redirectURI = opts.redirectURI ?? c.defaultRedirectURI;
       const url = new URL(c.authorizeEndpoint);
+      // Claude Code's OAuth uses the manual copy/paste flow: `code=true` tells
+      // claude.ai to display the authorization code on the callback page
+      // instead of round-tripping it through a local server. Omitting it makes
+      // claude.ai reject the post-consent grant with "Invalid request format"
+      // (confirmed via live OAuth 2026-06-09).
+      url.searchParams.set("code", "true");
       url.searchParams.set("response_type", "code");
       url.searchParams.set("client_id", c.clientId);
       url.searchParams.set("redirect_uri", redirectURI);

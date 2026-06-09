@@ -27,6 +27,9 @@ describe("anthropicOAuthService", () => {
     const auth = await svc.generateAuthURL({});
     const u = new URL(auth.authUrl);
     expect(u.origin + u.pathname).toBe("https://claude.ai/oauth/authorize");
+    // Claude Code's manual copy/paste flow requires `code=true`; without it
+    // claude.ai rejects the post-consent grant with "Invalid request format".
+    expect(u.searchParams.get("code")).toBe("true");
     expect(u.searchParams.get("client_id")).toBe(
       ANTHROPIC_OAUTH_DEFAULTS.clientId,
     );

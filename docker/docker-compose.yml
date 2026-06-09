@@ -24,6 +24,17 @@ x-app-env: &app-env
   # is up and writing usage_logs rows. Default false so the api+web-only
   # base profile still boots cleanly.
   ENABLE_GATEWAY: ${ENABLE_GATEWAY:-false}
+  # Self-service Anthropic (Claude Max) OAuth. Off by default — the
+  # resolveOAuthService gate returns NOT_FOUND for `anthropic` until this is
+  # on, so the dashboard wizard's Anthropic option short-circuits. The four
+  # ANTHROPIC_OAUTH_* overrides let an operator correct the best-known Claude
+  # Code constants (authorize/token/redirect/scopes) if they ever drift, all
+  # soft-default to empty so the in-code defaults apply when unset.
+  ENABLE_ANTHROPIC_OAUTH: ${ENABLE_ANTHROPIC_OAUTH:-false}
+  ANTHROPIC_OAUTH_AUTHORIZE_URL: ${ANTHROPIC_OAUTH_AUTHORIZE_URL:-}
+  ANTHROPIC_OAUTH_TOKEN_URL: ${ANTHROPIC_OAUTH_TOKEN_URL:-}
+  ANTHROPIC_OAUTH_REDIRECT_URI: ${ANTHROPIC_OAUTH_REDIRECT_URI:-}
+  ANTHROPIC_OAUTH_SCOPES: ${ANTHROPIC_OAUTH_SCOPES:-}
   # When ENABLE_GATEWAY=true, parseServerEnv requires these four to be
   # present on every service that imports @caliber/config (api, web, and
   # gateway), not just the gateway container. Defaults are empty so
