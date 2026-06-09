@@ -130,14 +130,15 @@ describe("accounts.completeOAuth (first-connect)", () => {
     const flowId = init.flowId;
     const pasted = `http://localhost:1455/auth/callback?code=THECODE&state=${flowId}`;
     const acct = await caller.accounts.completeOAuth({ flowId, pastedValue: pasted });
-    expect(acct.type).toBe("oauth");
-    expect(acct.userId).toBe(u.id);
-    expect(acct.platform).toBe("openai");
+    // both arms return a consistent { id } shape
+    expect(typeof acct.id).toBe("string");
     // flow-state consumed
     expect((redis as any).store.get(`oauth-flow:${flowId}`)).toBeUndefined();
-    // row really exists
+    // a user-owned oauth upstream really exists
     const [row] = await t.db.select().from(upstreamAccounts).where(eq(upstreamAccounts.id, acct.id));
     expect(row!.type).toBe("oauth");
+    expect(row!.userId).toBe(u.id);
+    expect(row!.platform).toBe("openai");
   });
 
   it("rejects when state in pastedValue != flowId (CSRF / bare code)", async () => {
@@ -169,5 +170,49 @@ describe("accounts.completeOAuth (first-connect)", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     // A's flow-state must remain (not griefed by B's attempt)
     expect((redis as any).store.get(`oauth-flow:${init.flowId}`)).toBeDefined();
+  });
+});
+
+describe("accounts.completeOAuth (re-authorize)", () => {
+  it("updates the existing oauth upstream's credential and resets health fields", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const redis = fakeRedis();
+    const caller = await callerFor({ db: t.db, userId: u.id, redis });
+    // first connect an oauth upstream
+    const init1 = await caller.accounts.initiateOAuth({ platform: "openai" });
+    const acct = await caller.accounts.completeOAuth({ flowId: init1.flowId, pastedValue: `http://x?code=C&state=${init1.flowId}` });
+    // force it into a broken/paused state (all reset fields set non-null)
+    await t.db.update(upstreamAccounts).set({ status: "error", schedulable: false, oauthRefreshFailCount: 3, oauthRefreshLastError: "invalid_grant", tempUnschedulableUntil: new Date(Date.now() + 3_600_000), tempUnschedulableReason: "oauth_invalid" }).where(eq(upstreamAccounts.id, acct.id));
+    // re-authorize
+    const init2 = await caller.accounts.initiateOAuth({ platform: "openai", targetUpstreamId: acct.id });
+    const res = await caller.accounts.completeOAuth({ flowId: init2.flowId, pastedValue: `http://x?code=C2&state=${init2.flowId}` });
+    expect(res.id).toBe(acct.id);
+    const [row] = await t.db.select().from(upstreamAccounts).where(eq(upstreamAccounts.id, acct.id));
+    expect(row!.status).toBe("active");
+    expect(row!.schedulable).toBe(true);
+    expect(row!.oauthRefreshFailCount).toBe(0);
+    expect(row!.oauthRefreshLastError).toBeNull();
+    expect(row!.tempUnschedulableUntil).toBeNull();
+    expect(row!.tempUnschedulableReason).toBeNull();
+    // no NEW row created
+    const all = await t.db.select().from(upstreamAccounts).where(eq(upstreamAccounts.userId, u.id));
+    expect(all.length).toBe(1);
+  });
+
+  it("rejects re-auth when target platform != flow.platform", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, { role: "member", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const redis = fakeRedis();
+    // ENABLE_ANTHROPIC_OAUTH=true so resolveOAuthService(anthropic) reaches
+    // exchange + the reauth platform check (the mismatch -> BAD_REQUEST)
+    // instead of short-circuiting to NOT_FOUND on the disabled flag.
+    const caller = await callerFor({ db: t.db, userId: u.id, redis, env: { ...defaultTestEnv, ENABLE_ANTHROPIC_OAUTH: true } });
+    const init1 = await caller.accounts.initiateOAuth({ platform: "openai" });
+    const acct = await caller.accounts.completeOAuth({ flowId: init1.flowId, pastedValue: `http://x?code=C&state=${init1.flowId}` });
+    // craft a flow with platform=anthropic but target the openai row, written directly to redis
+    const flowId = "anthroflow22charstate0";
+    (redis as any).store.set(`oauth-flow:${flowId}`, JSON.stringify({ userId: u.id, platform: "anthropic", codeVerifier: "v", redirectURI: "https://x/cb", targetUpstreamId: acct.id }));
+    await expect(caller.accounts.completeOAuth({ flowId, pastedValue: `code#${flowId}` })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

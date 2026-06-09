@@ -1070,7 +1070,87 @@ export const accountsRouter = router({
       const oauthExpiresAt = parseOauthExpiresAt(credentialsJson);
       const plaintext = buildCredentialPlaintext("oauth", credentialsJson);
 
-      // (Task 11 inserts the re-auth branch here, before first-connect.)
+      if (flow.targetUpstreamId) {
+        const [row] = await ctx.db
+          .select({
+            id: upstreamAccounts.id,
+            userId: upstreamAccounts.userId,
+            orgId: upstreamAccounts.orgId,
+            platform: upstreamAccounts.platform,
+            type: upstreamAccounts.type,
+          })
+          .from(upstreamAccounts)
+          .where(
+            and(
+              eq(upstreamAccounts.id, flow.targetUpstreamId),
+              isNull(upstreamAccounts.deletedAt),
+            ),
+          )
+          .limit(1);
+        // Collapse missing-row + not-owner into NOT_FOUND so a caller can't
+        // enumerate other users' upstream IDs (matches Task 9 + the router's
+        // anti-enumeration convention). The platform/type BAD_REQUEST below
+        // only runs on rows the caller owns, so it leaks nothing cross-user.
+        if (
+          !row ||
+          !can(ctx.perm, {
+            type: "account.manage_own",
+            ownerUserId: row.userId ?? "",
+          })
+        ) {
+          // Code already spent at the provider; consume the flow-state.
+          await ctx.redis.del(`oauth-flow:${input.flowId}`);
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        if (row.type !== "oauth" || row.platform !== flow.platform) {
+          await ctx.redis.del(`oauth-flow:${input.flowId}`);
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "target is not an oauth upstream of this platform",
+          });
+        }
+        const sealed = encryptCredential({
+          masterKeyHex,
+          accountId: row.id,
+          plaintext,
+        });
+        const rotatedAt = new Date();
+        await ctx.db.transaction(async (tx) => {
+          await tx
+            .update(credentialVault)
+            .set({
+              nonce: sealed.nonce,
+              ciphertext: sealed.ciphertext,
+              authTag: sealed.authTag,
+              oauthExpiresAt,
+              rotatedAt,
+            })
+            .where(eq(credentialVault.accountId, row.id));
+          await tx
+            .update(upstreamAccounts)
+            .set({
+              status: "active",
+              schedulable: true,
+              expiresAt: oauthExpiresAt,
+              oauthRefreshFailCount: 0,
+              oauthRefreshLastError: null,
+              tempUnschedulableUntil: null,
+              tempUnschedulableReason: null,
+              updatedAt: rotatedAt,
+            })
+            .where(eq(upstreamAccounts.id, row.id));
+          await writeAudit(tx, {
+            actorUserId: ctx.user.id,
+            action: "account.oauth_reauthorized",
+            targetType: "upstream_account",
+            targetId: row.id,
+            orgId: row.orgId,
+            metadata: { platform: row.platform },
+          });
+        });
+        await ctx.redis.del(`oauth-flow:${input.flowId}`);
+        return { id: row.id };
+      }
 
       const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
       const account = await ctx.db.transaction(async (tx) => {
@@ -1115,6 +1195,9 @@ export const accountsRouter = router({
       });
 
       await ctx.redis.del(`oauth-flow:${input.flowId}`);
-      return account;
+      // Return the same minimal shape as the re-auth arm so callers get a
+      // consistent `{ id }` contract (the row carries no credential material;
+      // the web wizard only needs success + the id).
+      return { id: account.id };
     }),
 });
