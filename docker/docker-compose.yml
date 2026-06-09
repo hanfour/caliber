@@ -207,7 +207,33 @@ services:
       # Customer-facing /v1/messages and /v1/chat/completions endpoints.
       # Put a TLS-terminating reverse proxy in front in production.
       - "${GATEWAY_PORT:-3002}:3002"
+    networks:
+      default: {}
+      tunnel:
+        aliases:
+          - gateway-tunnel
+
+  cloudflared:
+    # Opt-in: `docker compose --profile gateway --profile tunnel up`.
+    # Named Cloudflare tunnel — exposes the gateway publicly without a per-user
+    # VPN. Origin is configured (in the CF dashboard) to http://gateway-tunnel:3002
+    # so traffic always reaches the gateway over the dedicated `tunnel` network.
+    profiles: [tunnel]
+    image: cloudflare/cloudflared:2025.11.1
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${TUNNEL_TOKEN:-}"]
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - tunnel
 
 volumes:
   pg_data:
   redis_data:
+
+networks:
+  tunnel:
+    driver: bridge
+    # NOT internal: cloudflared needs egress to reach Cloudflare. Isolation
+    # comes from only gateway + cloudflared joining this network.
