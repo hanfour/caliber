@@ -22,4 +22,10 @@ describe("pkce", () => {
   it("state is 22-char base64url (16 bytes)", () => {
     expect(generateState()).toMatch(/^[A-Za-z0-9_-]{22}$/);
   });
+  it("two consecutive verifiers are distinct (CSPRNG entropy sanity)", () => {
+    expect(generatePKCEVerifier()).not.toBe(generatePKCEVerifier());
+  });
+  it("two consecutive states are distinct (CSPRNG entropy sanity)", () => {
+    expect(generateState()).not.toBe(generateState());
+  });
 });
