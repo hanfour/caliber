@@ -448,10 +448,11 @@ describe("fetchModelCatalog", () => {
     const cat = await fetchModelCatalog("anthropic", "https://api.anthropic.com", { authHeaders: {}, fetchImpl: f });
     expect(cat).toEqual([{ id: "claude-haiku-4-5-20251001", created: Date.parse("2025-10-01T00:00:00Z") }]);
   });
-  it("normalizes OpenAI data[] with created unix sec → ms", async () => {
-    const f = fakeFetch(200, { data: [{ id: "gpt-5.4", created: 1735689600 }] });
+  it("normalizes OpenAI (sub2api) data[] with created_at ISO → epoch ms", async () => {
+    // SPIKE 2026-06-10: sub2api returns created_at ISO, NOT created unix int.
+    const f = fakeFetch(200, { data: [{ id: "gpt-5.4", created_at: "2025-01-01T00:00:00Z" }] });
     const cat = await fetchModelCatalog("openai", "https://sub2api", { authHeaders: {}, fetchImpl: f });
-    expect(cat).toEqual([{ id: "gpt-5.4", created: 1735689600 * 1000 }]);
+    expect(cat).toEqual([{ id: "gpt-5.4", created: Date.parse("2025-01-01T00:00:00Z") }]);
   });
   it("returns [] on non-2xx (caller falls back)", async () => {
     const cat = await fetchModelCatalog("anthropic", "https://x", { authHeaders: {}, fetchImpl: fakeFetch(404, {}) });
@@ -508,8 +509,10 @@ export async function fetchModelCatalog(
   for (const raw of data) {
     const r = raw as { id?: unknown; created?: unknown; created_at?: unknown };
     if (typeof r.id !== "string") continue;
+    // SPIKE 2026-06-10: BOTH anthropic and sub2api return `created_at` (ISO).
+    // Prefer it; fall back to a unix `created` int only if created_at absent.
     let created: number | null = null;
-    if (platform === "anthropic" && typeof r.created_at === "string") {
+    if (typeof r.created_at === "string") {
       const ms = Date.parse(r.created_at);
       created = Number.isNaN(ms) ? null : ms;
     } else if (typeof r.created === "number" && Number.isFinite(r.created)) {
