@@ -10,6 +10,11 @@ interface Deps {
   fallbackMetric: (platform: string, credentialType: string) => void;
 }
 
+export interface RefreshDeps {
+  discoverBuckets: () => Promise<BucketKey[]>;
+  fetchForBucket: (b: BucketKey) => Promise<ModelCatalogEntry[]>;
+}
+
 export class ModelRegistry {
   private cache = new Map<string, ModelCatalogEntry[]>();
   constructor(private deps: Deps) {}
@@ -27,5 +32,17 @@ export class ModelRegistry {
 
   buckets(): string[] {
     return [...this.cache.keys()];
+  }
+
+  async refreshOnce(deps: RefreshDeps): Promise<void> {
+    const buckets = await deps.discoverBuckets();
+    for (const b of buckets) {
+      try {
+        const cat = await deps.fetchForBucket(b);
+        if (cat.length > 0) this.set(b, cat); // empty → leave on fallback
+      } catch {
+        // swallow — never let refresh break the gateway
+      }
+    }
   }
 }
