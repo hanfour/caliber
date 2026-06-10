@@ -49,6 +49,16 @@ import {
   fatalUpstreamReplyBody,
 } from "../runtime/sseErrorEvents.js";
 import { autoRoute } from "./dispatch.js";
+import {
+  applyModelResolution,
+  type Output as ModelResolution,
+} from "../models/applyModelResolution.js";
+import { listCandidateTypes } from "../models/candidateTypes.js";
+import {
+  buildAliasScope,
+  applyAliasResolved,
+  rewriteUpstreamModel,
+} from "../models/aliasWiring.js";
 
 export interface ChatCompletionsRouteOptions {
   env: ServerEnv;
@@ -655,15 +665,40 @@ export function makeChatCompletionsOpenaiHandler(
 
     const isStream = body.stream === true;
     const requestId = req.id;
+    const requestedModel = body.model;
+    const startedAtMs = Date.now();
+
+    // Model-alias resolution (feat/model-alias-resolution). Resolves the
+    // client `model` against the OpenAI catalog; single-bucket rewrites the
+    // upstream Responses body's `model` up front (so the cache key carries the
+    // resolved id, spec Finding #3), mixed-bucket defers to the per-attempt
+    // path. The cache is keyed on the *client* Chat body (shared with the
+    // anthropic-platform branch), so we resolve early to gate cacheability and
+    // thread the resolution into the failover helpers.
+    const aliasScope = buildAliasScope(req);
+    const resolution = await applyModelResolution({
+      requested: requestedModel,
+      platform: "openai",
+      baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
+      enabled: opts.env.GATEWAY_ENABLE_MODEL_ALIAS,
+      registry: app.modelRegistry,
+      listCandidateTypes: () => listCandidateTypes(app.db, aliasScope),
+    });
+
     // Mirror the messages-openai pattern: the upstream needs `stream:
     // true` to return text/event-stream; the client-facing flag is
-    // already mirrored on `body.stream`.
-    const upstreamBody = isStream
+    // already mirrored on `body.stream`. For single-bucket resolution, bake
+    // the resolved model into the upstream body up front; emit header + metric.
+    const upstreamBody: Record<string, unknown> = isStream
       ? { ...responsesBody, stream: true }
-      : responsesBody;
+      : { ...responsesBody };
+    if (resolution.upfront) {
+      upstreamBody.model = resolution.upfront.upstreamModel;
+      if (resolution.upfront.wasAlias) {
+        applyAliasResolved(app, reply, resolution.upfront, "openai");
+      }
+    }
     const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
-    const startedAtMs = Date.now();
-    const requestedModel = body.model;
 
     // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
     // for stream + non-stream; only non-stream 200s get stored for replay.
@@ -672,10 +707,12 @@ export function makeChatCompletionsOpenaiHandler(
     const idemKey = idem.idemKey;
 
     // Phase 3 #2 — same scope as the anthropic-platform handler so a
-    // group reconfigure doesn't invalidate.
+    // group reconfigure doesn't invalidate. Mixed-bucket resolution
+    // (`!resolution.cacheable`) skips the cache entirely — the served bucket
+    // (and thus the resolved model) isn't known until an account is picked.
     const clientBodyBuf = Buffer.from(JSON.stringify(body));
     let cacheKey: string | null = null;
-    if (!isStream) {
+    if (!isStream && resolution.cacheable) {
       const result = await checkRouteCache({
         redis: app.redis,
         ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
@@ -701,6 +738,7 @@ export function makeChatCompletionsOpenaiHandler(
         requestId,
         requestedModel,
         startedAtMs,
+        resolution,
       );
       return;
     }
@@ -722,9 +760,25 @@ export function makeChatCompletionsOpenaiHandler(
             account,
             requestId,
             async (credential) => {
+              // Mixed-bucket alias resolution: rewrite the upstream body's
+              // model for the chosen credential bucket (single-bucket already
+              // baked it into `upstreamBodyBuf` up front). `attemptUpstreamModel`
+              // feeds the synthetic usage's `upstream_model` (Finding #4).
+              let attemptBodyBuf: Buffer = upstreamBodyBuf;
+              let attemptUpstreamModel =
+                resolution.upfront?.upstreamModel ?? requestedModel;
+              if (resolution.upfront === null) {
+                const ra = resolution.perAttempt(credential.type);
+                attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+                attemptUpstreamModel = ra.upstreamModel;
+                if (ra.wasAlias) {
+                  applyAliasResolved(app, reply, ra, "openai");
+                }
+              }
+
               const upstream = await callUpstreamResponses({
                 baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
-                body: upstreamBodyBuf,
+                body: attemptBodyBuf,
                 credential,
                 signal: ac.signal,
               });
@@ -766,10 +820,11 @@ export function makeChatCompletionsOpenaiHandler(
               // account misbehaved. Build the synthetic Anthropic shape
               // directly from the translated Chat usage so
               // emitUsageLog's pricing column is populated unchanged.
+              // `model` is the RESOLVED upstream id (Finding #4).
               const upstreamForLog = translated
                 ? buildSyntheticAnthropicUsage({
                     id: `synthetic:openai-chat:${requestId}`,
-                    model: requestedModel,
+                    model: attemptUpstreamModel,
                     inputTokens: translated.usage?.prompt_tokens ?? 0,
                     outputTokens: translated.usage?.completion_tokens ?? 0,
                   })
@@ -789,7 +844,7 @@ export function makeChatCompletionsOpenaiHandler(
                 app,
                 req,
                 requestId,
-                requestBodyJson: upstreamBodyBuf.toString("utf8"),
+                requestBodyJson: attemptBodyBuf.toString("utf8"),
                 responseBody: translated,
                 stream: false,
               });
@@ -868,8 +923,30 @@ async function runChatCompletionsOpenaiStreamingFailover(
   requestId: string,
   requestedModel: string,
   startedAtMs: number,
+  resolution: ModelResolution,
 ): Promise<void> {
   reply.hijack();
+
+  const upfrontUpstreamModel =
+    resolution.upfront?.upstreamModel ?? requestedModel;
+
+  // After `reply.hijack()` SSE headers are written via `reply.raw.writeHead`,
+  // so the resolved-model header is threaded through this box. Single-bucket:
+  // known up front. Mixed-bucket: filled per-attempt before the first byte.
+  const resolvedModelHeader: { value: string | null } = {
+    value:
+      resolution.upfront && resolution.upfront.wasAlias
+        ? resolution.upfront.upstreamModel
+        : null,
+  };
+  const streamHeaders = (): Record<string, string> => ({
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...(resolvedModelHeader.value
+      ? { "x-caliber-resolved-model": resolvedModelHeader.value }
+      : {}),
+  });
 
   const ac = new AbortController();
   const onClose = () => ac.abort();
@@ -886,9 +963,27 @@ async function runChatCompletionsOpenaiStreamingFailover(
           account,
           requestId,
           async (credential) => {
+            // Mixed-bucket alias resolution: rewrite the body's model for the
+            // chosen credential bucket (single-bucket already baked in). Capture
+            // the resolved id for the SSE header + synthetic usage upstream_model.
+            let attemptBodyBuf: Buffer = upstreamBodyBuf;
+            let attemptUpstreamModel = upfrontUpstreamModel;
+            if (resolution.upfront === null) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+              attemptUpstreamModel = ra.upstreamModel;
+              if (ra.wasAlias) {
+                resolvedModelHeader.value = ra.upstreamModel;
+                app.gwMetrics.modelAliasResolvedTotal.inc({
+                  platform: "openai",
+                  family: ra.family ?? "",
+                });
+              }
+            }
+
             const upstream = await callUpstreamResponses({
               baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
-              body: upstreamBodyBuf,
+              body: attemptBodyBuf,
               credential,
               signal: ac.signal,
             });
@@ -918,11 +1013,7 @@ async function runChatCompletionsOpenaiStreamingFailover(
             } = { current: null };
 
             if (!reply.raw.headersSent) {
-              reply.raw.writeHead(200, {
-                "content-type": "text/event-stream",
-                "cache-control": "no-cache",
-                connection: "keep-alive",
-              });
+              reply.raw.writeHead(200, streamHeaders());
             }
 
             const translator = makeResponsesToChatStream();
@@ -986,7 +1077,8 @@ async function runChatCompletionsOpenaiStreamingFailover(
             const upstreamForLog = completedUsage
               ? buildSyntheticAnthropicUsage({
                   id: `synthetic:openai-stream-chat:${requestId}`,
-                  model: requestedModel,
+                  // RESOLVED upstream id (Finding #4), not the alias.
+                  model: attemptUpstreamModel,
                   inputTokens: Math.max(
                     0,
                     completedUsage.input_tokens - cachedTokens,
@@ -1010,7 +1102,7 @@ async function runChatCompletionsOpenaiStreamingFailover(
               app,
               req,
               requestId,
-              requestBodyJson: upstreamBodyBuf.toString("utf8"),
+              requestBodyJson: attemptBodyBuf.toString("utf8"),
               responseBody: null,
               stream: true,
             });

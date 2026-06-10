@@ -71,6 +71,16 @@ import {
   respondStreamFailoverCollapse,
   fatalUpstreamReplyBody,
 } from "../runtime/sseErrorEvents.js";
+import {
+  applyModelResolution,
+  type Output as ModelResolution,
+} from "../models/applyModelResolution.js";
+import { listCandidateTypes } from "../models/candidateTypes.js";
+import {
+  buildAliasScope,
+  applyAliasResolved,
+  rewriteUpstreamModel,
+} from "../models/aliasWiring.js";
 import type {
   NonStreamUpstreamResult,
   UpstreamResult,
@@ -188,11 +198,42 @@ export function makeResponsesRouteHandler(
       }
       const stream = rawBody.stream === true;
 
-      // Cache key uses the raw client body so a verbatim repeat (e.g.
-      // codex retry on transient failure) hits the cache.
-      const clientBodyBuf = Buffer.from(JSON.stringify(rawBody));
+      // Model-alias resolution (feat/model-alias-resolution). Runs AFTER the
+      // model-present check and BEFORE the cache-key buffer is built so a
+      // single-bucket (cacheable) resolution can rewrite the body up front —
+      // keeping the cache key keyed on the RESOLVED model (spec Finding #3).
+      const aliasScope = buildAliasScope(req);
+      const resolution = await applyModelResolution({
+        requested: modelRaw,
+        platform: "openai",
+        baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
+        enabled: opts.env.GATEWAY_ENABLE_MODEL_ALIAS,
+        registry: app.modelRegistry,
+        listCandidateTypes: () => listCandidateTypes(app.db, aliasScope),
+      });
+
+      // Single-bucket: every candidate shares one credential type, so the
+      // resolved upstream model is known up front. Rewrite the body NOW
+      // (before the cache buffer) so the cache key + forwarded body both carry
+      // the concrete id; set the response header + metric for an alias.
+      // Mixed-bucket (`upfront === null`) defers the rewrite to the per-attempt
+      // path inside the passthrough failover loop.
+      let resolvedBody: Record<string, unknown> = rawBody;
+      if (resolution.upfront) {
+        resolvedBody = { ...rawBody, model: resolution.upfront.upstreamModel };
+        if (resolution.upfront.wasAlias) {
+          applyAliasResolved(app, reply, resolution.upfront, "openai");
+        }
+      }
+
+      // Cache key uses the (possibly rewritten) client body so a verbatim
+      // repeat (e.g. codex retry on transient failure) hits the cache.
+      const clientBodyBuf = Buffer.from(JSON.stringify(resolvedBody));
       let cacheKey: string | null = null;
-      if (!stream) {
+      // Mixed-bucket resolution (`!resolution.cacheable`) can't be keyed by a
+      // resolved model up front — the served bucket isn't known until an
+      // account is picked — so the response cache is skipped entirely.
+      if (!stream && resolution.cacheable) {
         const result = await checkRouteCache({
           redis: app.redis,
           ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
@@ -214,9 +255,10 @@ export function makeResponsesRouteHandler(
           opts,
           req,
           reply,
-          rawBody,
+          resolvedBody,
           req.id,
-          modelRaw,
+          resolution.requestedModel,
+          resolution,
         );
         return;
       }
@@ -225,11 +267,12 @@ export function makeResponsesRouteHandler(
         opts,
         req,
         reply,
-        rawBody,
+        resolvedBody,
         req.id,
-        modelRaw,
+        resolution.requestedModel,
         cacheKey,
         idemKey,
+        resolution,
       );
       return;
     }
@@ -835,9 +878,16 @@ async function runOpenaiResponsesPassthroughFailover(
   requestedModel: string,
   cacheKey: string | null,
   idemKey: string | null,
+  resolution: ModelResolution,
 ): Promise<void> {
   const startedAtMs = Date.now();
   const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
+  // Resolved upstream model for the synthetic usage shape (Finding #4): the
+  // usage log's `upstream_model` must be the RESOLVED id, while
+  // `requested_model` stays the alias. For single-bucket the body already
+  // carries it (`resolution.upfront`); mixed-bucket fills it per-attempt below.
+  const upfrontUpstreamModel =
+    resolution.upfront?.upstreamModel ?? requestedModel;
 
   // Wire AbortSignal from client disconnect → upstream cancel.
   // Same plumbing as the streaming helpers; without this, a hung
@@ -859,10 +909,25 @@ async function runOpenaiResponsesPassthroughFailover(
           account,
           requestId,
           async (credential) => {
+            // Mixed-bucket alias resolution: the served bucket is only known
+            // now that a credential is resolved, so rewrite the body's model
+            // per the runtime type. Single-bucket already baked the resolved
+            // id into `upstreamBodyBuf` up front (no rewrite).
+            let attemptBodyBuf: Buffer = upstreamBodyBuf;
+            let attemptUpstreamModel = upfrontUpstreamModel;
+            if (resolution.upfront === null) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+              attemptUpstreamModel = ra.upstreamModel;
+              if (ra.wasAlias) {
+                applyAliasResolved(app, reply, ra, "openai");
+              }
+            }
+
             const upstream = expectNonStream(
               await callUpstreamResponses({
                 baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
-                body: upstreamBodyBuf,
+                body: attemptBodyBuf,
                 credential,
                 signal: ac.signal,
               }),
@@ -888,13 +953,15 @@ async function runOpenaiResponsesPassthroughFailover(
             }
 
             // Translate OpenAI usage → synthetic Anthropic shape so
-            // emitUsageLog's pricing path runs unchanged.
+            // emitUsageLog's pricing path runs unchanged. `model` is the
+            // RESOLVED upstream id (Finding #4), so the usage_log row's
+            // `upstream_model` reflects what was actually sent upstream.
             const usage = extractResponsesUsage(openaiResp);
             const cached = usage?.input_tokens_details?.cached_tokens ?? 0;
             const upstreamForLog = usage
               ? buildSyntheticAnthropicUsage({
                   id: `synthetic:openai-passthrough:${requestId}`,
-                  model: requestedModel,
+                  model: attemptUpstreamModel,
                   inputTokens: Math.max(0, usage.input_tokens - cached),
                   outputTokens: usage.output_tokens,
                   cacheReadInputTokens: cached,
@@ -916,7 +983,7 @@ async function runOpenaiResponsesPassthroughFailover(
               app,
               req,
               requestId,
-              requestBodyJson: upstreamBodyBuf.toString("utf8"),
+              requestBodyJson: attemptBodyBuf.toString("utf8"),
               responseBody: openaiResp,
               stream: false,
             });
@@ -1010,10 +1077,34 @@ async function runOpenaiResponsesStreamingPassthrough(
   body: Record<string, unknown>,
   requestId: string,
   requestedModel: string,
+  resolution: ModelResolution,
 ): Promise<void> {
   reply.hijack();
   const startedAtMs = Date.now();
   const upstreamBodyBuf = Buffer.from(JSON.stringify(body));
+  // Resolved upstream model for the synthetic usage shape (Finding #4).
+  const upfrontUpstreamModel =
+    resolution.upfront?.upstreamModel ?? requestedModel;
+
+  // After `reply.hijack()` the SSE headers are written manually via
+  // `reply.raw.writeHead` (Fastify's reply.header no longer flushes), so the
+  // resolved-model header is threaded into those writeHead calls through this
+  // box. Single-bucket: known up front. Mixed-bucket: filled per-attempt once a
+  // credential bucket is chosen (before the first byte flushes).
+  const resolvedModelHeader: { value: string | null } = {
+    value:
+      resolution.upfront && resolution.upfront.wasAlias
+        ? resolution.upfront.upstreamModel
+        : null,
+  };
+  const streamHeaders = (): Record<string, string> => ({
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...(resolvedModelHeader.value
+      ? { "x-caliber-resolved-model": resolvedModelHeader.value }
+      : {}),
+  });
 
   // Wire AbortSignal from client disconnect so a hung upstream is cancelled.
   const ac = new AbortController();
@@ -1032,9 +1123,29 @@ async function runOpenaiResponsesStreamingPassthrough(
           account,
           requestId,
           async (credential) => {
+            // Mixed-bucket alias resolution: rewrite the body's model for the
+            // chosen credential bucket (single-bucket already baked into
+            // `upstreamBodyBuf`). Capture the resolved id so the SSE headers
+            // carry it before any byte and so the synthetic usage's
+            // `upstream_model` matches what was actually sent upstream.
+            let attemptBodyBuf: Buffer = upstreamBodyBuf;
+            let attemptUpstreamModel = upfrontUpstreamModel;
+            if (resolution.upfront === null) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+              attemptUpstreamModel = ra.upstreamModel;
+              if (ra.wasAlias) {
+                resolvedModelHeader.value = ra.upstreamModel;
+                app.gwMetrics.modelAliasResolvedTotal.inc({
+                  platform: "openai",
+                  family: ra.family ?? "",
+                });
+              }
+            }
+
             const upstream = await callUpstreamResponses({
               baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
-              body: upstreamBodyBuf,
+              body: attemptBodyBuf,
               credential,
               signal: ac.signal,
             });
@@ -1071,11 +1182,7 @@ async function runOpenaiResponsesStreamingPassthrough(
             } = { current: null };
 
             if (!reply.raw.headersSent) {
-              reply.raw.writeHead(200, {
-                "content-type": "text/event-stream",
-                "cache-control": "no-cache",
-                connection: "keep-alive",
-              });
+              reply.raw.writeHead(200, streamHeaders());
             }
 
             const flushEvent = (ev: ResponsesSSEEvent): void => {
@@ -1131,7 +1238,8 @@ async function runOpenaiResponsesStreamingPassthrough(
             const upstreamForLog = completedUsage
               ? buildSyntheticAnthropicUsage({
                   id: `synthetic:openai-stream:${requestId}`,
-                  model: requestedModel,
+                  // RESOLVED upstream id (Finding #4), not the alias.
+                  model: attemptUpstreamModel,
                   inputTokens: Math.max(
                     0,
                     completedUsage.input_tokens - completedUsage.cached_tokens,
@@ -1155,7 +1263,7 @@ async function runOpenaiResponsesStreamingPassthrough(
               app,
               req,
               requestId,
-              requestBodyJson: upstreamBodyBuf.toString("utf8"),
+              requestBodyJson: attemptBodyBuf.toString("utf8"),
               responseBody: null,
               stream: true,
             });

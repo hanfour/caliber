@@ -56,10 +56,13 @@ import { checkRequestIdempotency } from "./idempotencyEntry.js";
 import {
   applyModelResolution,
   type Output as ModelResolution,
-  type Resolved as ResolvedModel,
 } from "../models/applyModelResolution.js";
 import { listCandidateTypes } from "../models/candidateTypes.js";
-import type { ScheduleRequest } from "../runtime/scheduler.js";
+import {
+  buildAliasScope,
+  applyAliasResolved,
+  rewriteUpstreamModel,
+} from "../models/aliasWiring.js";
 
 export interface MessagesRouteOptions {
   env: ServerEnv;
@@ -83,83 +86,6 @@ class CapacityError extends Error {
   constructor() {
     super("account_at_capacity");
     this.name = "CapacityError";
-  }
-}
-
-/**
- * Build the minimal scheduler-request scope `listCandidateTypes` reads — the
- * SAME six request-derived fields `buildFailoverInput` populates, mapped to the
- * exact shape `runFailover` forwards into `scheduler.select` (notably
- * `groupPlatform = ctx.platform` and `groupId = apiKey.groupId ?? undefined`).
- * Keeping this in lock-step means the bucket preview that decides cacheability
- * sees the identical candidate set the real failover loop will schedule over.
- */
-function buildAliasScope(req: FastifyRequest): ScheduleRequest {
-  const apiKey = req.apiKey;
-  if (!apiKey) {
-    throw new Error(
-      "buildAliasScope: req.apiKey is missing (apiKeyAuth middleware did not run)",
-    );
-  }
-  const ctx = req.gwGroupContext;
-  if (!ctx) {
-    throw new Error(
-      "buildAliasScope: req.gwGroupContext is missing (groupContext middleware did not run)",
-    );
-  }
-  return {
-    orgId: apiKey.orgId,
-    teamId: apiKey.teamId,
-    groupPlatform: ctx.platform,
-    groupId: apiKey.groupId ?? undefined,
-    routingPolicy: ctx.policy,
-    userId: apiKey.userId,
-  };
-}
-
-/**
- * Surface a resolved alias to the caller + metrics: emit the
- * `x-caliber-resolved-model` response header (so the client learns the concrete
- * id its alias mapped to) and bump `gw_model_alias_resolved_total`. Idempotent
- * w.r.t. the header — Fastify's `reply.header` overwrites — so a per-attempt
- * call after an upfront call simply re-affirms the same value.
- */
-function applyAliasResolved(
-  app: FastifyInstance,
-  reply: FastifyReply,
-  resolved: ResolvedModel,
-): void {
-  reply.header("x-caliber-resolved-model", resolved.upstreamModel);
-  app.gwMetrics.modelAliasResolvedTotal.inc({
-    platform: "anthropic",
-    family: resolved.family ?? "",
-  });
-}
-
-/**
- * Per-attempt upstream body for the mixed-bucket path: re-serialize the body
- * with `model` set to the bucket-specific resolved id. Only invoked when
- * `resolution.upfront === null` (the upfront path already baked the resolved id
- * into `upstreamBodyBuf`). Returns the original buffer untouched when the
- * resolver was a no-op (alias disabled / not an alias) so we never re-encode
- * needlessly. `upstreamBodyBuf` is a JSON object the route built, so the parse
- * is safe; on the off chance it isn't, fall back to the original buffer.
- */
-function rewriteUpstreamModel(
-  upstreamBodyBuf: Buffer,
-  resolved: ResolvedModel,
-): Buffer {
-  try {
-    const parsed = JSON.parse(upstreamBodyBuf.toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-    if (parsed.model === resolved.upstreamModel) return upstreamBodyBuf;
-    return Buffer.from(
-      JSON.stringify({ ...parsed, model: resolved.upstreamModel }),
-    );
-  } catch {
-    return upstreamBodyBuf;
   }
 }
 
@@ -247,7 +173,7 @@ export function makeMessagesAnthropicHandler(
     if (resolution.upfront) {
       sanitizedBody.model = resolution.upfront.upstreamModel;
       if (resolution.upfront.wasAlias) {
-        applyAliasResolved(app, reply, resolution.upfront);
+        applyAliasResolved(app, reply, resolution.upfront, "anthropic");
       }
     }
     const upstreamBodyBuf = Buffer.from(JSON.stringify(sanitizedBody));
@@ -477,7 +403,7 @@ async function runNonStreamFailover(
           const ra = resolution.perAttempt(credential.type);
           attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
           if (ra.wasAlias) {
-            applyAliasResolved(app, reply, ra);
+            applyAliasResolved(app, reply, ra, "anthropic");
           }
         }
 
