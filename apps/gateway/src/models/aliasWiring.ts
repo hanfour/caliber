@@ -71,6 +71,53 @@ export function applyAliasResolved(
 }
 
 /**
+ * Single-bucket drift handling (design "Catalog bucketing" invariant 5).
+ *
+ * The up-front (row-type) resolution already baked a concrete id into
+ * `upstreamBodyBuf` AND seeded the response-cache key. Once the live credential
+ * is decrypted its runtime `type` may DISAGREE with the row hint (a stale
+ * `upstream_accounts.type`), which would route the LIVE call to a stale id.
+ * Invariant 5 says the attempt must conservatively re-resolve against the
+ * credential-derived bucket — never trust the row hint for the live call.
+ *
+ * This compares the credential-derived resolution to what was baked in up
+ * front; on mismatch it rewrites the attempt body to the credential id, emits a
+ * warning + the dedicated drift counter, and returns the corrected buffer. It
+ * does NOT re-emit `modelAliasResolvedTotal` (already inc'd up front) — drift is
+ * a distinct signal. The cache key keeps the row-type resolution: a documented
+ * best-effort tradeoff (a single-bucket cache HIT replies before any attempt,
+ * so it can only ever use the row hint).
+ *
+ * No-op (returns the original buffer) when there is no up-front resolution
+ * (`upfront === null` → the mixed-bucket per-attempt path already re-resolves)
+ * or the credential bucket agrees with the baked id.
+ */
+export function applyUpfrontDrift(
+  app: FastifyInstance,
+  upstreamBodyBuf: Buffer,
+  upfront: ResolvedModel,
+  credentialResolved: ResolvedModel,
+  platform: AliasPlatformLabel,
+  context: { requestId: string; accountId: string },
+): Buffer {
+  if (credentialResolved.upstreamModel === upfront.upstreamModel) {
+    return upstreamBodyBuf;
+  }
+  app.log.warn(
+    {
+      requestId: context.requestId,
+      accountId: context.accountId,
+      platform,
+      rowResolvedModel: upfront.upstreamModel,
+      credentialResolvedModel: credentialResolved.upstreamModel,
+    },
+    "model-alias bucket drift: row type ≠ credential type; re-resolving live call against credential bucket",
+  );
+  app.gwMetrics.modelAliasBucketDriftTotal.inc({ platform });
+  return rewriteUpstreamModel(upstreamBodyBuf, credentialResolved);
+}
+
+/**
  * Per-attempt upstream body for the mixed-bucket path: re-serialize the body
  * with `model` set to the bucket-specific resolved id. Only invoked when
  * `resolution.upfront === null` (the upfront path already baked the resolved id

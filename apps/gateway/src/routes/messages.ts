@@ -62,6 +62,7 @@ import {
   buildAliasScope,
   applyAliasResolved,
   rewriteUpstreamModel,
+  applyUpfrontDrift,
 } from "../models/aliasWiring.js";
 
 export interface MessagesRouteOptions {
@@ -394,10 +395,13 @@ async function runNonStreamFailover(
           );
         }
 
-        // Mixed-bucket alias resolution: the served bucket is only known now
-        // that a credential is resolved, so rewrite the body's model per the
-        // runtime type. Single-bucket requests already carry the resolved id in
-        // `upstreamBodyBuf` (`resolution.upfront !== null`) and need no rewrite.
+        // Alias resolution against the LIVE credential bucket.
+        //   * Mixed-bucket (`upfront === null`): the served bucket is only known
+        //     now, so rewrite the body's model per the runtime type.
+        //   * Single-bucket (`upfront !== null`): the row-type id is already in
+        //     `upstreamBodyBuf`, but the row hint may be stale — re-resolve and,
+        //     on drift, rewrite to the credential-derived id + warn/metric
+        //     (design invariant 5). The cache key keeps the row-type id.
         let attemptBodyBuf = upstreamBodyBuf;
         if (resolution && resolution.upfront === null) {
           const ra = resolution.perAttempt(credential.type);
@@ -405,6 +409,16 @@ async function runNonStreamFailover(
           if (ra.wasAlias) {
             applyAliasResolved(app, reply, ra, "anthropic");
           }
+        } else if (resolution && resolution.upfront) {
+          const ra = resolution.perAttempt(credential.type);
+          attemptBodyBuf = applyUpfrontDrift(
+            app,
+            upstreamBodyBuf,
+            resolution.upfront,
+            ra,
+            "anthropic",
+            { requestId, accountId: account.id },
+          );
         }
 
         const upstream = await callUpstreamMessages({
@@ -680,9 +694,11 @@ async function runStreamingFailover(
           );
         }
 
-        // Mixed-bucket alias resolution: rewrite the body's model for the
-        // chosen credential bucket (single-bucket already baked into
-        // `upstreamBodyBuf` up front). Capture the resolved id so the SSE
+        // Alias resolution against the LIVE credential bucket. Mixed-bucket
+        // rewrites the body for the chosen bucket; single-bucket already baked
+        // the row-type id into `upstreamBodyBuf` up front but re-resolves here
+        // so a stale row hint (drift) routes the live call to the credential
+        // bucket (design invariant 5). Capture the resolved id so the SSE
         // headers (written below by streamHeaders) carry it before any byte.
         if (resolution && resolution.upfront === null) {
           const ra = resolution.perAttempt(credential.type);
@@ -696,6 +712,22 @@ async function runStreamingFailover(
               platform: "anthropic",
               family: ra.family ?? "",
             });
+          }
+        } else if (resolution && resolution.upfront) {
+          const ra = resolution.perAttempt(credential.type);
+          attemptBodyBuf = applyUpfrontDrift(
+            app,
+            upstreamBodyBuf,
+            resolution.upfront,
+            ra,
+            "anthropic",
+            { requestId, accountId: account.id },
+          );
+          // On drift the live call uses the credential-derived id, so the SSE
+          // header must reflect it too (the up-front box still holds the stale
+          // row id). No-drift leaves the box untouched.
+          if (ra.upstreamModel !== resolution.upfront.upstreamModel) {
+            resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
           }
         }
 
