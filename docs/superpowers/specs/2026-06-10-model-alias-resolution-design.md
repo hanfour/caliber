@@ -41,7 +41,7 @@ serves the request. Explicit concrete ids are never touched.
 | Behavior | **Alias resolution only.** Concrete id (== a known catalog entry for the serving account's bucket) → pass through unchanged. Alias → resolve to family-newest. |
 | Alias forms | **Both**: `-latest` suffix (`claude-sonnet-latest`) **and** bare family name (`claude-sonnet`). |
 | Platforms | **Both** Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`, `/v1/responses`). |
-| Catalog bucketing | **Per `(platform, baseUrl, credential.type)` bucket** — NOT platform-wide. Resolution uses the bucket of the **actually-selected** account. (Finding #1.) |
+| Catalog bucketing | **Per `(platform, routeUpstreamBaseUrl, credential.type)` bucket** — NOT platform-wide. Resolution uses the bucket of the **actually-selected** account. (Finding #1.) |
 | List source | Live fetch per bucket + in-memory cache (TTL ~1h) + static fallback. Background-refreshed off the request path. |
 | "Newest" | **Max `created` timestamp** from the catalog entry — NOT version-string parsing. |
 | Unresolvable | **Pass through** (no new failure mode) — let the upstream respond. |
@@ -49,16 +49,19 @@ serves the request. Explicit concrete ids are never touched.
 
 ## Catalog bucketing (Finding #1 — the central invariant)
 
-The request's serving account is chosen by the **failover loop** from the
-candidate set built by `buildFailoverInput` (routingPolicy / userId / platform).
+The request's serving account is chosen by the **failover loop** — the scheduler
+selecting from the request scope assembled by `buildFailoverInput` (routingPolicy
+/ userId / platform).
 Different accounts can have different credential classes (Max OAuth vs api-key)
 and therefore **different available model sets**. Resolving against the wrong
 class can route an api-key-only model to a Max OAuth account (or vice versa) —
 exactly the entitlement mismatch behind the original 404.
 
 **Invariants:**
-1. The model catalog is keyed by **`(platform, baseUrl, credential.type)`**
-   (a "bucket"), not platform-wide.
+1. The model catalog is keyed by **`(platform, routeUpstreamBaseUrl, credential.type)`**
+   (a "bucket"), not platform-wide. `routeUpstreamBaseUrl` is the base URL the
+   route/runtime calls (from `UPSTREAM_*_BASE_URL` env, e.g. sub2api for
+   OpenAI) — there is no per-account `baseUrl` column.
 2. Resolution for a given upstream attempt MUST use the catalog of **that
    attempt's selected account's bucket**.
 3. Because account selection happens inside failover, resolution is performed
@@ -75,10 +78,12 @@ but it MUST satisfy invariants 1–4.
 `buildFailoverInput` only assembles the request scope (`RunFailoverInput`); the
 candidate set / account is chosen later in `runFailover → scheduler.select()`,
 and the scheduler's sticky layer may go straight to a single account. So the
-plan adds a **conservative "bucket preview" helper** that reuses the scheduler's
-filtering semantics (incl. sticky) to return only the *possible* bucket set —
-from the **row-level `upstream_accounts.type`** hint (NOT a decrypted
-credential). The runtime bucket for an actual attempt is formed from
+plan adds a **conservative, side-effect-free "bucket preview" helper** that
+reuses the scheduler's *filtering/listing predicates* (and may READ sticky) to
+return only the *possible* bucket set — from the **row-level
+`upstream_accounts.type`** hint (NOT a decrypted credential). It MUST NOT call
+`scheduler.select()` (which writes sticky, emits decision metrics, and
+random-load-balances) and MUST NOT affect the subsequent real failover. The runtime bucket for an actual attempt is formed from
 **`credential.type`** after `withSlotAndCredential` decrypts the credential. If
 the row `type` and the decrypted credential payload disagree, the attempt
 conservatively re-resolves against the credential-derived bucket (or skips) and
@@ -87,7 +92,7 @@ emits a warning/metric — never trusts the stale row hint for the live call.
 ## Core Resolution Flow (per upstream attempt)
 
 ```
-attempt selects account A (failover loop) → bucket = (platform, A.baseUrl, A.credential.type)
+attempt selects account A (failover loop) → bucket = (platform, routeUpstreamBaseUrl, A.credential.type)
    catalog = registry.get(bucket)            // cached live list, or static fallback
    m = original client requested model
      ├─ m exactly matches a catalog id        → concrete: forward m unchanged
@@ -121,7 +126,7 @@ upstream body carries the resolved id.
 
 ## Model Registry (apps/gateway — source, cache, fallback)
 
-- **Per-bucket in-memory cache**, keyed `(platform, baseUrl, credential.type)`.
+- **Per-bucket in-memory cache**, keyed `(platform, routeUpstreamBaseUrl, credential.type)`.
   In-memory per gateway instance (lists are eventually-consistent; no Redis).
 - **Background refresh** (off the request path → no per-request latency): every
   `GATEWAY_MODEL_REGISTRY_REFRESH_SEC` (default 3600), refresh each *distinct
@@ -191,6 +196,13 @@ refresh (e.g. a new family-newest) can't serve a stale cached body for
 >   result keyed by its resolved id, but this does NOT guarantee a future
 >   mixed-bucket request hits unless its preview converges to a single bucket or
 >   reconstructs the same resolved key — documented as best-effort, not relied on.
+>
+> Accepted tradeoff: a single-bucket cache **hit** replies before any attempt, so
+> it resolves against the **row-level `type`** hint and never reaches the
+> credential-derived runtime bucket — i.e. cache lookup trusts the row type as a
+> cache-only hint, and row/credential drift is a (documented) data-integrity
+> risk for cached responses. Tests MUST cover "row type ≠ credential type +
+> cache enabled" behavior.
 
 ## OpenAI passthrough usage logging (Finding #4)
 
@@ -241,7 +253,9 @@ the same requested-vs-upstream split.
   selected bucket; cross-bucket failover re-resolves; response header set;
   `usage_logs` shows requested(alias) vs upstream(resolved); non-streaming cache
   key includes resolved model + header preserved on cache hit; OpenAI passthrough
-  synthetic usage uses the resolved id.
+  synthetic usage uses the resolved id; **row `type` ≠ runtime `credential.type`
+  with cache enabled** behaves per the accepted tradeoff (and the live attempt
+  re-resolves/skips + warns).
 - **Spike** (plan step 1, manual): live-probe both `/v1/models` endpoints +
   capture raw shape per the spike checklist above.
 
