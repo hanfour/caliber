@@ -53,6 +53,13 @@ import {
 } from "../runtime/responseCache.js";
 import { storeIdempotent } from "../runtime/idempotencyCache.js";
 import { checkRequestIdempotency } from "./idempotencyEntry.js";
+import {
+  applyModelResolution,
+  type Output as ModelResolution,
+  type Resolved as ResolvedModel,
+} from "../models/applyModelResolution.js";
+import { listCandidateTypes } from "../models/candidateTypes.js";
+import type { ScheduleRequest } from "../runtime/scheduler.js";
 
 export interface MessagesRouteOptions {
   env: ServerEnv;
@@ -76,6 +83,83 @@ class CapacityError extends Error {
   constructor() {
     super("account_at_capacity");
     this.name = "CapacityError";
+  }
+}
+
+/**
+ * Build the minimal scheduler-request scope `listCandidateTypes` reads — the
+ * SAME six request-derived fields `buildFailoverInput` populates, mapped to the
+ * exact shape `runFailover` forwards into `scheduler.select` (notably
+ * `groupPlatform = ctx.platform` and `groupId = apiKey.groupId ?? undefined`).
+ * Keeping this in lock-step means the bucket preview that decides cacheability
+ * sees the identical candidate set the real failover loop will schedule over.
+ */
+function buildAliasScope(req: FastifyRequest): ScheduleRequest {
+  const apiKey = req.apiKey;
+  if (!apiKey) {
+    throw new Error(
+      "buildAliasScope: req.apiKey is missing (apiKeyAuth middleware did not run)",
+    );
+  }
+  const ctx = req.gwGroupContext;
+  if (!ctx) {
+    throw new Error(
+      "buildAliasScope: req.gwGroupContext is missing (groupContext middleware did not run)",
+    );
+  }
+  return {
+    orgId: apiKey.orgId,
+    teamId: apiKey.teamId,
+    groupPlatform: ctx.platform,
+    groupId: apiKey.groupId ?? undefined,
+    routingPolicy: ctx.policy,
+    userId: apiKey.userId,
+  };
+}
+
+/**
+ * Surface a resolved alias to the caller + metrics: emit the
+ * `x-caliber-resolved-model` response header (so the client learns the concrete
+ * id its alias mapped to) and bump `gw_model_alias_resolved_total`. Idempotent
+ * w.r.t. the header — Fastify's `reply.header` overwrites — so a per-attempt
+ * call after an upfront call simply re-affirms the same value.
+ */
+function applyAliasResolved(
+  app: FastifyInstance,
+  reply: FastifyReply,
+  resolved: ResolvedModel,
+): void {
+  reply.header("x-caliber-resolved-model", resolved.upstreamModel);
+  app.gwMetrics.modelAliasResolvedTotal.inc({
+    platform: "anthropic",
+    family: resolved.family ?? "",
+  });
+}
+
+/**
+ * Per-attempt upstream body for the mixed-bucket path: re-serialize the body
+ * with `model` set to the bucket-specific resolved id. Only invoked when
+ * `resolution.upfront === null` (the upfront path already baked the resolved id
+ * into `upstreamBodyBuf`). Returns the original buffer untouched when the
+ * resolver was a no-op (alias disabled / not an alias) so we never re-encode
+ * needlessly. `upstreamBodyBuf` is a JSON object the route built, so the parse
+ * is safe; on the off chance it isn't, fall back to the original buffer.
+ */
+function rewriteUpstreamModel(
+  upstreamBodyBuf: Buffer,
+  resolved: ResolvedModel,
+): Buffer {
+  try {
+    const parsed = JSON.parse(upstreamBodyBuf.toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    if (parsed.model === resolved.upstreamModel) return upstreamBodyBuf;
+    return Buffer.from(
+      JSON.stringify({ ...parsed, model: resolved.upstreamModel }),
+    );
+  } catch {
+    return upstreamBodyBuf;
   }
 }
 
@@ -125,6 +209,25 @@ export function makeMessagesAnthropicHandler(
     const isStream = body.stream === true;
     const requestId = req.id; // Fastify auto-generates UUID per request.
 
+    // Model-alias resolution (feat/model-alias-resolution). Runs AFTER the
+    // missing_model validation so `body.model` is a known non-empty string,
+    // and BEFORE `sanitizedBody`/`upstreamBodyBuf` are built so a single-bucket
+    // (cacheable) resolution can rewrite the body up front — keeping the cache
+    // key keyed on the RESOLVED model. The scope handed to `listCandidateTypes`
+    // mirrors the six request-derived fields `buildFailoverInput` populates
+    // (and the exact shape `runFailover` forwards to `scheduler.select`), so the
+    // bucket preview sees the SAME candidate set the real scheduler will.
+    const aliasScope = buildAliasScope(req);
+    const resolution = await applyModelResolution({
+      requested: body.model,
+      platform: "anthropic",
+      baseUrl:
+        opts.env.UPSTREAM_ANTHROPIC_BASE_URL || "https://api.anthropic.com",
+      enabled: opts.env.GATEWAY_ENABLE_MODEL_ALIAS,
+      registry: app.modelRegistry,
+      listCandidateTypes: () => listCandidateTypes(app.db, aliasScope),
+    });
+
     // Strip client-side fields that the OAuth upstream rejects with
     // `Extra inputs are not permitted`. claude code CLI sends
     // `context_management` (its own context-window-trimming hint)
@@ -135,6 +238,17 @@ export function makeMessagesAnthropicHandler(
     const sanitizedBody: Record<string, unknown> = { ...body };
     for (const key of ANTHROPIC_SILENTLY_DROPPED_FIELDS) {
       delete sanitizedBody[key];
+    }
+    // Single-bucket resolution: every candidate account shares one credential
+    // type, so the resolved upstream model is known up front. Rewrite the body
+    // NOW (before `upstreamBodyBuf`) so the cache key + forwarded body both
+    // carry the concrete id. Mixed-bucket (`upfront === null`) defers the
+    // rewrite to the per-attempt path inside the failover loop.
+    if (resolution.upfront) {
+      sanitizedBody.model = resolution.upfront.upstreamModel;
+      if (resolution.upfront.wasAlias) {
+        applyAliasResolved(app, reply, resolution.upfront);
+      }
     }
     const upstreamBodyBuf = Buffer.from(JSON.stringify(sanitizedBody));
 
@@ -150,7 +264,12 @@ export function makeMessagesAnthropicHandler(
     // identifies the public endpoint so cached entries don't collide
     // with bodies sent to other routes.
     let cacheKey: string | null = null;
-    if (!isStream) {
+    // Mixed-bucket resolution (`!resolution.cacheable`) can't be keyed by a
+    // resolved model up front — the served bucket isn't known until an account
+    // is picked in the failover loop — so the response cache is skipped
+    // entirely for that request. Idempotency (above) is unaffected: it keys on
+    // the client X-Request-Id, not the resolved model.
+    if (!isStream && resolution.cacheable) {
       const result = await checkRouteCache({
         redis: app.redis,
         ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
@@ -181,6 +300,7 @@ export function makeMessagesAnthropicHandler(
           upstreamBodyBuf,
           requestId,
           ac.signal,
+          resolution,
         );
       } else {
         await runNonStreamFailover(
@@ -193,6 +313,7 @@ export function makeMessagesAnthropicHandler(
           ac.signal,
           cacheKey,
           idemKey,
+          resolution,
         );
       }
     } catch (err) {
@@ -281,6 +402,13 @@ async function runNonStreamFailover(
    * 200 response is cached under it so a retried request replays verbatim.
    */
   idemKey?: string | null,
+  /**
+   * Model-alias resolution (feat/model-alias-resolution). Drives the usage-log
+   * `requestedModel` (always the original alias) and, for mixed-bucket requests
+   * (`upfront === null`), the per-attempt upstream-model rewrite keyed on the
+   * selected credential's runtime type.
+   */
+  resolution?: ModelResolution,
 ): Promise<void> {
   // Capture start time BEFORE the failover loop so durationMs includes
   // credential resolve + slot acquire + failover switches. Sub-task B of
@@ -291,8 +419,11 @@ async function runNonStreamFailover(
   // Pull the client-facing `model` out of the already-validated body so the
   // usage-log payload's `requestedModel` matches what the caller sent.
   // (The route handler above validates `body.model` is a non-empty string
-  // before invoking this function, so the cast is safe.)
-  const requestedModel = (req.body as { model: string }).model;
+  // before invoking this function, so the cast is safe.) When alias resolution
+  // ran, `resolution.requestedModel` is the original alias too — preferred so a
+  // future divergence stays single-sourced.
+  const requestedModel =
+    resolution?.requestedModel ?? (req.body as { model: string }).model;
 
   const result = await runFailover(buildFailoverInput(req, app.db, {
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
@@ -337,9 +468,22 @@ async function runNonStreamFailover(
           );
         }
 
+        // Mixed-bucket alias resolution: the served bucket is only known now
+        // that a credential is resolved, so rewrite the body's model per the
+        // runtime type. Single-bucket requests already carry the resolved id in
+        // `upstreamBodyBuf` (`resolution.upfront !== null`) and need no rewrite.
+        let attemptBodyBuf = upstreamBodyBuf;
+        if (resolution && resolution.upfront === null) {
+          const ra = resolution.perAttempt(credential.type);
+          attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+          if (ra.wasAlias) {
+            applyAliasResolved(app, reply, ra);
+          }
+        }
+
         const upstream = await callUpstreamMessages({
           baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
-          body: upstreamBodyBuf,
+          body: attemptBodyBuf,
           credential,
           signal,
         });
@@ -402,7 +546,7 @@ async function runNonStreamFailover(
           app,
           req,
           requestId,
-          requestBodyJson: upstreamBodyBuf.toString("utf8"),
+          requestBodyJson: attemptBodyBuf.toString("utf8"),
           responseBody: parsedUpstream,
           stream: false,
         });
@@ -495,6 +639,7 @@ async function runStreamingFailover(
   upstreamBodyBuf: Buffer,
   requestId: string,
   signal: AbortSignal,
+  resolution?: ModelResolution,
 ): Promise<void> {
   // Take over the response — Fastify will not auto-send.
   reply.hijack();
@@ -505,8 +650,30 @@ async function runStreamingFailover(
   const startedAtMs = Date.now();
 
   // The client-facing `model` is validated in the /v1/messages handler above
-  // before this function is called, so the cast is safe.
-  const requestedModel = (req.body as { model: string }).model;
+  // before this function is called, so the cast is safe. When alias resolution
+  // ran, `resolution.requestedModel` is the same original alias.
+  const requestedModel =
+    resolution?.requestedModel ?? (req.body as { model: string }).model;
+
+  // After `reply.hijack()` the SSE headers are written manually via
+  // `reply.raw.writeHead` (Fastify's reply.header no longer flushes), so the
+  // resolved-model header is threaded into those writeHead calls through this
+  // box. Single-bucket: known up front. Mixed-bucket: filled per-attempt once a
+  // credential bucket is chosen (before the first byte flushes).
+  const resolvedModelHeader: { value: string | null } = {
+    value:
+      resolution?.upfront && resolution.upfront.wasAlias
+        ? resolution.upfront.upstreamModel
+        : null,
+  };
+  const streamHeaders = (): Record<string, string> => ({
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...(resolvedModelHeader.value
+      ? { "x-caliber-resolved-model": resolvedModelHeader.value }
+      : {}),
+  });
 
   await runFailover(buildFailoverInput(req, app.db, {
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
@@ -549,11 +716,7 @@ async function runStreamingFailover(
             bufferReleasedAtMs = Date.now();
           }
           if (!reply.raw.headersSent) {
-            reply.raw.writeHead(200, {
-              "content-type": "text/event-stream",
-              "cache-control": "no-cache",
-              connection: "keep-alive",
-            });
+            reply.raw.writeHead(200, streamHeaders());
           }
           for (const c of chunks) {
             reply.raw.write(c);
@@ -563,6 +726,10 @@ async function runStreamingFailover(
           reply.raw.write(chunk);
         },
       });
+
+      // Hoisted out of the `try` so the post-commit error path's body-capture
+      // (in the `catch` below) can report what was actually sent upstream.
+      let attemptBodyBuf = upstreamBodyBuf;
 
       try {
         let credential = await resolveCredential(app.db, account.id, {
@@ -587,9 +754,25 @@ async function runStreamingFailover(
           );
         }
 
+        // Mixed-bucket alias resolution: rewrite the body's model for the
+        // chosen credential bucket (single-bucket already baked into
+        // `upstreamBodyBuf` up front). Capture the resolved id so the SSE
+        // headers (written below by streamHeaders) carry it before any byte.
+        if (resolution && resolution.upfront === null) {
+          const ra = resolution.perAttempt(credential.type);
+          attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+          if (ra.wasAlias) {
+            resolvedModelHeader.value = ra.upstreamModel;
+            app.gwMetrics.modelAliasResolvedTotal.inc({
+              platform: "anthropic",
+              family: ra.family ?? "",
+            });
+          }
+        }
+
         const upstream = await callUpstreamMessages({
           baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
-          body: upstreamBodyBuf,
+          body: attemptBodyBuf,
           credential,
           signal,
         });
@@ -654,7 +837,7 @@ async function runStreamingFailover(
               app,
               req,
               requestId,
-              requestBodyJson: upstreamBodyBuf.toString("utf8"),
+              requestBodyJson: attemptBodyBuf.toString("utf8"),
               responseBody: extractor.getAssembledTranscript(),
               stream: true,
             });
@@ -675,11 +858,7 @@ async function runStreamingFailover(
 
         if (!reply.raw.headersSent) {
           // No bytes ever flushed (empty stream) — set headers and end.
-          reply.raw.writeHead(200, {
-            "content-type": "text/event-stream",
-            "cache-control": "no-cache",
-            connection: "keep-alive",
-          });
+          reply.raw.writeHead(200, streamHeaders());
         }
         reply.raw.end();
 
@@ -712,7 +891,7 @@ async function runStreamingFailover(
           app,
           req,
           requestId,
-          requestBodyJson: upstreamBodyBuf.toString("utf8"),
+          requestBodyJson: attemptBodyBuf.toString("utf8"),
           responseBody: extractor.getAssembledTranscript(),
           stream: true,
         });
@@ -775,7 +954,7 @@ async function runStreamingFailover(
           app,
           req,
           requestId,
-          requestBodyJson: upstreamBodyBuf.toString("utf8"),
+          requestBodyJson: attemptBodyBuf.toString("utf8"),
           responseBody: extractor.getAssembledTranscript(),
           stream: true,
           attemptErrors: errMsg,
