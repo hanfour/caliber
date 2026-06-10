@@ -972,8 +972,11 @@ async function runChatCompletionsOpenaiStreamingFailover(
               const ra = resolution.perAttempt(credential.type);
               attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
               attemptUpstreamModel = ra.upstreamModel;
+              // Reset per attempt: a prior failed attempt may have set the box;
+              // if this (winning) attempt's bucket doesn't treat the model as an
+              // alias, the header must NOT carry the earlier attempt's resolved id.
+              resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
               if (ra.wasAlias) {
-                resolvedModelHeader.value = ra.upstreamModel;
                 app.gwMetrics.modelAliasResolvedTotal.inc({
                   platform: "openai",
                   family: ra.family ?? "",

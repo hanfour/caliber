@@ -687,8 +687,11 @@ async function runStreamingFailover(
         if (resolution && resolution.upfront === null) {
           const ra = resolution.perAttempt(credential.type);
           attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+          // Reset per attempt: a prior failed attempt may have set the box;
+          // if this (winning) attempt's bucket doesn't treat the model as an
+          // alias, the header must NOT carry the earlier attempt's resolved id.
+          resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
           if (ra.wasAlias) {
-            resolvedModelHeader.value = ra.upstreamModel;
             app.gwMetrics.modelAliasResolvedTotal.inc({
               platform: "anthropic",
               family: ra.family ?? "",
