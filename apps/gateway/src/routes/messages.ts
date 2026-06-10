@@ -419,6 +419,13 @@ async function runNonStreamFailover(
             "anthropic",
             { requestId, accountId: account.id },
           );
+          // On drift the live call uses the credential-derived id, so the
+          // forwarded reply header (set up front to the row id) must be
+          // re-pointed at it — symmetric with the streaming box reset above.
+          // No-drift leaves the up-front header untouched.
+          if (ra.upstreamModel !== resolution.upfront.upstreamModel && ra.wasAlias) {
+            reply.header("x-caliber-resolved-model", ra.upstreamModel);
+          }
         }
 
         const upstream = await callUpstreamMessages({
@@ -723,12 +730,13 @@ async function runStreamingFailover(
             "anthropic",
             { requestId, accountId: account.id },
           );
-          // On drift the live call uses the credential-derived id, so the SSE
-          // header must reflect it too (the up-front box still holds the stale
-          // row id). No-drift leaves the box untouched.
-          if (ra.upstreamModel !== resolution.upfront.upstreamModel) {
-            resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
-          }
+          // Reset per attempt (not only on drift): a prior drifted attempt
+          // must not leak its resolved id into a later non-drift attempt on
+          // this single-bucket box. On no-drift `ra.upstreamModel ===
+          // upfront.upstreamModel`, so this re-affirms the correct id; on
+          // drift it points the SSE header at the credential-derived id the
+          // live call actually used.
+          resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
         }
 
         const upstream = await callUpstreamMessages({

@@ -59,21 +59,84 @@ afterAll(async () => {
 let fakeServer: Server;
 let fakeBaseUrl: string;
 let receivedModels: string[];
+// Per-credential forced 503: a request whose `x-api-key` (api_key bucket) or
+// `Authorization: Bearer <token>` (oauth bucket) is in this set answers 503 →
+// failover switch_account. Lets a two-attempt drift test fail attempt-1 and
+// win attempt-2 deterministically. Reset in `beforeEach`.
+let failCredentials: Set<string>;
+
+/** Anthropic SSE chunks echoing `model` back (message_start → delta → stop). */
+function anthropicSseChunks(model: string | null): string[] {
+  return [
+    `event: message_start\ndata: ${JSON.stringify({
+      type: "message_start",
+      message: {
+        id: "msg_alias_stream",
+        type: "message",
+        role: "assistant",
+        model: model ?? "unknown",
+        content: [],
+        usage: { input_tokens: 3, output_tokens: 0 },
+      },
+    })}\n\n`,
+    `event: content_block_delta\ndata: ${JSON.stringify({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "ok" },
+    })}\n\n`,
+    `event: message_delta\ndata: ${JSON.stringify({
+      type: "message_delta",
+      delta: { stop_reason: "end_turn" },
+      usage: { output_tokens: 2 },
+    })}\n\n`,
+    `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+  ];
+}
+
+/** The credential token a request carried, for per-credential 503 targeting. */
+function credentialTokenOf(req: { headers: Record<string, unknown> }): string {
+  const xKey = req.headers["x-api-key"];
+  if (typeof xKey === "string" && xKey.length > 0) return xKey;
+  const auth = req.headers["authorization"];
+  return typeof auth === "string" && auth.startsWith("Bearer ")
+    ? auth.slice("Bearer ".length)
+    : "";
+}
 
 beforeAll(async () => {
   receivedModels = [];
+  failCredentials = new Set<string>();
   fakeServer = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
     req.on("end", () => {
       let model: string | null = null;
+      let isStream = false;
       try {
         const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         model = typeof parsed.model === "string" ? parsed.model : null;
+        isStream = parsed.stream === true;
       } catch {
         model = null;
       }
       if (model) receivedModels.push(model);
+
+      // Per-credential failover: fail this attempt so the next account is tried.
+      if (failCredentials.has(credentialTokenOf(req))) {
+        res.statusCode = 503;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ error: { message: "forced failover" } }));
+        return;
+      }
+
+      if (isStream) {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/event-stream");
+        for (const c of anthropicSseChunks(model)) res.write(c);
+        res.end();
+        return;
+      }
+
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(
@@ -102,6 +165,7 @@ afterAll(
 
 beforeEach(async () => {
   receivedModels = [];
+  failCredentials = new Set<string>();
   // Each freshly-built app restarts Fastify's request-id counter at `req-1`,
   // and `writeUsageLogBatch` upserts ON CONFLICT(request_id) DO NOTHING with a
   // GLOBALLY-unique request_id — so a second `it`'s `req-1` usage row would
@@ -192,26 +256,35 @@ async function seedOwnAccount(
   userId: string,
   rowType: "api_key" | "oauth",
   credType: "api_key" | "oauth",
+  opts: { priority?: number; credToken?: string } = {},
 ): Promise<string> {
   const [acct] = await db
     .insert(upstreamAccounts)
     .values({
       orgId,
       userId,
-      name: `own-${rowType}-row`,
+      name: `own-${rowType}-${Math.random().toString(36).slice(2, 8)}`,
       platform: "anthropic",
       type: rowType,
       schedulable: true,
       status: "active",
+      ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
     })
     .returning();
 
+  // The credential token (api_key value or oauth access_token) — distinct per
+  // account when `credToken` is supplied so the fake upstream can target one
+  // attempt for a forced 503 in failover tests.
+  const token =
+    opts.credToken ??
+    (credType === "api_key" ? "sk-ant-test-key" : "oauth-access-token-test");
+
   const plaintext =
     credType === "api_key"
-      ? JSON.stringify({ type: "api_key", api_key: "sk-ant-test-key" })
+      ? JSON.stringify({ type: "api_key", api_key: token })
       : JSON.stringify({
           type: "oauth",
-          access_token: "oauth-access-token-test",
+          access_token: token,
           refresh_token: "oauth-refresh-token-test",
           expires_at: new Date(
             Date.now() + 365 * 24 * 60 * 60 * 1000,
@@ -246,6 +319,22 @@ async function makeApp(
     add: () => Promise.reject(new Error("stub: force inline DB fallback")),
   };
   return app;
+}
+
+/**
+ * Swap the app's scheduler for a deterministic one (`topK: 1`, `random: () => 0`)
+ * so the lowest-priority-number candidate is always attempt-1 and the failover
+ * order is reproducible.
+ */
+async function makeDeterministic(app: FastifyInstance): Promise<void> {
+  const { createScheduler } = await import("../../src/runtime/scheduler.js");
+  const scheduler = createScheduler({
+    db,
+    redis: (app as unknown as { redis: Redis }).redis,
+    topK: 1,
+    random: () => 0,
+  });
+  (app as unknown as { gwScheduler: unknown }).gwScheduler = scheduler;
 }
 
 /** Read a prom-client counter's value for a specific label set (0 if absent). */
@@ -380,6 +469,11 @@ describe("POST /v1/messages — model alias + response cache", () => {
     // received the credential-derived id, NOT the row-type (fallback) id.
     expect(receivedModels).toEqual([DRIFT_RESOLVED]);
 
+    // The response header must advertise the SAME id the upstream actually got
+    // (the credential-derived drift id), not the up-front row-type id. Guards
+    // the non-stream drift header re-affirm.
+    expect(res.headers["x-caliber-resolved-model"]).toBe(DRIFT_RESOLVED);
+
     // Drift metric incremented for the anthropic platform.
     const after = await counterValue(app.gwMetrics.modelAliasBucketDriftTotal, {
       platform: "anthropic",
@@ -417,6 +511,120 @@ describe("POST /v1/messages — model alias + response cache", () => {
     expect(rows.length).toBe(1);
     expect(rows[0]!.requestedModel).toBe("claude-haiku");
     expect(rows[0]!.upstreamModel).toBe(DRIFT_RESOLVED);
+
+    await app.close();
+  });
+
+  it("(c) stream=true drift: SSE x-caliber-resolved-model advertises the credential-derived id, not the row-type id", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_aliasdriftstream_${Math.random().toString(36).slice(2)}`;
+    await seedOwnKey(orgId, userId, rawKey);
+    // Row says `oauth` (single-bucket on oauth → upfront seeds the SSE header
+    // box to the fallback id); the vault credential decrypts to `api_key`, whose
+    // registry-overridden catalog resolves `claude-haiku` to a DIFFERENT id.
+    await seedOwnAccount(orgId, userId, "oauth", "api_key");
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const DRIFT_RESOLVED = "claude-haiku-9-9-29990101";
+    app.modelRegistry.set(
+      { platform: "anthropic", baseUrl: fakeBaseUrl, credentialType: "api_key" },
+      [{ id: DRIFT_RESOLVED, created: 1_900_000_000 }],
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: "claude-haiku",
+        max_tokens: 8,
+        messages: [{ role: "user", content: "hi" }],
+        stream: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    // The live attempt sent the credential-derived id upstream...
+    expect(receivedModels).toEqual([DRIFT_RESOLVED]);
+    // ...and the SSE response header must advertise that SAME id, NOT the
+    // up-front row-type (fallback) id the box was seeded with. Guards the
+    // streaming drift header re-point.
+    expect(res.headers["x-caliber-resolved-model"]).toBe(DRIFT_RESOLVED);
+    expect(res.body).toContain("event: message_stop");
+
+    await app.close();
+  });
+
+  it("(d) stream=true single-bucket failover: attempt-1 drifts then 503s, attempt-2 wins on the row bucket → header reflects attempt-2's id, NOT attempt-1's drifted id (FIX 1 regression guard)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_aliasdriftfail_${Math.random().toString(36).slice(2)}`;
+    await seedOwnKey(orgId, userId, rawKey);
+
+    // BOTH accounts have ROW type `oauth` → single-bucket (upfront resolves on
+    // the oauth bucket = the static fallback id). The failover spans two
+    // attempts inside that one bucket:
+    //   • attempt-1 (priority 10): credential decrypts to `api_key` → DRIFTS to
+    //     the api_key registry id (sets the SSE box to the drifted id) — then
+    //     the fake 503s its x-api-key → failover switch_account.
+    //   • attempt-2 (priority 50): credential decrypts to `oauth` → NO drift
+    //     (matches the row bucket, stays on the fallback id) → 200 wins.
+    // Without FIX 1 the box would retain attempt-1's drifted id (the no-drift
+    // branch only wrote ON drift) → the SSE header would lie. With FIX 1 the
+    // box is reset every attempt, so the header reflects attempt-2's id.
+    const failKey = `sk-ant-drift-${Math.random().toString(36).slice(2)}`;
+    await seedOwnAccount(orgId, userId, "oauth", "api_key", {
+      priority: 10,
+      credToken: failKey,
+    });
+    await seedOwnAccount(orgId, userId, "oauth", "oauth", {
+      priority: 50,
+      credToken: `oauth-win-${Math.random().toString(36).slice(2)}`,
+    });
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri());
+    await makeDeterministic(app);
+
+    // api_key bucket resolves `claude-haiku` to a distinct (drifted) id; the
+    // oauth (row) bucket stays on the shipped static fallback.
+    const DRIFT_RESOLVED = "claude-haiku-9-9-29990101";
+    app.modelRegistry.set(
+      { platform: "anthropic", baseUrl: fakeBaseUrl, credentialType: "api_key" },
+      [{ id: DRIFT_RESOLVED, created: 1_900_000_000 }],
+    );
+
+    // Fail attempt-1 (its decrypted api_key credential) so attempt-2 is tried.
+    failCredentials.add(failKey);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: "claude-haiku",
+        max_tokens: 8,
+        messages: [{ role: "user", content: "hi" }],
+        stream: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    // Both attempts were made, in order: drifted api_key (503), then oauth (win).
+    expect(receivedModels[0]).toBe(DRIFT_RESOLVED);
+    expect(receivedModels[receivedModels.length - 1]).toBe(FALLBACK_RESOLVED);
+    // FIX 1: the winning (no-drift) attempt reset the box → the SSE header
+    // carries attempt-2's fallback id, NOT attempt-1's stale drifted id.
+    expect(res.headers["x-caliber-resolved-model"]).toBe(FALLBACK_RESOLVED);
 
     await app.close();
   });
