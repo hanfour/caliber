@@ -89,6 +89,22 @@ describe("parseServerEnv", () => {
       expect(env.GATEWAY_OAUTH_MAX_FAIL).toBe(3);
     });
 
+    it("model-alias knobs default on / 3600", () => {
+      const env = parseServerEnv(valid);
+      expect(env.GATEWAY_ENABLE_MODEL_ALIAS).toBe(true);
+      expect(env.GATEWAY_MODEL_REGISTRY_REFRESH_SEC).toBe(3600);
+      expect(env.GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC).toBeUndefined();
+      expect(env.GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI).toBeUndefined();
+    });
+
+    it("GATEWAY_MODEL_REGISTRY_REFRESH_SEC='' falls back to 3600 (would crash min(60) without fix)", () => {
+      const env = parseServerEnv({
+        ...valid,
+        GATEWAY_MODEL_REGISTRY_REFRESH_SEC: "",
+      });
+      expect(env.GATEWAY_MODEL_REGISTRY_REFRESH_SEC).toBe(3600);
+    });
+
     it("GATEWAY_REDIS_FAILURE_MODE='' falls back to 'strict' (would crash enum without fix)", () => {
       const env = parseServerEnv({
         ...valid,

@@ -181,6 +181,23 @@ export const serverEnvSchema = z
       z.coerce.number().int().min(1).default(3),
     ),
     /**
+     * Model-alias resolution: map inbound model ids to a canonical upstream
+     * model via a periodically-refreshed registry. Default on. Refresh
+     * cadence (seconds, min 60) controls how often the registry is re-fetched.
+     * The two FALLBACK overrides are optional comma/space-separated id lists
+     * used when the live registry can't be reached for that provider.
+     */
+    GATEWAY_ENABLE_MODEL_ALIAS: booleanUnion.default(true),
+    GATEWAY_MODEL_REGISTRY_REFRESH_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(60).default(3600),
+    ),
+    GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC: emptyAsUndefined(
+      z.string().optional(),
+    ),
+    GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI: emptyAsUndefined(
+      z.string().optional(),
+    ),
+    /**
      * OAuth token-refresh endpoint for anthropic (Claude Max / Claude.ai
      * subscription bundles). Anthropic has historically moved this URL
      * around (api.anthropic.com vs console.anthropic.com vs platform.
