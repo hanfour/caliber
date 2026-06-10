@@ -17,6 +17,9 @@ const METRIC_NAMES = [
   'gw_oauth_refresh_dead_total',
   'gw_queue_depth',
   'gw_queue_dlq_count',
+  'gw_model_alias_resolved_total',
+  'gw_model_registry_fetch_total',
+  'gw_model_registry_fallback_used_total',
 ]
 
 async function buildTestApp(): Promise<FastifyInstance> {

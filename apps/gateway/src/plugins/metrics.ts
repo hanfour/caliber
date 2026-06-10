@@ -74,6 +74,11 @@ export interface GatewayMetrics {
   gwSchedulerLatencyMs: Histogram<"platform">;
   gwSchedulerLoadSkew: Gauge<"platform">;
   gwSchedulerRuntimeAccountCount: Gauge<string>;
+
+  // Model alias resolution / registry
+  modelAliasResolvedTotal: Counter<"platform" | "family">;
+  modelRegistryFetchTotal: Counter<"platform" | "bucket_type" | "result">;
+  modelRegistryFallbackUsedTotal: Counter<"platform" | "bucket_type">;
 }
 
 declare module "fastify" {
@@ -431,6 +436,28 @@ async function metricsPluginBody(
   });
   gwSchedulerRuntimeAccountCount.set(0);
 
+  // Model alias resolution / registry metrics.
+  const modelAliasResolvedTotal = new Counter({
+    name: "gw_model_alias_resolved_total",
+    help: "Model aliases resolved to a concrete id",
+    labelNames: ["platform", "family"] as const,
+    registers: [register],
+  });
+
+  const modelRegistryFetchTotal = new Counter({
+    name: "gw_model_registry_fetch_total",
+    help: "Model registry /v1/models fetch attempts",
+    labelNames: ["platform", "bucket_type", "result"] as const,
+    registers: [register],
+  });
+
+  const modelRegistryFallbackUsedTotal = new Counter({
+    name: "gw_model_registry_fallback_used_total",
+    help: "Model registry served static fallback",
+    labelNames: ["platform", "bucket_type"] as const,
+    registers: [register],
+  });
+
   // Materialize zero values so unlabeled metrics appear in scrape output
   waitQueueDepth.set(0);
   idempotencyHitTotal.inc(0);
@@ -515,5 +542,8 @@ async function metricsPluginBody(
     gwSchedulerLatencyMs,
     gwSchedulerLoadSkew,
     gwSchedulerRuntimeAccountCount,
+    modelAliasResolvedTotal,
+    modelRegistryFetchTotal,
+    modelRegistryFallbackUsedTotal,
   });
 }
