@@ -71,6 +71,19 @@ The plan decides the exact placement (a resolve step inside the failover loop,
 after `selectAccount` yields the account+credential, before `callUpstream*`),
 but it MUST satisfy invariants 1–4.
 
+**5. Preview bucket vs runtime bucket — distinct sources of truth.**
+`buildFailoverInput` only assembles the request scope (`RunFailoverInput`); the
+candidate set / account is chosen later in `runFailover → scheduler.select()`,
+and the scheduler's sticky layer may go straight to a single account. So the
+plan adds a **conservative "bucket preview" helper** that reuses the scheduler's
+filtering semantics (incl. sticky) to return only the *possible* bucket set —
+from the **row-level `upstream_accounts.type`** hint (NOT a decrypted
+credential). The runtime bucket for an actual attempt is formed from
+**`credential.type`** after `withSlotAndCredential` decrypts the credential. If
+the row `type` and the decrypted credential payload disagree, the attempt
+conservatively re-resolves against the credential-derived bucket (or skips) and
+emits a warning/metric — never trusts the stale row hint for the live call.
+
 ## Core Resolution Flow (per upstream attempt)
 
 ```
@@ -165,10 +178,19 @@ refresh (e.g. a new family-newest) can't serve a stale cached body for
 `claude-sonnet-latest`. On a cache **hit**, still set the
 `x-caliber-resolved-model` header.
 
-> Interaction with per-attempt resolution: where the candidate set spans
-> multiple buckets, the cacheable result is the served attempt's resolution; the
-> cache key reflects that attempt's resolved id. The plan reconciles
-> cache-lookup placement with per-attempt resolution under invariants #1–#4.
+> Interaction with per-attempt resolution. `checkRouteCache` replies directly on
+> a hit, so the resolved model + `x-caliber-resolved-model` must be known *before*
+> the cache lookup. Mechanism:
+> - Use the **conservative bucket-preview helper** (above) to compute the
+>   possible bucket set up front.
+> - **`bucketSet.size === 1`** → resolve once up-front against that bucket;
+>   use the resolved id for the cache key + header + every attempt.
+> - **mixed bucket** (size > 1) → **skip the cache lookup entirely** (we can't
+>   know the served attempt's resolved id beforehand); resolve per-attempt
+>   inside failover. An optional write-through MAY cache the served attempt's
+>   result keyed by its resolved id, but this does NOT guarantee a future
+>   mixed-bucket request hits unless its preview converges to a single bucket or
+>   reconstructs the same resolved key — documented as best-effort, not relied on.
 
 ## OpenAI passthrough usage logging (Finding #4)
 
