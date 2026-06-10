@@ -41,3 +41,21 @@ describe("resolveModelAlias edge cases", () => {
     expect(resolveModelAlias("claude-haiku", "anthropic", [])).toEqual({ resolved: "claude-haiku", wasAlias: false });
   });
 });
+
+const O: ModelCatalogEntry[] = [
+  { id: "gpt-5-2025-08-01", created: 100 },
+  { id: "gpt-5-2025-09-01", created: 200 },
+  { id: "gpt-5-mini-2025-09-01", created: 250 },
+];
+describe("resolveModelAlias (openai, conservative)", () => {
+  it("resolves gpt-5 to newest gpt-5 dated id, NOT gpt-5-mini", () => {
+    const r = resolveModelAlias("gpt-5", "openai", O);
+    expect(r.resolved).toBe("gpt-5-2025-09-01");
+  });
+  it("resolves gpt-5-mini family separately", () => {
+    expect(resolveModelAlias("gpt-5-mini", "openai", O).resolved).toBe("gpt-5-mini-2025-09-01");
+  });
+  it("passes through when family is ambiguous/unmatched", () => {
+    expect(resolveModelAlias("gpt", "openai", O)).toEqual({ resolved: "gpt", wasAlias: false });
+  });
+});
