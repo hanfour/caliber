@@ -515,6 +515,82 @@ describe("POST /v1/messages — model alias + response cache", () => {
     await app.close();
   });
 
+  it("(b2) non-stream drift where the credential bucket CANNOT resolve the alias (passthrough): upstream gets the bare alias, usage_logs.upstream_model is the bare alias, and the stale up-front resolved-model header is CLEARED (not lying)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `ak_aliasdriftpass_${Math.random().toString(36).slice(2)}`;
+    await seedOwnKey(orgId, userId, rawKey);
+    // Row says `oauth` → bucket preview resolves `claude-haiku` on the oauth
+    // (static fallback) bucket → single-bucket, upfront seeds the header to
+    // FALLBACK_RESOLVED. The vault credential decrypts to `api_key`, whose
+    // registry-overridden catalog below LACKS the haiku family → the live
+    // attempt FALLS THROUGH to passthrough (`ra.wasAlias === false`).
+    await seedOwnAccount(orgId, userId, "oauth", "api_key");
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    // api_key (credential-derived) bucket has NO claude-haiku family member, so
+    // `claude-haiku` is NOT an alias there → the live call passes the bare alias
+    // through. The body drifts (credential id `claude-haiku` ≠ row-type
+    // FALLBACK_RESOLVED) but is NOT a resolved alias.
+    app.modelRegistry.set(
+      {
+        platform: "anthropic",
+        baseUrl: fakeBaseUrl,
+        credentialType: "api_key",
+      },
+      [{ id: "claude-sonnet-4-5-20250101", created: 1_900_000_000 }],
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: "claude-haiku",
+        max_tokens: 8,
+        messages: [{ role: "user", content: "hi" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // The live attempt couldn't resolve the alias → the upstream received the
+    // BARE alias, NOT the up-front row-type (fallback) id.
+    expect(receivedModels).toEqual(["claude-haiku"]);
+
+    // The stale up-front header must be CLEARED — advertising FALLBACK_RESOLVED
+    // here would LIE (the upstream got `claude-haiku`). Guards the I1 fix.
+    expect(res.headers["x-caliber-resolved-model"]).toBeUndefined();
+
+    // usage_log: requested stays the original alias; upstream_model is the bare
+    // alias the live call actually sent. Poll — inline DB write is async.
+    let rows: Array<{
+      requestedModel: string | null;
+      upstreamModel: string | null;
+    }> = [];
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      rows = await db
+        .select({
+          requestedModel: usageLogs.requestedModel,
+          upstreamModel: usageLogs.upstreamModel,
+        })
+        .from(usageLogs)
+        .where(and(eq(usageLogs.orgId, orgId), eq(usageLogs.userId, userId)));
+      if (rows.length > 0 || Date.now() > deadline) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.requestedModel).toBe("claude-haiku");
+    expect(rows[0]!.upstreamModel).toBe("claude-haiku");
+
+    await app.close();
+  });
+
   it("(c) stream=true drift: SSE x-caliber-resolved-model advertises the credential-derived id, not the row-type id", async () => {
     const orgId = await seedOrg();
     const userId = await seedUser();

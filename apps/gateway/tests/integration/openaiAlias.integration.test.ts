@@ -528,6 +528,50 @@ describe("POST /v1/responses (openai passthrough) — model alias resolution", (
     await app.close();
   });
 
+  // /v1/chat/completions openai-platform branch (Chat → Responses pivot).
+  // Same single-bucket up-front resolution + per-attempt synthetic-usage
+  // `attemptUpstreamModel` wiring as /v1/responses, but exercised through the
+  // chat-completions route so the `makeChatCompletionsOpenaiHandler` non-stream
+  // alias path has wire coverage (was responses-only before).
+  it("/v1/chat/completions: resolves `gpt-5` upstream, sets the header, and logs alias→resolved", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId);
+    const rawKey = `ak_oai_chat_${Math.random().toString(36).slice(2)}`;
+    await seedKey(orgId, userId, rawKey, groupId);
+    await seedGroupApiKeyAccount(orgId, groupId);
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: "gpt-5",
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 8,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // (a) The fake OpenAI Responses upstream received the RESOLVED id, not alias.
+    expect(receivedModel).toBe(RESOLVED);
+    // (b) The resolved-model header is echoed to the caller.
+    expect(res.headers["x-caliber-resolved-model"]).toBe(RESOLVED);
+
+    // (c) usage_logs: requested_model is the alias, upstream_model the resolved id.
+    const rows = await pollUsageRows(orgId, userId);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.requestedModel).toBe("gpt-5");
+    expect(rows[0]!.upstreamModel).toBe(RESOLVED);
+
+    await app.close();
+  });
+
   // Streaming single-bucket: guards the resolved-model header box wired through
   // `runOpenaiResponsesStreamingPassthrough` (writeHead-via-streamHeaders()).
   it("stream=true: resolves the alias, carries the header on the SSE response, and logs alias→resolved", async () => {

@@ -420,11 +420,20 @@ async function runNonStreamFailover(
             { requestId, accountId: account.id },
           );
           // On drift the live call uses the credential-derived id, so the
-          // forwarded reply header (set up front to the row id) must be
-          // re-pointed at it — symmetric with the streaming box reset above.
+          // forwarded reply header (set up front to the row id) must reflect
+          // what was ACTUALLY sent upstream — symmetric with the streaming box
+          // reset above. If the credential bucket re-resolved the model as an
+          // alias, re-point the header at that id; if the credential bucket
+          // can't resolve the alias (passthrough → `ra.wasAlias === false`,
+          // body now carries the bare alias), CLEAR the stale up-front header
+          // so it can never advertise an id the upstream never received.
           // No-drift leaves the up-front header untouched.
-          if (ra.upstreamModel !== resolution.upfront.upstreamModel && ra.wasAlias) {
-            reply.header("x-caliber-resolved-model", ra.upstreamModel);
+          if (ra.upstreamModel !== resolution.upfront.upstreamModel) {
+            if (ra.wasAlias) {
+              reply.header("x-caliber-resolved-model", ra.upstreamModel);
+            } else {
+              reply.removeHeader("x-caliber-resolved-model");
+            }
           }
         }
 

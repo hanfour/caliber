@@ -18,6 +18,7 @@ const METRIC_NAMES = [
   'gw_queue_depth',
   'gw_queue_dlq_count',
   'gw_model_alias_resolved_total',
+  'gw_model_alias_bucket_drift_total',
   'gw_model_registry_fetch_total',
   'gw_model_registry_fallback_used_total',
 ]
