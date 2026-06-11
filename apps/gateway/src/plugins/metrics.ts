@@ -74,6 +74,12 @@ export interface GatewayMetrics {
   gwSchedulerLatencyMs: Histogram<"platform">;
   gwSchedulerLoadSkew: Gauge<"platform">;
   gwSchedulerRuntimeAccountCount: Gauge<string>;
+
+  // Model alias resolution / registry
+  modelAliasResolvedTotal: Counter<"platform" | "family">;
+  modelAliasBucketDriftTotal: Counter<"platform">;
+  modelRegistryFetchTotal: Counter<"platform" | "bucket_type" | "result">;
+  modelRegistryFallbackUsedTotal: Counter<"platform" | "bucket_type">;
 }
 
 declare module "fastify" {
@@ -431,6 +437,40 @@ async function metricsPluginBody(
   });
   gwSchedulerRuntimeAccountCount.set(0);
 
+  // Model alias resolution / registry metrics.
+  const modelAliasResolvedTotal = new Counter({
+    name: "gw_model_alias_resolved_total",
+    help: "Model aliases resolved to a concrete id",
+    labelNames: ["platform", "family"] as const,
+    registers: [register],
+  });
+
+  // Row `type` ≠ decrypted credential type, detected on the live attempt:
+  // the up-front (row-type) resolution that seeded the cache key disagreed
+  // with the credential-derived bucket, so the live call re-resolved against
+  // the credential bucket (design "Catalog bucketing" invariant 5). A nonzero
+  // count flags stale `upstream_accounts.type` rows worth reconciling.
+  const modelAliasBucketDriftTotal = new Counter({
+    name: "gw_model_alias_bucket_drift_total",
+    help: "Live attempt re-resolved against the credential bucket because the row type disagreed with the decrypted credential type",
+    labelNames: ["platform"] as const,
+    registers: [register],
+  });
+
+  const modelRegistryFetchTotal = new Counter({
+    name: "gw_model_registry_fetch_total",
+    help: "Model registry /v1/models fetch attempts",
+    labelNames: ["platform", "bucket_type", "result"] as const,
+    registers: [register],
+  });
+
+  const modelRegistryFallbackUsedTotal = new Counter({
+    name: "gw_model_registry_fallback_used_total",
+    help: "Model registry served static fallback",
+    labelNames: ["platform", "bucket_type"] as const,
+    registers: [register],
+  });
+
   // Materialize zero values so unlabeled metrics appear in scrape output
   waitQueueDepth.set(0);
   idempotencyHitTotal.inc(0);
@@ -515,5 +555,9 @@ async function metricsPluginBody(
     gwSchedulerLatencyMs,
     gwSchedulerLoadSkew,
     gwSchedulerRuntimeAccountCount,
+    modelAliasResolvedTotal,
+    modelAliasBucketDriftTotal,
+    modelRegistryFetchTotal,
+    modelRegistryFallbackUsedTotal,
   });
 }

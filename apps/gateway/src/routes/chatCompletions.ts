@@ -49,6 +49,17 @@ import {
   fatalUpstreamReplyBody,
 } from "../runtime/sseErrorEvents.js";
 import { autoRoute } from "./dispatch.js";
+import {
+  applyModelResolution,
+  type Output as ModelResolution,
+} from "../models/applyModelResolution.js";
+import { listCandidateTypes } from "../models/candidateTypes.js";
+import {
+  buildAliasScope,
+  applyAliasResolved,
+  rewriteUpstreamModel,
+  applyUpfrontDrift,
+} from "../models/aliasWiring.js";
 
 export interface ChatCompletionsRouteOptions {
   env: ServerEnv;
@@ -122,12 +133,38 @@ export function makeChatCompletionsAnthropicHandler(
 
     const requestId = req.id;
     const isStream = body.stream === true;
+
+    // Model-alias resolution (feat/model-alias-resolution). The client `model`
+    // (OpenAI Chat shape) is the alias; resolve it against the ANTHROPIC catalog
+    // (this branch translates Chat → Anthropic Messages and forwards to the
+    // Anthropic upstream) and rewrite the TRANSLATED body's `model`. Runs after
+    // the missing_model check and before `upstreamBodyBuf` so a single-bucket
+    // resolution bakes the concrete id into the forwarded body + cache key.
+    const aliasScope = buildAliasScope(req);
+    const resolution = await applyModelResolution({
+      requested: body.model,
+      platform: "anthropic",
+      baseUrl:
+        opts.env.UPSTREAM_ANTHROPIC_BASE_URL || "https://api.anthropic.com",
+      enabled: opts.env.GATEWAY_ENABLE_MODEL_ALIAS,
+      registry: app.modelRegistry,
+      listCandidateTypes: () => listCandidateTypes(app.db, aliasScope),
+    });
+
     // For the streaming path we need the upstream to also stream — set
     // `stream: true` on the translated Anthropic body so
-    // `callUpstreamMessages` requests text/event-stream.
-    const upstreamBody = isStream
+    // `callUpstreamMessages` requests text/event-stream. Single-bucket
+    // resolution rewrites the translated body's `model` up front; mixed-bucket
+    // (`upfront === null`) defers to the per-attempt path in the failover loop.
+    const upstreamBody: Record<string, unknown> = isStream
       ? { ...anthropicBody, stream: true }
-      : anthropicBody;
+      : { ...anthropicBody };
+    if (resolution.upfront) {
+      upstreamBody.model = resolution.upfront.upstreamModel;
+      if (resolution.upfront.wasAlias) {
+        applyAliasResolved(app, reply, resolution.upfront, "anthropic");
+      }
+    }
     const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
 
     // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
@@ -139,10 +176,16 @@ export function makeChatCompletionsAnthropicHandler(
     // Phase 3 #2 — cache scope `v1/chat/completions` keyed on the
     // CLIENT body (openai-chat shape), shared across this handler and
     // the openai-platform branch so a reconfigured group hits the same
-    // cache. Skipped for streaming.
-    const clientBodyBuf = Buffer.from(JSON.stringify(body));
+    // cache. Skipped for streaming. Finding 1: key on the RESOLVED model
+    // (single-bucket) so an alias request can't keep hitting a stale cached
+    // response after the registry remaps it. Mixed-bucket skips the cache via
+    // `resolution.cacheable`.
+    const cacheKeyBody = resolution.upfront
+      ? { ...body, model: resolution.upfront.upstreamModel }
+      : body;
+    const clientBodyBuf = Buffer.from(JSON.stringify(cacheKeyBody));
     let cacheKey: string | null = null;
-    if (!isStream) {
+    if (!isStream && resolution.cacheable) {
       const result = await checkRouteCache({
         redis: app.redis,
         ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
@@ -166,7 +209,8 @@ export function makeChatCompletionsAnthropicHandler(
         reply,
         upstreamBodyBuf,
         requestId,
-        body.model,
+        resolution.requestedModel,
+        resolution,
       );
       return;
     }
@@ -175,10 +219,11 @@ export function makeChatCompletionsAnthropicHandler(
     // request translation + credential resolve + slot acquire + failover
     // switches. See usageLogging.ts for payload semantics.
     const startedAtMs = Date.now();
-    // Pull client-requested model from the already-validated body. This
-    // is the OpenAI model name (e.g., "gpt-4") the client sent — distinct
-    // from the Anthropic upstream model that comes back in `parsed.model`.
-    const requestedModel = body.model;
+    // Pull client-requested model from the resolution (the original alias).
+    // This is the OpenAI model name (e.g., "claude-haiku") the client sent —
+    // distinct from the Anthropic upstream model that comes back in
+    // `parsed.model` (which is the RESOLVED id the upstream echoed).
+    const requestedModel = resolution.requestedModel;
 
     try {
       const openaiResponse = await runFailover(buildFailoverInput(req, app.db, {
@@ -223,9 +268,47 @@ export function makeChatCompletionsAnthropicHandler(
               );
             }
 
+            // Alias resolution against the LIVE credential bucket.
+            //   * Mixed-bucket (`upfront === null`): rewrite the translated
+            //     body's model per the runtime type. Set-or-CLEAR the reply
+            //     header per attempt so a failed alias attempt can't leak a
+            //     stale `x-caliber-resolved-model` into a later non-alias winner
+            //     (Finding 4).
+            //   * Single-bucket (`upfront !== null`): the row id is baked into
+            //     `upstreamBodyBuf`; re-resolve and, on drift, rewrite to the
+            //     credential-derived id + warn/metric (design invariant 5) and
+            //     re-point/clear the up-front reply header to match.
+            let attemptBodyBuf: Buffer = upstreamBodyBuf;
+            if (resolution.upfront === null) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+              if (ra.wasAlias) {
+                applyAliasResolved(app, reply, ra, "anthropic");
+              } else {
+                reply.removeHeader("x-caliber-resolved-model");
+              }
+            } else if (resolution.upfront) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = applyUpfrontDrift(
+                app,
+                upstreamBodyBuf,
+                resolution.upfront,
+                ra,
+                "anthropic",
+                { requestId, accountId: account.id },
+              );
+              if (ra.upstreamModel !== resolution.upfront.upstreamModel) {
+                if (ra.wasAlias) {
+                  reply.header("x-caliber-resolved-model", ra.upstreamModel);
+                } else {
+                  reply.removeHeader("x-caliber-resolved-model");
+                }
+              }
+            }
+
             const result = await callUpstreamMessages({
               baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
-              body: upstreamBodyBuf,
+              body: attemptBodyBuf,
               credential,
             });
 
@@ -285,7 +368,7 @@ export function makeChatCompletionsAnthropicHandler(
               app,
               req,
               requestId,
-              requestBodyJson: upstreamBodyBuf.toString("utf8"),
+              requestBodyJson: attemptBodyBuf.toString("utf8"),
               responseBody: parsed,
               stream: false,
             });
@@ -392,9 +475,28 @@ async function runChatCompletionsStreamingFailover(
   upstreamBodyBuf: Buffer,
   requestId: string,
   requestedModel: string,
+  resolution: ModelResolution,
 ): Promise<void> {
   reply.hijack();
   const startedAtMs = Date.now();
+
+  // After `reply.hijack()` SSE headers are written via `reply.raw.writeHead`,
+  // so the resolved-model header is threaded through this box. Single-bucket:
+  // known up front. Mixed-bucket: filled per-attempt before the first byte.
+  const resolvedModelHeader: { value: string | null } = {
+    value:
+      resolution.upfront && resolution.upfront.wasAlias
+        ? resolution.upfront.upstreamModel
+        : null,
+  };
+  const streamHeaders = (): Record<string, string> => ({
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...(resolvedModelHeader.value
+      ? { "x-caliber-resolved-model": resolvedModelHeader.value }
+      : {}),
+  });
 
   // Wire AbortSignal from client disconnect so a hung upstream is cancelled.
   const ac = new AbortController();
@@ -443,9 +545,40 @@ async function runChatCompletionsStreamingFailover(
             );
           }
 
+          // Alias resolution against the LIVE credential bucket. Reset the
+          // header box per attempt (a failed alias attempt must not leak its
+          // resolved id into a non-alias winner).
+          //   * Mixed-bucket (`upfront === null`): rewrite per runtime type.
+          //   * Single-bucket (`upfront !== null`): re-resolve and, on drift,
+          //     rewrite to the credential-derived id + warn/metric (invariant 5)
+          //     and re-point the SSE header box at what was actually sent.
+          let attemptBodyBuf: Buffer = upstreamBodyBuf;
+          if (resolution.upfront === null) {
+            const ra = resolution.perAttempt(credential.type);
+            attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+            resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
+            if (ra.wasAlias) {
+              app.gwMetrics.modelAliasResolvedTotal.inc({
+                platform: "anthropic",
+                family: ra.family ?? "",
+              });
+            }
+          } else if (resolution.upfront) {
+            const ra = resolution.perAttempt(credential.type);
+            attemptBodyBuf = applyUpfrontDrift(
+              app,
+              upstreamBodyBuf,
+              resolution.upfront,
+              ra,
+              "anthropic",
+              { requestId, accountId: account.id },
+            );
+            resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
+          }
+
           const upstream = await callUpstreamMessages({
             baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
-            body: upstreamBodyBuf,
+            body: attemptBodyBuf,
             credential,
             signal: ac.signal,
           });
@@ -476,11 +609,7 @@ async function runChatCompletionsStreamingFailover(
           // as soon as they arrive.
           let lastUsageChunk: OpenAIStreamChunk | null = null;
           if (!reply.raw.headersSent) {
-            reply.raw.writeHead(200, {
-              "content-type": "text/event-stream",
-              "cache-control": "no-cache",
-              connection: "keep-alive",
-            });
+            reply.raw.writeHead(200, streamHeaders());
           }
 
           const translator = makeAnthropicToChatStream();
@@ -540,7 +669,7 @@ async function runChatCompletionsStreamingFailover(
             app,
             req,
             requestId,
-            requestBodyJson: upstreamBodyBuf.toString("utf8"),
+            requestBodyJson: attemptBodyBuf.toString("utf8"),
             responseBody: null,
             stream: true,
           });
@@ -655,15 +784,40 @@ export function makeChatCompletionsOpenaiHandler(
 
     const isStream = body.stream === true;
     const requestId = req.id;
+    const requestedModel = body.model;
+    const startedAtMs = Date.now();
+
+    // Model-alias resolution (feat/model-alias-resolution). Resolves the
+    // client `model` against the OpenAI catalog; single-bucket rewrites the
+    // upstream Responses body's `model` up front (so the cache key carries the
+    // resolved id, spec Finding #3), mixed-bucket defers to the per-attempt
+    // path. The cache is keyed on the *client* Chat body (shared with the
+    // anthropic-platform branch), so we resolve early to gate cacheability and
+    // thread the resolution into the failover helpers.
+    const aliasScope = buildAliasScope(req);
+    const resolution = await applyModelResolution({
+      requested: requestedModel,
+      platform: "openai",
+      baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
+      enabled: opts.env.GATEWAY_ENABLE_MODEL_ALIAS,
+      registry: app.modelRegistry,
+      listCandidateTypes: () => listCandidateTypes(app.db, aliasScope),
+    });
+
     // Mirror the messages-openai pattern: the upstream needs `stream:
     // true` to return text/event-stream; the client-facing flag is
-    // already mirrored on `body.stream`.
-    const upstreamBody = isStream
+    // already mirrored on `body.stream`. For single-bucket resolution, bake
+    // the resolved model into the upstream body up front; emit header + metric.
+    const upstreamBody: Record<string, unknown> = isStream
       ? { ...responsesBody, stream: true }
-      : responsesBody;
+      : { ...responsesBody };
+    if (resolution.upfront) {
+      upstreamBody.model = resolution.upfront.upstreamModel;
+      if (resolution.upfront.wasAlias) {
+        applyAliasResolved(app, reply, resolution.upfront, "openai");
+      }
+    }
     const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
-    const startedAtMs = Date.now();
-    const requestedModel = body.model;
 
     // Idempotency cache (design §4.5) — client-opt-in via X-Request-Id. Runs
     // for stream + non-stream; only non-stream 200s get stored for replay.
@@ -672,10 +826,22 @@ export function makeChatCompletionsOpenaiHandler(
     const idemKey = idem.idemKey;
 
     // Phase 3 #2 — same scope as the anthropic-platform handler so a
-    // group reconfigure doesn't invalidate.
-    const clientBodyBuf = Buffer.from(JSON.stringify(body));
+    // group reconfigure doesn't invalidate. Mixed-bucket resolution
+    // (`!resolution.cacheable`) skips the cache entirely — the served bucket
+    // (and thus the resolved model) isn't known until an account is picked.
+    //
+    // Finding 5: key the cache on the RESOLVED model (single-bucket), mirroring
+    // responses.ts. Keep the Chat client shape — just swap `model` — so a
+    // `gpt-5` alias request can't keep hitting a stale cached response after the
+    // registry remaps it to a newer concrete id. Mixed-bucket already skips the
+    // cache via `resolution.cacheable`, so only the single-bucket key needs the
+    // resolved model.
+    const cacheKeyBody = resolution.upfront
+      ? { ...body, model: resolution.upfront.upstreamModel }
+      : body;
+    const clientBodyBuf = Buffer.from(JSON.stringify(cacheKeyBody));
     let cacheKey: string | null = null;
-    if (!isStream) {
+    if (!isStream && resolution.cacheable) {
       const result = await checkRouteCache({
         redis: app.redis,
         ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
@@ -701,6 +867,7 @@ export function makeChatCompletionsOpenaiHandler(
         requestId,
         requestedModel,
         startedAtMs,
+        resolution,
       );
       return;
     }
@@ -722,9 +889,54 @@ export function makeChatCompletionsOpenaiHandler(
             account,
             requestId,
             async (credential) => {
+              // Alias resolution against the LIVE credential bucket.
+              //   * Mixed-bucket (`upfront === null`): rewrite the upstream
+              //     body's model per the runtime type. Set-or-CLEAR the reply
+              //     header per attempt so a failed alias attempt can't leak a
+              //     stale `x-caliber-resolved-model` into a later non-alias
+              //     winner (Finding 4).
+              //   * Single-bucket (`upfront !== null`): the row id is baked into
+              //     `upstreamBodyBuf`; re-resolve and, on drift, rewrite to the
+              //     credential-derived id + warn/metric (Finding 2) and
+              //     re-point/clear the up-front reply header to match.
+              // `attemptUpstreamModel` feeds the synthetic usage's
+              // `upstream_model` = resolved id (synthetic usage-threading; not
+              // the header-leak "Finding 4" above).
+              let attemptBodyBuf: Buffer = upstreamBodyBuf;
+              let attemptUpstreamModel =
+                resolution.upfront?.upstreamModel ?? requestedModel;
+              if (resolution.upfront === null) {
+                const ra = resolution.perAttempt(credential.type);
+                attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+                attemptUpstreamModel = ra.upstreamModel;
+                if (ra.wasAlias) {
+                  applyAliasResolved(app, reply, ra, "openai");
+                } else {
+                  reply.removeHeader("x-caliber-resolved-model");
+                }
+              } else if (resolution.upfront) {
+                const ra = resolution.perAttempt(credential.type);
+                attemptBodyBuf = applyUpfrontDrift(
+                  app,
+                  upstreamBodyBuf,
+                  resolution.upfront,
+                  ra,
+                  "openai",
+                  { requestId, accountId: account.id },
+                );
+                attemptUpstreamModel = ra.upstreamModel;
+                if (ra.upstreamModel !== resolution.upfront.upstreamModel) {
+                  if (ra.wasAlias) {
+                    reply.header("x-caliber-resolved-model", ra.upstreamModel);
+                  } else {
+                    reply.removeHeader("x-caliber-resolved-model");
+                  }
+                }
+              }
+
               const upstream = await callUpstreamResponses({
                 baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
-                body: upstreamBodyBuf,
+                body: attemptBodyBuf,
                 credential,
                 signal: ac.signal,
               });
@@ -766,10 +978,11 @@ export function makeChatCompletionsOpenaiHandler(
               // account misbehaved. Build the synthetic Anthropic shape
               // directly from the translated Chat usage so
               // emitUsageLog's pricing column is populated unchanged.
+              // `model` is the synthetic usage `upstream_model` = RESOLVED id.
               const upstreamForLog = translated
                 ? buildSyntheticAnthropicUsage({
                     id: `synthetic:openai-chat:${requestId}`,
-                    model: requestedModel,
+                    model: attemptUpstreamModel,
                     inputTokens: translated.usage?.prompt_tokens ?? 0,
                     outputTokens: translated.usage?.completion_tokens ?? 0,
                   })
@@ -789,7 +1002,7 @@ export function makeChatCompletionsOpenaiHandler(
                 app,
                 req,
                 requestId,
-                requestBodyJson: upstreamBodyBuf.toString("utf8"),
+                requestBodyJson: attemptBodyBuf.toString("utf8"),
                 responseBody: translated,
                 stream: false,
               });
@@ -868,8 +1081,30 @@ async function runChatCompletionsOpenaiStreamingFailover(
   requestId: string,
   requestedModel: string,
   startedAtMs: number,
+  resolution: ModelResolution,
 ): Promise<void> {
   reply.hijack();
+
+  const upfrontUpstreamModel =
+    resolution.upfront?.upstreamModel ?? requestedModel;
+
+  // After `reply.hijack()` SSE headers are written via `reply.raw.writeHead`,
+  // so the resolved-model header is threaded through this box. Single-bucket:
+  // known up front. Mixed-bucket: filled per-attempt before the first byte.
+  const resolvedModelHeader: { value: string | null } = {
+    value:
+      resolution.upfront && resolution.upfront.wasAlias
+        ? resolution.upfront.upstreamModel
+        : null,
+  };
+  const streamHeaders = (): Record<string, string> => ({
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...(resolvedModelHeader.value
+      ? { "x-caliber-resolved-model": resolvedModelHeader.value }
+      : {}),
+  });
 
   const ac = new AbortController();
   const onClose = () => ac.abort();
@@ -886,9 +1121,51 @@ async function runChatCompletionsOpenaiStreamingFailover(
           account,
           requestId,
           async (credential) => {
+            // Alias resolution against the LIVE credential bucket. Capture the
+            // resolved id for the SSE header + synthetic usage upstream_model.
+            //   * Mixed-bucket (`upfront === null`): rewrite per the runtime
+            //     type; reset the header box per attempt (a failed alias
+            //     attempt must not leak its id into a non-alias winner).
+            //   * Single-bucket (`upfront !== null`): the row id is baked into
+            //     `upstreamBodyBuf`; re-resolve and, on drift, rewrite to the
+            //     credential-derived id + warn/metric (Finding 2) and re-point
+            //     the SSE header box at what was actually sent upstream.
+            let attemptBodyBuf: Buffer = upstreamBodyBuf;
+            let attemptUpstreamModel = upfrontUpstreamModel;
+            if (resolution.upfront === null) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+              attemptUpstreamModel = ra.upstreamModel;
+              // Reset per attempt: a prior failed attempt may have set the box;
+              // if this (winning) attempt's bucket doesn't treat the model as an
+              // alias, the header must NOT carry the earlier attempt's resolved id.
+              resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
+              if (ra.wasAlias) {
+                app.gwMetrics.modelAliasResolvedTotal.inc({
+                  platform: "openai",
+                  family: ra.family ?? "",
+                });
+              }
+            } else if (resolution.upfront) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = applyUpfrontDrift(
+                app,
+                upstreamBodyBuf,
+                resolution.upfront,
+                ra,
+                "openai",
+                { requestId, accountId: account.id },
+              );
+              attemptUpstreamModel = ra.upstreamModel;
+              // Reset per attempt (not only on drift): on no-drift this
+              // re-affirms the correct id; on drift it re-points the SSE header
+              // at the credential-derived id the live call actually used.
+              resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
+            }
+
             const upstream = await callUpstreamResponses({
               baseUrl: opts.env.UPSTREAM_OPENAI_BASE_URL,
-              body: upstreamBodyBuf,
+              body: attemptBodyBuf,
               credential,
               signal: ac.signal,
             });
@@ -918,11 +1195,7 @@ async function runChatCompletionsOpenaiStreamingFailover(
             } = { current: null };
 
             if (!reply.raw.headersSent) {
-              reply.raw.writeHead(200, {
-                "content-type": "text/event-stream",
-                "cache-control": "no-cache",
-                connection: "keep-alive",
-              });
+              reply.raw.writeHead(200, streamHeaders());
             }
 
             const translator = makeResponsesToChatStream();
@@ -986,7 +1259,8 @@ async function runChatCompletionsOpenaiStreamingFailover(
             const upstreamForLog = completedUsage
               ? buildSyntheticAnthropicUsage({
                   id: `synthetic:openai-stream-chat:${requestId}`,
-                  model: requestedModel,
+                  // synthetic usage `upstream_model` = RESOLVED id, not alias.
+                  model: attemptUpstreamModel,
                   inputTokens: Math.max(
                     0,
                     completedUsage.input_tokens - cachedTokens,
@@ -1010,7 +1284,7 @@ async function runChatCompletionsOpenaiStreamingFailover(
               app,
               req,
               requestId,
-              requestBodyJson: upstreamBodyBuf.toString("utf8"),
+              requestBodyJson: attemptBodyBuf.toString("utf8"),
               responseBody: null,
               stream: true,
             });

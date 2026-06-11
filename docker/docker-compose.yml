@@ -35,6 +35,13 @@ x-app-env: &app-env
   ANTHROPIC_OAUTH_TOKEN_URL: ${ANTHROPIC_OAUTH_TOKEN_URL:-}
   ANTHROPIC_OAUTH_REDIRECT_URI: ${ANTHROPIC_OAUTH_REDIRECT_URI:-}
   ANTHROPIC_OAUTH_SCOPES: ${ANTHROPIC_OAUTH_SCOPES:-}
+  # Model-alias resolution knobs (default on / 3600s refresh; fallback
+  # overrides are comma/space-separated id lists). Soft-default to empty
+  # so the in-code defaults apply when unset.
+  GATEWAY_ENABLE_MODEL_ALIAS: ${GATEWAY_ENABLE_MODEL_ALIAS:-true}
+  GATEWAY_MODEL_REGISTRY_REFRESH_SEC: ${GATEWAY_MODEL_REGISTRY_REFRESH_SEC:-}
+  GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC: ${GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC:-}
+  GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI: ${GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI:-}
   # When ENABLE_GATEWAY=true, parseServerEnv requires these four to be
   # present on every service that imports @caliber/config (api, web, and
   # gateway), not just the gateway container. Defaults are empty so

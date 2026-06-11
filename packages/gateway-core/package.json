@@ -16,6 +16,11 @@
       "import": "./dist/oauth/index.js",
       "default": "./dist/oauth/index.js"
     },
+    "./models": {
+      "types": "./dist/models/index.d.ts",
+      "import": "./dist/models/index.js",
+      "default": "./dist/models/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "pricing"],

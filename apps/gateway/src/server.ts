@@ -55,6 +55,8 @@ import {
   startIdempotencyPurgeCron,
   type IdempotencyPurgeCronHandle,
 } from "./workers/idempotencyPurge.js";
+import { ModelRegistry } from "./models/modelRegistry.js";
+import { buildRefreshDeps } from "./models/registryWiring.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -87,6 +89,13 @@ declare module "fastify" {
      * queues). Cron handler subscribes to this queue to enqueue daily jobs.
      */
     evaluatorQueue?: Queue<EvaluatorJobPayload>;
+    /**
+     * Live model catalog registry (model-alias resolution). Always decorated;
+     * its background refresh loop only runs when GATEWAY_ENABLE_MODEL_ALIAS is
+     * set. With the flag off the registry serves static fallbacks for every
+     * bucket, so consumers can read `app.modelRegistry` unconditionally.
+     */
+    modelRegistry: ModelRegistry;
   }
 }
 
@@ -169,6 +178,72 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
   await app.register(chatCompletionsRoutes, { env: opts.env });
   await app.register(responsesRoutes, { env: opts.env });
   await app.register(codexResponsesRoutes, { env: opts.env });
+
+  // Model-alias registry. Decorated unconditionally so route handlers can read
+  // `app.modelRegistry` without a flag check — with the alias feature off the
+  // registry simply serves static fallbacks (and increments the fallback
+  // metric) for every bucket. The background refresh loop below is what's
+  // actually gated on GATEWAY_ENABLE_MODEL_ALIAS.
+  // ModelRegistry reads only the two `GATEWAY_MODEL_REGISTRY_FALLBACK_*` string
+  // knobs from its `env` (via staticFallbackCatalog). Source them from the
+  // parsed `opts.env` so buildServer({ env }) callers (tests / embedded) can
+  // override fallbacks; the full ServerEnv carries boolean fields and isn't
+  // assignable to Record<string, string | undefined>, so project just the two
+  // string knobs into a fresh object.
+  const modelRegistry = new ModelRegistry({
+    env: {
+      GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC:
+        opts.env.GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC,
+      GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI:
+        opts.env.GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI,
+    },
+    fallbackMetric: (platform, bucketType) =>
+      app.gwMetrics.modelRegistryFallbackUsedTotal.inc({
+        platform,
+        bucket_type: bucketType,
+      }),
+    logger: app.log,
+    now: () => Date.now(),
+    // Bound per-bucket cache freshness to 2× the refresh cadence: a single
+    // missed/empty refresh is tolerated (stale-while-revalidate), but a
+    // sustained failure expires within ~2 cycles → the bucket degrades to the
+    // static fallback rather than serving stale ids forever. Derived from the
+    // existing refresh-interval knob (no new env knob).
+    ttlMs: opts.env.GATEWAY_MODEL_REGISTRY_REFRESH_SEC * 2 * 1000,
+  });
+  app.decorate("modelRegistry", modelRegistry);
+
+  // Background catalog refresh — gated on the feature flag AND on real (non
+  // test-injected) Redis, mirroring the cron gates below. The loop never blocks
+  // startup (refreshOnce is fire-and-forget) and never throws into the gateway:
+  // refreshOnce itself guards bucket discovery (logs + skips the cycle on
+  // failure) and the per-bucket RefreshDeps swallow/metric per-bucket fetch
+  // failures, degrading to fallbacks — so the `void`-ed calls below can never
+  // produce an unhandled rejection.
+  if (opts.redis === undefined && opts.env.GATEWAY_ENABLE_MODEL_ALIAS && app.db) {
+    const refreshDeps = buildRefreshDeps({
+      db: app.db,
+      env: opts.env,
+      fetchMetric: (platform, bucketType, result) =>
+        app.gwMetrics.modelRegistryFetchTotal.inc({
+          platform,
+          bucket_type: bucketType,
+          result,
+        }),
+      logger: app.log,
+    });
+    // One refresh on boot — do NOT await, startup must not block on upstreams.
+    void modelRegistry.refreshOnce(refreshDeps);
+    const refreshTimer = setInterval(
+      () => void modelRegistry.refreshOnce(refreshDeps),
+      opts.env.GATEWAY_MODEL_REGISTRY_REFRESH_SEC * 1000,
+    );
+    // Unref so the interval never holds the process / test runner open.
+    if (typeof refreshTimer.unref === "function") refreshTimer.unref();
+    app.addHook("onClose", async () => {
+      clearInterval(refreshTimer);
+    });
+  }
 
   // BullMQ wiring: skip when a test injected its own Redis (see BuildOpts docs).
   if (opts.redis === undefined) {
