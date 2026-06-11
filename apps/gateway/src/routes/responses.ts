@@ -323,10 +323,36 @@ export function makeResponsesRouteHandler(
     }
     const body = parsed.data;
 
-    // Cache scope `v1/responses` keyed on the Zod-validated body.
-    const clientBodyBuf = Buffer.from(JSON.stringify(body));
+    // Model-alias resolution (feat/model-alias-resolution). The Zod-validated
+    // client `model` is the alias; resolve it against the ANTHROPIC catalog
+    // (this branch translates Responses → Anthropic Messages and forwards to the
+    // Anthropic upstream) and rewrite the TRANSLATED body's `model` below.
+    // Resolved before the cache-key buffer so a single-bucket resolution keys
+    // the cache on the concrete id (Finding 1); mixed-bucket skips the cache.
+    const aliasScope = buildAliasScope(req);
+    const resolution = await applyModelResolution({
+      requested: body.model,
+      platform: "anthropic",
+      baseUrl:
+        opts.env.UPSTREAM_ANTHROPIC_BASE_URL || "https://api.anthropic.com",
+      enabled: opts.env.GATEWAY_ENABLE_MODEL_ALIAS,
+      registry: app.modelRegistry,
+      listCandidateTypes: () => listCandidateTypes(app.db, aliasScope),
+    });
+    if (resolution.upfront && resolution.upfront.wasAlias) {
+      applyAliasResolved(app, reply, resolution.upfront, "anthropic");
+    }
+
+    // Cache scope `v1/responses` keyed on the Zod-validated body. Single-bucket
+    // resolution swaps `model` to the resolved id so an alias request can't keep
+    // hitting a stale cached response after the registry remaps it (Finding 1).
+    // Mixed-bucket (`!resolution.cacheable`) skips the cache entirely.
+    const cacheKeyBody = resolution.upfront
+      ? { ...body, model: resolution.upfront.upstreamModel }
+      : body;
+    const clientBodyBuf = Buffer.from(JSON.stringify(cacheKeyBody));
     let cacheKey: string | null = null;
-    if (body.stream !== true) {
+    if (body.stream !== true && resolution.cacheable) {
       const result = await checkRouteCache({
         redis: app.redis,
         ttlSec: opts.env.GATEWAY_CACHE_TTL_SEC,
@@ -365,9 +391,15 @@ export function makeResponsesRouteHandler(
 
     const requestId = req.id;
     const isStream = body.stream === true;
-    const upstreamBody = isStream
+    // Single-bucket resolution bakes the resolved id into the TRANSLATED body's
+    // `model` up front (so the forwarded body carries the concrete id); mixed-
+    // bucket (`upfront === null`) defers to the per-attempt path.
+    const upstreamBody: Record<string, unknown> = isStream
       ? { ...anthropicBody, stream: true }
-      : anthropicBody;
+      : { ...anthropicBody };
+    if (resolution.upfront) {
+      upstreamBody.model = resolution.upfront.upstreamModel;
+    }
     const upstreamBodyBuf = Buffer.from(JSON.stringify(upstreamBody));
 
     if (isStream) {
@@ -378,13 +410,14 @@ export function makeResponsesRouteHandler(
         reply,
         upstreamBodyBuf,
         requestId,
-        body.model,
+        resolution.requestedModel,
+        resolution,
       );
       return;
     }
 
     const startedAtMs = Date.now();
-    const requestedModel = body.model;
+    const requestedModel = resolution.requestedModel;
 
     try {
       const responsesResp = await runFailover(buildFailoverInput(req, app.db, {
@@ -398,9 +431,46 @@ export function makeResponsesRouteHandler(
             account,
             requestId,
             async (credential) => {
+              // Alias resolution against the LIVE credential bucket.
+              //   * Mixed-bucket (`upfront === null`): rewrite the translated
+              //     body's model per the runtime type. Set-or-CLEAR the reply
+              //     header per attempt so a failed alias attempt can't leak a
+              //     stale `x-caliber-resolved-model` into a non-alias winner.
+              //   * Single-bucket (`upfront !== null`): the row id is baked into
+              //     `upstreamBodyBuf`; re-resolve and, on drift, rewrite to the
+              //     credential-derived id + warn/metric (invariant 5) and
+              //     re-point/clear the up-front reply header to match.
+              let attemptBodyBuf: Buffer = upstreamBodyBuf;
+              if (resolution.upfront === null) {
+                const ra = resolution.perAttempt(credential.type);
+                attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+                if (ra.wasAlias) {
+                  applyAliasResolved(app, reply, ra, "anthropic");
+                } else {
+                  reply.removeHeader("x-caliber-resolved-model");
+                }
+              } else if (resolution.upfront) {
+                const ra = resolution.perAttempt(credential.type);
+                attemptBodyBuf = applyUpfrontDrift(
+                  app,
+                  upstreamBodyBuf,
+                  resolution.upfront,
+                  ra,
+                  "anthropic",
+                  { requestId, accountId: account.id },
+                );
+                if (ra.upstreamModel !== resolution.upfront.upstreamModel) {
+                  if (ra.wasAlias) {
+                    reply.header("x-caliber-resolved-model", ra.upstreamModel);
+                  } else {
+                    reply.removeHeader("x-caliber-resolved-model");
+                  }
+                }
+              }
+
               const upstream = await callUpstreamMessages({
                 baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
-                body: upstreamBodyBuf,
+                body: attemptBodyBuf,
                 credential,
               });
 
@@ -444,7 +514,7 @@ export function makeResponsesRouteHandler(
                 app,
                 req,
                 requestId,
-                requestBodyJson: upstreamBodyBuf.toString("utf8"),
+                requestBodyJson: attemptBodyBuf.toString("utf8"),
                 responseBody: anthropicResp,
                 stream: false,
               });
@@ -675,9 +745,35 @@ async function runResponsesStreamingFailover(
   upstreamBodyBuf: Buffer,
   requestId: string,
   requestedModel: string,
+  resolution: ModelResolution,
 ): Promise<void> {
   reply.hijack();
   const startedAtMs = Date.now();
+
+  // Resolved upstream model for the synthetic usage shape: the usage_log's
+  // `upstream_model` must be the RESOLVED id (the captured `response.completed`
+  // usage block has no model field). Single-bucket: known up front; mixed-
+  // bucket: filled per-attempt below.
+  const upfrontUpstreamModel =
+    resolution.upfront?.upstreamModel ?? requestedModel;
+
+  // After `reply.hijack()` SSE headers are written via `reply.raw.writeHead`,
+  // so the resolved-model header is threaded through this box. Single-bucket:
+  // known up front. Mixed-bucket: filled per-attempt before the first byte.
+  const resolvedModelHeader: { value: string | null } = {
+    value:
+      resolution.upfront && resolution.upfront.wasAlias
+        ? resolution.upfront.upstreamModel
+        : null,
+  };
+  const streamHeaders = (): Record<string, string> => ({
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...(resolvedModelHeader.value
+      ? { "x-caliber-resolved-model": resolvedModelHeader.value }
+      : {}),
+  });
 
   // Wire AbortSignal from client disconnect so a hung upstream is cancelled.
   const ac = new AbortController();
@@ -696,9 +792,44 @@ async function runResponsesStreamingFailover(
           account,
           requestId,
           async (credential) => {
+            // Alias resolution against the LIVE credential bucket. Capture the
+            // resolved id for the SSE header box + synthetic usage upstream_model.
+            //   * Mixed-bucket (`upfront === null`): rewrite per runtime type;
+            //     reset the header box per attempt (a failed alias attempt must
+            //     not leak its id into a non-alias winner).
+            //   * Single-bucket (`upfront !== null`): re-resolve and, on drift,
+            //     rewrite to the credential-derived id + warn/metric (invariant
+            //     5) and re-point the SSE header box at what was actually sent.
+            let attemptBodyBuf: Buffer = upstreamBodyBuf;
+            let attemptUpstreamModel = upfrontUpstreamModel;
+            if (resolution.upfront === null) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+              attemptUpstreamModel = ra.upstreamModel;
+              resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
+              if (ra.wasAlias) {
+                app.gwMetrics.modelAliasResolvedTotal.inc({
+                  platform: "anthropic",
+                  family: ra.family ?? "",
+                });
+              }
+            } else if (resolution.upfront) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = applyUpfrontDrift(
+                app,
+                upstreamBodyBuf,
+                resolution.upfront,
+                ra,
+                "anthropic",
+                { requestId, accountId: account.id },
+              );
+              attemptUpstreamModel = ra.upstreamModel;
+              resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
+            }
+
             const upstream = await callUpstreamMessages({
               baseUrl: opts.env.UPSTREAM_ANTHROPIC_BASE_URL,
-              body: upstreamBodyBuf,
+              body: attemptBodyBuf,
               credential,
               signal: ac.signal,
             });
@@ -730,11 +861,7 @@ async function runResponsesStreamingFailover(
             } | null = null;
 
             if (!reply.raw.headersSent) {
-              reply.raw.writeHead(200, {
-                "content-type": "text/event-stream",
-                "cache-control": "no-cache",
-                connection: "keep-alive",
-              });
+              reply.raw.writeHead(200, streamHeaders());
             }
 
             const translator = makeAnthropicToResponsesStream();
@@ -783,10 +910,13 @@ async function runResponsesStreamingFailover(
             // Anthropic API surfaces `cache_read_input_tokens` only on
             // message_start, which `makeAnthropicToResponsesStream` already
             // folded into `input_tokens_details.cached_tokens`.
+            // `upstream_model` must be the RESOLVED upstream id, NOT the alias
+            // (the captured usage block carries no model field). `requested_model`
+            // stays the alias via `requestedModel` on emitUsageLog.
             const upstreamResponse = completedUsage
               ? syntheticAnthropicFromResponsesUsage(
                   completedUsage,
-                  requestedModel,
+                  attemptUpstreamModel,
                   requestId,
                 )
               : null;
@@ -805,7 +935,7 @@ async function runResponsesStreamingFailover(
               app,
               req,
               requestId,
-              requestBodyJson: upstreamBodyBuf.toString("utf8"),
+              requestBodyJson: attemptBodyBuf.toString("utf8"),
               responseBody: null,
               stream: true,
             });
