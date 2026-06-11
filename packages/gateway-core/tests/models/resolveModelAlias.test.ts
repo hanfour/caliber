@@ -59,3 +59,54 @@ describe("resolveModelAlias (openai, conservative)", () => {
     expect(resolveModelAlias("gpt", "openai", O)).toEqual({ resolved: "gpt", wasAlias: false });
   });
 });
+
+describe("resolveModelAlias (openai, dotted-version catalog)", () => {
+  const dotted: ModelCatalogEntry[] = [
+    { id: "gpt-5.4-mini", created: 100 },
+    { id: "gpt-5.4", created: 100 },
+  ];
+
+  it("resolves gpt-5 to gpt-5.4 (mini excluded)", () => {
+    const r = resolveModelAlias("gpt-5", "openai", dotted);
+    expect(r.resolved).toBe("gpt-5.4");
+    expect(r.wasAlias).toBe(true);
+  });
+
+  it("resolves gpt-5-latest to gpt-5.4", () => {
+    const r = resolveModelAlias("gpt-5-latest", "openai", dotted);
+    expect(r.resolved).toBe("gpt-5.4");
+    expect(r.wasAlias).toBe(true);
+  });
+
+  it("picks the newest dotted version by created", () => {
+    const cat: ModelCatalogEntry[] = [
+      { id: "gpt-5.3", created: 1 },
+      { id: "gpt-5.4", created: 2 },
+    ];
+    expect(resolveModelAlias("gpt-5", "openai", cat).resolved).toBe("gpt-5.4");
+  });
+
+  it("does NOT swallow a different family (gpt-5 vs gpt-50.1)", () => {
+    const cat: ModelCatalogEntry[] = [{ id: "gpt-50.1", created: 1 }];
+    expect(resolveModelAlias("gpt-5", "openai", cat)).toEqual({
+      resolved: "gpt-5",
+      wasAlias: false,
+    });
+  });
+
+  it("excludes non-version suffix segments (gpt-5-codex) but resolves real versions", () => {
+    const cat: ModelCatalogEntry[] = [
+      { id: "gpt-5-codex", created: 5 },
+      { id: "gpt-5.4", created: 1 },
+    ];
+    expect(resolveModelAlias("gpt-5", "openai", cat).resolved).toBe("gpt-5.4");
+  });
+
+  it("passes through when the only suffix is non-version (gpt-5-codex alone)", () => {
+    const cat: ModelCatalogEntry[] = [{ id: "gpt-5-codex", created: 5 }];
+    expect(resolveModelAlias("gpt-5", "openai", cat)).toEqual({
+      resolved: "gpt-5",
+      wasAlias: false,
+    });
+  });
+});

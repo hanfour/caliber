@@ -45,17 +45,20 @@ function familyMembers(
 const OPENAI_SUBMODEL_WORDS = ["mini", "nano", "micro", "turbo", "preview"];
 
 function openaiFamilyMembers(family: string, catalog: ModelCatalogEntry[]): ModelCatalogEntry[] {
-  const prefix = `${family}-`;
   return catalog.filter((e) => {
-    if (!e.id.startsWith(prefix)) return false;
-    // The segment immediately after the family prefix must NOT be:
-    // 1. Another sub-model keyword (mini/nano/…) — otherwise gpt-5 would swallow gpt-5-mini
-    // 2. Another family component (must look like a version/date, not a model number)
-    const rest = e.id.slice(prefix.length);
-    const nextWord = rest.split("-")[0] ?? "";
-    if (OPENAI_SUBMODEL_WORDS.includes(nextWord)) return false;
-    // Must have 4+ consecutive digits (year-like) or full version pattern (e.g., v4-turbo)
-    // to distinguish from family components like "5" in gpt-5
-    return /^\d{4}/.test(nextWord);
+    if (!e.id.startsWith(family)) return false;
+    // The family must be followed immediately by a version separator, so
+    // family "gpt-5" does NOT swallow a different family like "gpt-50.1".
+    const sep = e.id[family.length];
+    if (sep !== "-" && sep !== ".") return false;
+    const rest = e.id.slice(family.length + 1);
+    if (rest.length === 0) return false;
+    const segments = rest.split(/[-.]/);
+    // Exclude sub-model variants anywhere in the suffix (gpt-5-mini, gpt-5.4-mini).
+    if (segments.some((s) => OPENAI_SUBMODEL_WORDS.includes(s))) return false;
+    const first = segments[0] ?? "";
+    // Dotted version (gpt-5.4 → "4"): pure-numeric version segment.
+    // Dated/hyphenated (gpt-5-2025-09-01 → "2025"): conservative 4-digit year prefix.
+    return sep === "." ? /^\d+$/.test(first) : /^\d{4}/.test(first);
   });
 }

@@ -161,6 +161,34 @@ describe("gateway server", () => {
     await app.close();
   });
 
+  it("ModelRegistry honors GATEWAY_MODEL_REGISTRY_FALLBACK_* overrides from the parsed opts.env (not process.env)", async () => {
+    // Finding 2: buildServer must source the two fallback knobs from the parsed
+    // opts.env. With the old `env: process.env` wiring this override (set only
+    // on opts.env) would NOT reach the registry and the default catalog would
+    // be served instead.
+    const app = await buildServer({
+      env: makeEnv({
+        ENABLE_GATEWAY: "true",
+        GATEWAY_BASE_URL: "http://localhost:3002",
+        REDIS_URL: "redis://localhost:6379",
+        CREDENTIAL_ENCRYPTION_KEY: "a".repeat(64),
+        API_KEY_HASH_PEPPER: "b".repeat(64),
+        GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI: "gpt-override-9-9, gpt-override-9-9-mini",
+      }),
+      db: {} as never,
+      redis: new RedisMock() as unknown as Redis,
+    });
+    // Cold cache → registry serves the static fallback, which must reflect the
+    // parsed-env override.
+    const cat = app.modelRegistry.get({
+      platform: "openai",
+      baseUrl: "https://sub2api.example",
+      credentialType: "api_key",
+    });
+    expect(cat.map((e) => e.id)).toEqual(["gpt-override-9-9", "gpt-override-9-9-mini"]);
+    await app.close();
+  });
+
   it("app.close() is idempotent / does not throw when BullMQ wiring is skipped", async () => {
     // Regression guard: the onClose hook only fires when wireUsageLogPipeline()
     // ran, so the test-mode path (opts.redis injected) must close cleanly with

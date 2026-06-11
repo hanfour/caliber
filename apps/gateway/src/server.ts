@@ -184,12 +184,19 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
   // registry simply serves static fallbacks (and increments the fallback
   // metric) for every bucket. The background refresh loop below is what's
   // actually gated on GATEWAY_ENABLE_MODEL_ALIAS.
-  // ModelRegistry reads only the string `GATEWAY_MODEL_REGISTRY_FALLBACK_*`
-  // knobs from its `env` (via staticFallbackCatalog), so pass the raw
-  // string-keyed process.env rather than the typed ServerEnv (which carries
-  // boolean fields and does not satisfy Record<string, string | undefined>).
+  // ModelRegistry reads only the two `GATEWAY_MODEL_REGISTRY_FALLBACK_*` string
+  // knobs from its `env` (via staticFallbackCatalog). Source them from the
+  // parsed `opts.env` so buildServer({ env }) callers (tests / embedded) can
+  // override fallbacks; the full ServerEnv carries boolean fields and isn't
+  // assignable to Record<string, string | undefined>, so project just the two
+  // string knobs into a fresh object.
   const modelRegistry = new ModelRegistry({
-    env: process.env,
+    env: {
+      GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC:
+        opts.env.GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC,
+      GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI:
+        opts.env.GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI,
+    },
     fallbackMetric: (platform, bucketType) =>
       app.gwMetrics.modelRegistryFallbackUsedTotal.inc({
         platform,
