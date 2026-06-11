@@ -197,7 +197,10 @@ let openaiBaseUrl: string;
 
 // ── Environment helper ───────────────────────────────────────────────────────
 
-function buildEnv(connectionString: string): Record<string, unknown> {
+function buildEnv(
+  connectionString: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     NODE_ENV: "test",
     DATABASE_URL: connectionString,
@@ -218,6 +221,7 @@ function buildEnv(connectionString: string): Record<string, unknown> {
     UPSTREAM_OPENAI_BASE_URL: fakeBaseUrl,
     // Turn the model-alias resolver ON for this suite.
     GATEWAY_ENABLE_MODEL_ALIAS: "true",
+    ...extra,
   };
 }
 
@@ -396,6 +400,53 @@ async function seedOauthBucket(
 }
 
 /**
+ * Seed an OpenAI account whose ROW type is `oauth` but whose DECRYPTED
+ * credential is actually an `api_key` (a stale `upstream_accounts.type`). Used
+ * by the single-bucket DRIFT test: `listCandidateTypes` reports `oauth` (single
+ * bucket → up-front resolution against the oauth catalog), but the live
+ * credential decrypts as `api_key` → the attempt must re-resolve against the
+ * api_key catalog (design invariant 5 / Finding 2). The api_key `api_key` value
+ * is `token` so the fake upstream can echo it / target it.
+ */
+async function seedRowOauthCredApiKeyAccount(
+  orgId: string,
+  groupId: string,
+  token: string,
+): Promise<string> {
+  const [acct] = await db
+    .insert(upstreamAccounts)
+    .values({
+      orgId,
+      name: "openai-drift-acct",
+      platform: "openai",
+      // ROW says oauth — this is the stale hint listCandidateTypes reads.
+      type: "oauth",
+      schedulable: true,
+      status: "active",
+    })
+    .returning();
+
+  // But the vault holds an api_key credential — the live decrypted class.
+  const sealed = encryptCredential({
+    masterKeyHex: masterKey,
+    accountId: acct!.id,
+    plaintext: JSON.stringify({ type: "api_key", api_key: token }),
+  });
+  await db.insert(credentialVault).values({
+    accountId: acct!.id,
+    nonce: sealed.nonce,
+    ciphertext: sealed.ciphertext,
+    authTag: sealed.authTag,
+  });
+
+  await db
+    .insert(accountGroupMembers)
+    .values({ accountId: acct!.id, groupId, priority: 50 });
+
+  return acct!.id;
+}
+
+/**
  * Swap the app's scheduler for a deterministic one (`topK: 1`, `random: 0`)
  * so failover order is fixed: the lowest-priority-number member is attempt-1,
  * the next is attempt-2. Lets the mixed-bucket test force a specific bucket to
@@ -410,6 +461,26 @@ async function makeDeterministic(app: FastifyInstance): Promise<void> {
     random: () => 0,
   });
   (app as unknown as { gwScheduler: unknown }).gwScheduler = scheduler;
+}
+
+/** Read a prom-client counter's value for a specific label set (0 if absent). */
+async function counterValue(
+  counter: {
+    get: () => Promise<{
+      values: Array<{ value: number; labels: Record<string, string | number> }>;
+    }>;
+  },
+  match: Record<string, string>,
+): Promise<number> {
+  const snapshot = await counter.get();
+  let total = 0;
+  for (const v of snapshot.values) {
+    const ok = Object.entries(match).every(
+      ([k, val]) => String(v.labels[k]) === val,
+    );
+    if (ok) total += v.value;
+  }
+  return total;
 }
 
 // ── App factory ───────────────────────────────────────────────────────────────
@@ -434,9 +505,10 @@ async function makeApp(
       ],
     );
   },
+  extraEnv: Record<string, unknown> = {},
 ): Promise<FastifyInstance> {
   const { parseServerEnv } = await import("@caliber/config");
-  const env = parseServerEnv(buildEnv(connectionString));
+  const env = parseServerEnv(buildEnv(connectionString, extraEnv));
   openaiBaseUrl = env.UPSTREAM_OPENAI_BASE_URL;
   const app = await buildServer({ env, db, redis: redisMock });
   setupRegistry(app, openaiBaseUrl);
@@ -679,6 +751,208 @@ describe("POST /v1/responses (openai passthrough) — model alias resolution", (
     expect(rows.length).toBe(1);
     expect(rows[0]!.requestedModel).toBe("gpt-5");
     expect(rows[0]!.upstreamModel).toBe("gpt-5");
+
+    await app.close();
+  });
+
+  // Finding 2: single-bucket DRIFT on /v1/responses openai passthrough.
+  //
+  // ONE account → `listCandidateTypes` returns a single type → single-bucket
+  // up-front resolution. But the row type (`oauth`) ≠ the decrypted credential
+  // type (`api_key`): a stale `upstream_accounts.type`. The up-front resolution
+  // runs against the OAUTH catalog; the live attempt must re-resolve against the
+  // API_KEY catalog (design invariant 5) and rewrite the body to the
+  // credential-derived id, emit the drift warn + `gw_model_alias_bucket_drift_total`,
+  // and keep the response header consistent with what was actually sent upstream.
+  it("single-bucket drift: row type ≠ credential type → live call re-resolves against the credential bucket, drift metric + header consistent", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId);
+    const rawKey = `ak_oai_drift_${Math.random().toString(36).slice(2)}`;
+    await seedKey(orgId, userId, rawKey, groupId);
+    const apiToken = `sk-drift-${Math.random().toString(36).slice(2)}`;
+    await seedRowOauthCredApiKeyAccount(orgId, groupId, apiToken);
+
+    // oauth (row-type) catalog resolves `gpt-5` to one id; api_key
+    // (credential-derived) catalog resolves it to a DIFFERENT id → observable
+    // drift on the wire.
+    const OAUTH_RESOLVED = "gpt-5-2025-10-01";
+    const APIKEY_RESOLVED = "gpt-5-2099-01-01";
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri(), (a, baseUrl) => {
+      a.modelRegistry.set(
+        { platform: "openai", baseUrl, credentialType: "oauth" },
+        [{ id: OAUTH_RESOLVED, created: 1_700_000_000 }],
+      );
+      a.modelRegistry.set(
+        { platform: "openai", baseUrl, credentialType: "api_key" },
+        [{ id: APIKEY_RESOLVED, created: 1_900_000_000 }],
+      );
+    });
+
+    const before = await counterValue(app.gwMetrics.modelAliasBucketDriftTotal, {
+      platform: "openai",
+    });
+    const warnings: unknown[] = [];
+    const origWarn = app.log.warn.bind(app.log);
+    (app.log as unknown as { warn: (...a: unknown[]) => void }).warn = (
+      ...args: unknown[]
+    ) => {
+      warnings.push(args[0]);
+      return origWarn(...(args as Parameters<typeof origWarn>));
+    };
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { model: "gpt-5", input: "hi", max_output_tokens: 8 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // The LIVE attempt re-resolved against the credential (api_key) bucket: the
+    // upstream received the credential-derived id, NOT the oauth row-type id.
+    expect(receivedModel).toBe(APIKEY_RESOLVED);
+    // The response header advertises the SAME id the upstream actually got.
+    expect(res.headers["x-caliber-resolved-model"]).toBe(APIKEY_RESOLVED);
+
+    // Drift metric incremented + warn emitted.
+    const after = await counterValue(app.gwMetrics.modelAliasBucketDriftTotal, {
+      platform: "openai",
+    });
+    expect(after).toBe(before + 1);
+    const droveDrift = warnings.some(
+      (w) =>
+        typeof w === "object" &&
+        w !== null &&
+        "rowResolvedModel" in (w as Record<string, unknown>),
+    );
+    expect(droveDrift).toBe(true);
+
+    // usage_log: requested stays the alias; upstream_model is the
+    // credential-derived (drift) id, NOT the row-type up-front id.
+    const rows = await pollUsageRows(orgId, userId);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.requestedModel).toBe("gpt-5");
+    expect(rows[0]!.upstreamModel).toBe(APIKEY_RESOLVED);
+
+    await app.close();
+  });
+
+  // Finding 4: mixed-bucket NON-STREAM failover must not leak a stale
+  // `x-caliber-resolved-model` header from a FAILED alias attempt.
+  //
+  // attempt-1 (oauth bucket, priority 10) resolves `gpt-5` as an alias →
+  // `applyAliasResolved` mutates the reply header — but the fake upstream 503s
+  // its token → failover. attempt-2 (api_key bucket, priority 50) is NOT an
+  // alias and wins. The winning non-alias attempt must CLEAR the header so the
+  // response does NOT advertise the stale attempt-1 id.
+  it("mixed-bucket non-stream failover: winning non-alias attempt clears the stale header (no leak)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId);
+    const rawKey = `ak_oai_leak_${Math.random().toString(36).slice(2)}`;
+    await seedKey(orgId, userId, rawKey, groupId);
+
+    const oauthToken = `oauth-fail-${Math.random().toString(36).slice(2)}`;
+    const apiToken = `sk-win-${Math.random().toString(36).slice(2)}`;
+    await seedOauthBucket(orgId, groupId, oauthToken, 10);
+    await seedApiKeyBucket(orgId, groupId, apiToken, 50);
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri(), (a, baseUrl) => {
+      // oauth bucket: `gpt-5` resolves (alias) → sets the reply header.
+      a.modelRegistry.set(
+        { platform: "openai", baseUrl, credentialType: "oauth" },
+        [{ id: RESOLVED, created: 1_700_000_000 }],
+      );
+      // api_key bucket: NO gpt-5 family → `gpt-5` passes through unchanged.
+      a.modelRegistry.set(
+        { platform: "openai", baseUrl, credentialType: "api_key" },
+        [{ id: "gpt-4o-mini", created: 1_700_000_000 }],
+      );
+    });
+    await makeDeterministic(app);
+    failTokens.add(oauthToken);
+
+    // NON-stream (no stream:true) so the reply-header mutate path is exercised.
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/responses",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { model: "gpt-5", input: "hi", max_output_tokens: 8 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Both buckets tried in order: oauth (alias→503) then api_key (win).
+    expect(receivedModels[0]).toBe(RESOLVED); // attempt-1 sent the resolved id
+    expect(receivedModels[receivedModels.length - 1]).toBe("gpt-5"); // winner passthrough
+    // Finding 4: the winning non-alias attempt CLEARED the header → NOT the
+    // stale attempt-1 resolved id, and ABSENT entirely.
+    expect(res.headers["x-caliber-resolved-model"]).toBeUndefined();
+
+    const rows = await pollUsageRows(orgId, userId);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.requestedModel).toBe("gpt-5");
+    expect(rows[0]!.upstreamModel).toBe("gpt-5");
+
+    await app.close();
+  });
+
+  // Finding 5: /v1/chat/completions single-bucket cache key includes the
+  // RESOLVED model. First call MISS (resolves + dispatches + caches under the
+  // resolved-model key), second identical call HIT (served from cache, upstream
+  // NOT re-hit) and still carries the resolved-model header.
+  it("/v1/chat/completions: cache key uses the resolved model — MISS then HIT, header preserved", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId);
+    const rawKey = `ak_oai_chatcache_${Math.random().toString(36).slice(2)}`;
+    await seedKey(orgId, userId, rawKey, groupId);
+    await seedGroupApiKeyAccount(orgId, groupId);
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri(), undefined, {
+      GATEWAY_CACHE_TTL_SEC: "60",
+    });
+
+    const payload = {
+      model: "gpt-5",
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 8,
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload,
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["x-cache"]).toBe("miss");
+    expect(first.headers["x-caliber-resolved-model"]).toBe(RESOLVED);
+    // Upstream received the resolved id on the miss.
+    expect(receivedModels).toEqual([RESOLVED]);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.headers["x-cache"]).toBe("hit");
+    // The cached reply still carries the resolved-model header.
+    expect(second.headers["x-caliber-resolved-model"]).toBe(RESOLVED);
+    // Upstream was only ever hit ONCE (the miss); the HIT short-circuited — so
+    // the cache key was keyed on the resolved body that maps to this entry.
+    expect(receivedModels).toEqual([RESOLVED]);
 
     await app.close();
   });

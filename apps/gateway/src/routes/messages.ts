@@ -406,8 +406,14 @@ async function runNonStreamFailover(
         if (resolution && resolution.upfront === null) {
           const ra = resolution.perAttempt(credential.type);
           attemptBodyBuf = rewriteUpstreamModel(upstreamBodyBuf, ra);
+          // Set-or-CLEAR per attempt (Finding 4): failover attempts run
+          // sequentially and the winner is the last executed, so a failed
+          // alias attempt must not leave a stale `x-caliber-resolved-model`
+          // header advertising an id the winning non-alias attempt never sent.
           if (ra.wasAlias) {
             applyAliasResolved(app, reply, ra, "anthropic");
+          } else {
+            reply.removeHeader("x-caliber-resolved-model");
           }
         } else if (resolution && resolution.upfront) {
           const ra = resolution.perAttempt(credential.type);

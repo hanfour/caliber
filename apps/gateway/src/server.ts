@@ -212,6 +212,7 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
           bucket_type: bucketType,
           result,
         }),
+      logger: app.log,
     });
     // One refresh on boot — do NOT await, startup must not block on upstreams.
     void modelRegistry.refreshOnce(refreshDeps);

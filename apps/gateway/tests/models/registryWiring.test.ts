@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ResolvedCredential } from "../../src/runtime/resolveCredential.js";
-import { authHeadersFor, baseUrlFor } from "../../src/models/registryWiring.js";
+import type { Database } from "@caliber/db";
+import type { BucketKey } from "@caliber/gateway-core/models";
+import {
+  authHeadersFor,
+  baseUrlFor,
+  buildRefreshDeps,
+} from "../../src/models/registryWiring.js";
 
 const apiKeyCred: ResolvedCredential = { type: "api_key", apiKey: "sk-test-123" };
 const oauthCred: ResolvedCredential = {
@@ -58,5 +64,85 @@ describe("baseUrlFor", () => {
 
   it("openai with no base url configured → empty string", () => {
     expect(baseUrlFor("openai", {})).toBe("");
+  });
+});
+
+// ── Finding 3: registry refresh must not poison a bucket with a wrong-class
+//    credential. `pickAccountId` selects by ROW type; if the decrypted
+//    credential disagrees (stale `upstream_accounts.type`), the fetch must be
+//    skipped (no upstream call with mismatched creds) and the bucket degrade to
+//    its static fallback. ───────────────────────────────────────────────────
+
+const oauthBucket: BucketKey = {
+  platform: "openai",
+  baseUrl: "https://sub2api.example",
+  credentialType: "oauth",
+};
+
+/** A `db` stub whose `pickAccountId` query returns one active row id. */
+function dbReturningAccountId(accountId: string | null): Database {
+  return {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => Promise.resolve(accountId ? [{ id: accountId }] : []),
+        }),
+      }),
+    }),
+  } as unknown as Database;
+}
+
+describe("buildRefreshDeps.fetchForBucket — credential-type guard (Finding 3)", () => {
+  it("skips fetch + emits 'error' when decrypted credential class ≠ bucket type", async () => {
+    const fetchMetric = vi.fn();
+    const fetchSpy = vi.fn();
+    // Row says oauth (so pickAccountId picked it for the oauth bucket), but the
+    // decrypted credential is actually an api_key → mismatch.
+    const mismatchedCred: ResolvedCredential = {
+      type: "api_key",
+      apiKey: "sk-stale-row",
+    };
+    const deps = buildRefreshDeps({
+      db: dbReturningAccountId("acct-1"),
+      env: {
+        UPSTREAM_OPENAI_BASE_URL: "https://sub2api.example",
+        CREDENTIAL_ENCRYPTION_KEY: "k".repeat(64),
+      },
+      fetchMetric,
+      fetchImpl: fetchSpy as unknown as typeof fetch,
+      resolveCredentialImpl: () => Promise.resolve(mismatchedCred),
+    });
+
+    const result = await deps.fetchForBucket(oauthBucket);
+
+    // Degrades to [] so the bucket keeps its static fallback.
+    expect(result).toEqual([]);
+    // Emits the fetch metric as "error" (clear signal of a stale row).
+    expect(fetchMetric).toHaveBeenCalledWith("openai", "oauth", "error");
+    // Crucially: the upstream /v1/models fetch was NEVER called with the
+    // wrong-class credential.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 'error' + [] when no active account exists for the bucket", async () => {
+    const fetchMetric = vi.fn();
+    const fetchSpy = vi.fn();
+    const deps = buildRefreshDeps({
+      db: dbReturningAccountId(null),
+      env: {
+        UPSTREAM_OPENAI_BASE_URL: "https://sub2api.example",
+        CREDENTIAL_ENCRYPTION_KEY: "k".repeat(64),
+      },
+      fetchMetric,
+      fetchImpl: fetchSpy as unknown as typeof fetch,
+      resolveCredentialImpl: () =>
+        Promise.reject(new Error("should not resolve when no account")),
+    });
+
+    const result = await deps.fetchForBucket(oauthBucket);
+
+    expect(result).toEqual([]);
+    expect(fetchMetric).toHaveBeenCalledWith("openai", "oauth", "error");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

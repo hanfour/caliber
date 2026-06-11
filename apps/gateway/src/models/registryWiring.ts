@@ -1,7 +1,10 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { upstreamAccounts, type Database } from "@caliber/db";
 import type { BucketKey, ModelCatalogEntry, Platform } from "@caliber/gateway-core/models";
-import { resolveCredential, type ResolvedCredential } from "../runtime/resolveCredential.js";
+import {
+  resolveCredential,
+  type ResolvedCredential,
+} from "../runtime/resolveCredential.js";
 import { fetchModelCatalog } from "./modelCatalogFetch.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -109,7 +112,23 @@ export function buildRefreshDeps(opts: {
     result: "ok" | "empty" | "error",
   ) => void;
   fetchImpl?: typeof fetch;
+  /**
+   * Credential decryption seam. Defaults to the real `resolveCredential`;
+   * tests inject a stub to exercise the credential-type guard below without
+   * a live vault row.
+   */
+  resolveCredentialImpl?: (
+    db: Database,
+    accountId: string,
+    o: { masterKeyHex: string },
+  ) => Promise<ResolvedCredential>;
+  /**
+   * Optional structured logger for the credential-mismatch skip path so ops
+   * can spot stale `upstream_accounts.type` rows. Defaults to a no-op.
+   */
+  logger?: { warn: (obj: unknown, msg: string) => void };
 }) {
+  const resolveCred = opts.resolveCredentialImpl ?? resolveCredential;
   return {
     discoverBuckets: () => discoverBuckets(opts.db, opts.env),
     fetchForBucket: async (b: BucketKey): Promise<ModelCatalogEntry[]> => {
@@ -119,9 +138,28 @@ export function buildRefreshDeps(opts: {
           opts.fetchMetric(b.platform, b.credentialType, "error");
           return [];
         }
-        const cred = await resolveCredential(opts.db, accountId, {
+        const cred = await resolveCred(opts.db, accountId, {
           masterKeyHex: opts.env.CREDENTIAL_ENCRYPTION_KEY!,
         });
+        // Finding 3: `pickAccountId` selects by the ROW's
+        // `upstream_accounts.type`, but that hint can be stale. If the
+        // DECRYPTED credential's class disagrees with the bucket type, fetching
+        // would key a catalog under an entitlement the credential doesn't
+        // actually have (poisoning the bucket). Skip the fetch, emit "error",
+        // and degrade to the static fallback rather than trust the stale row.
+        if (cred.type !== b.credentialType) {
+          opts.logger?.warn(
+            {
+              platform: b.platform,
+              accountId,
+              bucketType: b.credentialType,
+              credentialType: cred.type,
+            },
+            "model-registry refresh: stale upstream_accounts.type — decrypted credential class ≠ bucket type; skipping fetch (bucket stays on static fallback)",
+          );
+          opts.fetchMetric(b.platform, b.credentialType, "error");
+          return [];
+        }
         const headers = authHeadersFor(b.platform, cred);
         const cat = await fetchModelCatalog(b.platform, b.baseUrl, {
           authHeaders: headers,

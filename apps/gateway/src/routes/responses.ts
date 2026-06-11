@@ -80,6 +80,7 @@ import {
   buildAliasScope,
   applyAliasResolved,
   rewriteUpstreamModel,
+  applyUpfrontDrift,
 } from "../models/aliasWiring.js";
 import type {
   NonStreamUpstreamResult,
@@ -909,10 +910,20 @@ async function runOpenaiResponsesPassthroughFailover(
           account,
           requestId,
           async (credential) => {
-            // Mixed-bucket alias resolution: the served bucket is only known
-            // now that a credential is resolved, so rewrite the body's model
-            // per the runtime type. Single-bucket already baked the resolved
-            // id into `upstreamBodyBuf` up front (no rewrite).
+            // Alias resolution against the LIVE credential bucket.
+            //   * Mixed-bucket (`upfront === null`): the served bucket is only
+            //     known now that a credential is resolved, so rewrite the
+            //     body's model per the runtime type. Set-or-CLEAR the reply
+            //     header per attempt so a failed alias attempt can't leak a
+            //     stale `x-caliber-resolved-model` into a later non-alias
+            //     winner (Finding 4 — failover attempts run sequentially, so
+            //     the last-executed winner determines the final header).
+            //   * Single-bucket (`upfront !== null`): the row-type id is already
+            //     baked into `upstreamBodyBuf`, but the row hint may be stale —
+            //     re-resolve and, on drift, rewrite to the credential-derived id
+            //     + warn/metric (design invariant 5, Finding 2). Re-point or
+            //     clear the up-front reply header to match what is actually
+            //     sent upstream.
             let attemptBodyBuf: Buffer = upstreamBodyBuf;
             let attemptUpstreamModel = upfrontUpstreamModel;
             if (resolution.upfront === null) {
@@ -921,6 +932,26 @@ async function runOpenaiResponsesPassthroughFailover(
               attemptUpstreamModel = ra.upstreamModel;
               if (ra.wasAlias) {
                 applyAliasResolved(app, reply, ra, "openai");
+              } else {
+                reply.removeHeader("x-caliber-resolved-model");
+              }
+            } else if (resolution.upfront) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = applyUpfrontDrift(
+                app,
+                upstreamBodyBuf,
+                resolution.upfront,
+                ra,
+                "openai",
+                { requestId, accountId: account.id },
+              );
+              attemptUpstreamModel = ra.upstreamModel;
+              if (ra.upstreamModel !== resolution.upfront.upstreamModel) {
+                if (ra.wasAlias) {
+                  reply.header("x-caliber-resolved-model", ra.upstreamModel);
+                } else {
+                  reply.removeHeader("x-caliber-resolved-model");
+                }
               }
             }
 
@@ -1123,11 +1154,17 @@ async function runOpenaiResponsesStreamingPassthrough(
           account,
           requestId,
           async (credential) => {
-            // Mixed-bucket alias resolution: rewrite the body's model for the
-            // chosen credential bucket (single-bucket already baked into
-            // `upstreamBodyBuf`). Capture the resolved id so the SSE headers
-            // carry it before any byte and so the synthetic usage's
-            // `upstream_model` matches what was actually sent upstream.
+            // Alias resolution against the LIVE credential bucket. Capture the
+            // resolved id so the SSE headers carry it before any byte and so
+            // the synthetic usage's `upstream_model` matches what was actually
+            // sent upstream.
+            //   * Mixed-bucket (`upfront === null`): rewrite per the runtime
+            //     type; reset the header box per attempt (a failed alias
+            //     attempt must not leak its id into a non-alias winner).
+            //   * Single-bucket (`upfront !== null`): the row id is baked into
+            //     `upstreamBodyBuf`; re-resolve and, on drift, rewrite to the
+            //     credential-derived id + warn/metric (Finding 2) and re-point
+            //     the SSE header box at what was actually sent upstream.
             let attemptBodyBuf: Buffer = upstreamBodyBuf;
             let attemptUpstreamModel = upfrontUpstreamModel;
             if (resolution.upfront === null) {
@@ -1144,6 +1181,21 @@ async function runOpenaiResponsesStreamingPassthrough(
                   family: ra.family ?? "",
                 });
               }
+            } else if (resolution.upfront) {
+              const ra = resolution.perAttempt(credential.type);
+              attemptBodyBuf = applyUpfrontDrift(
+                app,
+                upstreamBodyBuf,
+                resolution.upfront,
+                ra,
+                "openai",
+                { requestId, accountId: account.id },
+              );
+              attemptUpstreamModel = ra.upstreamModel;
+              // Reset per attempt (not only on drift): on no-drift this
+              // re-affirms the correct id; on drift it re-points the SSE header
+              // at the credential-derived id the live call actually used.
+              resolvedModelHeader.value = ra.wasAlias ? ra.upstreamModel : null;
             }
 
             const upstream = await callUpstreamResponses({
