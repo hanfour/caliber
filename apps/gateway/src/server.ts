@@ -202,13 +202,24 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
         platform,
         bucket_type: bucketType,
       }),
+    logger: app.log,
+    now: () => Date.now(),
+    // Bound per-bucket cache freshness to 2× the refresh cadence: a single
+    // missed/empty refresh is tolerated (stale-while-revalidate), but a
+    // sustained failure expires within ~2 cycles → the bucket degrades to the
+    // static fallback rather than serving stale ids forever. Derived from the
+    // existing refresh-interval knob (no new env knob).
+    ttlMs: opts.env.GATEWAY_MODEL_REGISTRY_REFRESH_SEC * 2 * 1000,
   });
   app.decorate("modelRegistry", modelRegistry);
 
   // Background catalog refresh — gated on the feature flag AND on real (non
   // test-injected) Redis, mirroring the cron gates below. The loop never blocks
-  // startup (refreshOnce is fire-and-forget) and never throws into the gateway
-  // (RefreshDeps swallow per-bucket failures and degrade to fallbacks).
+  // startup (refreshOnce is fire-and-forget) and never throws into the gateway:
+  // refreshOnce itself guards bucket discovery (logs + skips the cycle on
+  // failure) and the per-bucket RefreshDeps swallow/metric per-bucket fetch
+  // failures, degrading to fallbacks — so the `void`-ed calls below can never
+  // produce an unhandled rejection.
   if (opts.redis === undefined && opts.env.GATEWAY_ENABLE_MODEL_ALIAS && app.db) {
     const refreshDeps = buildRefreshDeps({
       db: app.db,
