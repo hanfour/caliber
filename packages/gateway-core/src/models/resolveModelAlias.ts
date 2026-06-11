@@ -35,11 +35,27 @@ function familyMembers(
   catalog: ModelCatalogEntry[],
 ): ModelCatalogEntry[] {
   if (platform === "anthropic") {
-    const prefix = `${family}-`;
-    return catalog.filter((e) => e.id.startsWith(prefix));
+    return anthropicFamilyMembers(family, catalog);
   }
   // openai handled in a later task (conservative). Default: no match for now.
   return openaiFamilyMembers(family, catalog);
+}
+
+function anthropicFamilyMembers(
+  family: string,
+  catalog: ModelCatalogEntry[],
+): ModelCatalogEntry[] {
+  const prefix = `${family}-`;
+  return catalog.filter((e) => {
+    if (!e.id.startsWith(prefix)) return false;
+    // The family must extend up to the version: the segment immediately after
+    // `${family}-` must begin a version number (a digit), not another name word.
+    // Keeps `claude-haiku` → `claude-haiku-4-5-…` while a bare brand like
+    // `claude` (next segment "haiku") or `claude-latest` passes through instead
+    // of silently collapsing across every Claude family.
+    const nextSeg = e.id.slice(prefix.length).split("-")[0] ?? "";
+    return /^\d/.test(nextSeg);
+  });
 }
 
 const OPENAI_SUBMODEL_WORDS = ["mini", "nano", "micro", "turbo", "preview"];

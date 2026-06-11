@@ -42,6 +42,32 @@ describe("resolveModelAlias edge cases", () => {
   });
 });
 
+describe("resolveModelAlias (anthropic, conservative family matching)", () => {
+  it("passes a bare brand 'claude' through (does NOT collapse across families)", () => {
+    expect(resolveModelAlias("claude", "anthropic", A)).toEqual({
+      resolved: "claude",
+      wasAlias: false,
+    });
+  });
+  it("passes 'claude-latest' through (next segment is a name word, not a version)", () => {
+    expect(resolveModelAlias("claude-latest", "anthropic", A)).toEqual({
+      resolved: "claude-latest",
+      wasAlias: false,
+    });
+  });
+  it("still resolves a real digit-led family alias (claude-haiku)", () => {
+    expect(resolveModelAlias("claude-haiku", "anthropic", A).resolved).toBe(
+      "claude-haiku-4-5-20251001",
+    );
+  });
+  it("auto-handles a new tier without an allowlist (claude-fable → claude-fable-5)", () => {
+    const cat: ModelCatalogEntry[] = [{ id: "claude-fable-5", created: 100 }];
+    const r = resolveModelAlias("claude-fable", "anthropic", cat);
+    expect(r.resolved).toBe("claude-fable-5");
+    expect(r.wasAlias).toBe(true);
+  });
+});
+
 const O: ModelCatalogEntry[] = [
   { id: "gpt-5-2025-08-01", created: 100 },
   { id: "gpt-5-2025-09-01", created: 200 },
