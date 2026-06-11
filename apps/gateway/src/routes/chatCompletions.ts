@@ -900,7 +900,8 @@ export function makeChatCompletionsOpenaiHandler(
               //     credential-derived id + warn/metric (Finding 2) and
               //     re-point/clear the up-front reply header to match.
               // `attemptUpstreamModel` feeds the synthetic usage's
-              // `upstream_model` (Finding #4).
+              // `upstream_model` = resolved id (synthetic usage-threading; not
+              // the header-leak "Finding 4" above).
               let attemptBodyBuf: Buffer = upstreamBodyBuf;
               let attemptUpstreamModel =
                 resolution.upfront?.upstreamModel ?? requestedModel;
@@ -977,7 +978,7 @@ export function makeChatCompletionsOpenaiHandler(
               // account misbehaved. Build the synthetic Anthropic shape
               // directly from the translated Chat usage so
               // emitUsageLog's pricing column is populated unchanged.
-              // `model` is the RESOLVED upstream id (Finding #4).
+              // `model` is the synthetic usage `upstream_model` = RESOLVED id.
               const upstreamForLog = translated
                 ? buildSyntheticAnthropicUsage({
                     id: `synthetic:openai-chat:${requestId}`,
@@ -1258,7 +1259,7 @@ async function runChatCompletionsOpenaiStreamingFailover(
             const upstreamForLog = completedUsage
               ? buildSyntheticAnthropicUsage({
                   id: `synthetic:openai-stream-chat:${requestId}`,
-                  // RESOLVED upstream id (Finding #4), not the alias.
+                  // synthetic usage `upstream_model` = RESOLVED id, not alias.
                   model: attemptUpstreamModel,
                   inputTokens: Math.max(
                     0,

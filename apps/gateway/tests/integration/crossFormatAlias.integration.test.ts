@@ -467,4 +467,53 @@ describe("Anthropic-upstream cross-format surfaces — model alias resolution", 
 
     await app.close();
   });
+
+  // Streaming /v1/chat/completions — the Chat→Anthropic streaming path
+  // (`runChatCompletionsStreamingFailover`) consumes the SAME Anthropic upstream
+  // SSE via `parseAnthropicSse`, then translates to OpenAI Chat chunks. Guards
+  // the resolved-model header box (written via streamHeaders()) AND the synthetic
+  // usage-threading: `lastUsageChunk` carries the upstream-echoed model, so
+  // `upstream_model` must be the resolved id, not the alias.
+  it("/v1/chat/completions stream=true: carries the header on the SSE response and logs upstream_model=resolved", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId);
+    const rawKey = `ak_cf_chat_stream_${Math.random().toString(36).slice(2)}`;
+    await seedKey(orgId, userId, rawKey, groupId);
+    await seedGroupApiKeyAccount(orgId, groupId);
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: {
+        model: ALIAS,
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 8,
+        stream: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
+    // The fake Anthropic upstream received the RESOLVED id, not the alias.
+    expect(receivedModel).toBe(RESOLVED);
+    // The SSE response header carries the resolved id (threaded through the box).
+    expect(res.headers["x-caliber-resolved-model"]).toBe(RESOLVED);
+
+    // usage_log: requested stays the alias; upstream_model is the RESOLVED id.
+    // The translated Chat usage chunk carries `model` from the upstream-echoed
+    // message_start, which `syntheticAnthropicResponse` threads into the row.
+    const rows = await pollUsageRows(orgId, userId);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.requestedModel).toBe(ALIAS);
+    expect(rows[0]!.upstreamModel).toBe(RESOLVED);
+
+    await app.close();
+  });
 });
