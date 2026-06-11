@@ -365,6 +365,16 @@
       "invalidFormat": "잘못된 자격 증명 형식",
       "failToast": "다시 온보딩에 실패했습니다",
       "submit": "다시 온보딩"
+    },
+    "rotateDialog": {
+      "title": "자격 증명 교체",
+      "description": "\"{name}\"의 저장된 자격 증명을 대체합니다. 계정과 사용 기록은 유지됩니다.",
+      "warning": "저장된 자격 증명을 즉시 대체합니다.",
+      "credentialsLabel": "새 자격 증명",
+      "placeholder": "새 Anthropic 또는 OpenAI API 키를 붙여넣으세요",
+      "submit": "교체",
+      "submitting": "교체 중…",
+      "rotatedToast": "자격 증명이 교체되었습니다"
     }
   },
   "accountGroups": {

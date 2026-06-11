@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge, deriveAccountStatus } from "./status";
 import { ReonboardDialog } from "./ReonboardDialog";
+import { RotateCredentialDialog } from "./RotateCredentialDialog";
 
 type AccountRow = inferRouterOutputs<AppRouter>["accounts"]["list"][number];
 
@@ -36,6 +37,7 @@ interface AccountRowActionsProps {
   orgId: string;
   onDelete: (row: AccountRow) => void;
   onReonboard: (row: AccountRow) => void;
+  onRotate: (row: AccountRow) => void;
   isDeleting: boolean;
 }
 
@@ -44,6 +46,7 @@ function AccountRowActions({
   orgId,
   onDelete,
   onReonboard,
+  onRotate,
   isDeleting,
 }: AccountRowActionsProps) {
   const { can } = usePermissions();
@@ -91,17 +94,13 @@ function AccountRowActions({
             {t("reonboardFromKeychain")}
           </DropdownMenuItem>
         )}
-        {/* Rotate + Edit flows land in a follow-up PR. Kept disabled here so
-            the eventual affordance has a stable slot and permissioned admins
-            can see the feature is planned (rather than a toast that reads as
-            user error). */}
+        {/* Rotate (api_key-only): re-seals a fresh credential into the vault
+            via accounts.rotate. OAuth accounts use re-onboard above. The Edit
+            flow still lands in a follow-up PR (kept disabled below). */}
         {canRotate && row.type !== "oauth" && (
-          <DropdownMenuItem disabled>
+          <DropdownMenuItem onSelect={() => onRotate(row)}>
             <Key className="h-4 w-4" />
             {t("rotateCredentials")}
-            <span className="ml-auto text-[10px] text-muted-foreground">
-              {tCommon("comingSoon")}
-            </span>
           </DropdownMenuItem>
         )}
         {canUpdate && (
@@ -146,6 +145,10 @@ export function AccountList({ orgId }: AccountListProps) {
   } = trpc.accounts.list.useQuery({ orgId });
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [reonboardingAccount, setReonboardingAccount] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [rotatingAccount, setRotatingAccount] = useState<{
     id: string;
     name: string;
   } | null>(null);
@@ -350,6 +353,9 @@ export function AccountList({ orgId }: AccountListProps) {
                       onReonboard={(r) =>
                         setReonboardingAccount({ id: r.id, name: r.name })
                       }
+                      onRotate={(r) =>
+                        setRotatingAccount({ id: r.id, name: r.name })
+                      }
                       isDeleting={deletingId === row.id}
                     />
                   </td>
@@ -363,6 +369,11 @@ export function AccountList({ orgId }: AccountListProps) {
         account={reonboardingAccount}
         orgId={orgId}
         onClose={() => setReonboardingAccount(null)}
+      />
+      <RotateCredentialDialog
+        account={rotatingAccount}
+        orgId={orgId}
+        onClose={() => setRotatingAccount(null)}
       />
     </div>
   );

@@ -365,6 +365,16 @@
       "invalidFormat": "凭证格式无效",
       "failToast": "重新载入失败",
       "submit": "重新载入"
+    },
+    "rotateDialog": {
+      "title": "轮换凭证",
+      "description": "替换「{name}」已存储的凭证。账户及其使用记录会保留。",
+      "warning": "这会立即替换已存储的凭证。",
+      "credentialsLabel": "新凭证",
+      "placeholder": "粘贴新的 Anthropic 或 OpenAI API 密钥",
+      "submit": "轮换",
+      "submitting": "轮换中…",
+      "rotatedToast": "凭证已轮换"
     }
   },
   "accountGroups": {

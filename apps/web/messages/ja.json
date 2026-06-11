@@ -365,6 +365,16 @@
       "invalidFormat": "認証情報の形式が無効です",
       "failToast": "再オンボーディングに失敗しました",
       "submit": "再オンボーディング"
+    },
+    "rotateDialog": {
+      "title": "認証情報をローテーション",
+      "description": "「{name}」の保存された認証情報を置き換えます。アカウントと使用履歴は保持されます。",
+      "warning": "保存された認証情報を直ちに置き換えます。",
+      "credentialsLabel": "新しい認証情報",
+      "placeholder": "新しい Anthropic または OpenAI の API キーを貼り付け",
+      "submit": "ローテーション",
+      "submitting": "ローテーション中…",
+      "rotatedToast": "認証情報をローテーションしました"
     }
   },
   "accountGroups": {

@@ -365,6 +365,16 @@
       "invalidFormat": "Invalid credentials format",
       "failToast": "Re-onboard failed",
       "submit": "Re-onboard"
+    },
+    "rotateDialog": {
+      "title": "Rotate credential",
+      "description": "Replace the stored credential for \"{name}\". The account and its usage history are kept.",
+      "warning": "This replaces the stored credential immediately.",
+      "credentialsLabel": "New credential",
+      "placeholder": "Paste the new Anthropic or OpenAI API key",
+      "submit": "Rotate",
+      "submitting": "Rotating…",
+      "rotatedToast": "Credential rotated"
     }
   },
   "accountGroups": {
