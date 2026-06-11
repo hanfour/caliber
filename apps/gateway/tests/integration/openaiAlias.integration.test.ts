@@ -956,4 +956,71 @@ describe("POST /v1/responses (openai passthrough) — model alias resolution", (
 
     await app.close();
   });
+
+  // Fast-follow A: PROVE the /v1/chat/completions cache key normalizes to the
+  // RESOLVED model — not the raw client alias. The MISS→HIT test above (identical
+  // payload twice) would ALSO pass for an alias-keyed cache, so it doesn't
+  // distinguish the two. This test does:
+  //   • Request A: { model: "gpt-5" } (ALIAS) → MISS → resolves to
+  //     `gpt-5-2025-10-01`, dispatches once, caches under the RESOLVED-model key.
+  //   • Request B: { model: "gpt-5-2025-10-01" } (the explicit CONCRETE id the
+  //     alias resolves to; otherwise an IDENTICAL body) → the resolver treats an
+  //     exact catalog id as passthrough (wasAlias=false), so its resolved body is
+  //     ALSO `{...rest, model: "gpt-5-2025-10-01"}`.
+  // If the cache key used the RESOLVED model, A's key == B's key → B is a HIT
+  // served from A WITHOUT a second upstream call. If the key used the raw client
+  // model, A would key on `gpt-5` and B on `gpt-5-2025-10-01` → B would MISS and
+  // hit upstream a second time. Asserting B is a HIT with receivedModels still
+  // length 1 can therefore ONLY pass if the key carries the resolved id.
+  it("/v1/chat/completions: cache key normalizes to the RESOLVED model — alias request A and the concrete-id request B collide on one cache entry", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const groupId = await seedGroup(orgId);
+    const rawKey = `ak_oai_resolvedkey_${Math.random().toString(36).slice(2)}`;
+    await seedKey(orgId, userId, rawKey, groupId);
+    await seedGroupApiKeyAccount(orgId, groupId);
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri(), undefined, {
+      GATEWAY_CACHE_TTL_SEC: "60",
+    });
+
+    // Identical bodies APART from `model`: A uses the alias, B uses the exact
+    // concrete id the alias resolves to.
+    const rest = {
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 8,
+    };
+
+    // Request A — alias `gpt-5` → MISS, resolves + dispatches + caches.
+    const first = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { model: "gpt-5", ...rest },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["x-cache"]).toBe("miss");
+    expect(first.headers["x-caliber-resolved-model"]).toBe(RESOLVED);
+    expect(receivedModels).toEqual([RESOLVED]);
+
+    // Request B — concrete `gpt-5-2025-10-01` (passthrough, NOT an alias). Its
+    // resolved body equals A's resolved body → cache key collides → HIT.
+    const second = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { authorization: `Bearer ${rawKey}` },
+      payload: { model: RESOLVED, ...rest },
+    });
+    expect(second.statusCode).toBe(200);
+    // The crux: B HITS A's entry. This is ONLY possible if A's cache key used
+    // the RESOLVED id (`gpt-5-2025-10-01`), not the raw alias (`gpt-5`).
+    expect(second.headers["x-cache"]).toBe("hit");
+    // And the upstream was NEVER hit a second time — proof the HIT short-circuited.
+    expect(receivedModels).toEqual([RESOLVED]);
+
+    await app.close();
+  });
 });
