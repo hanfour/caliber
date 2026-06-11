@@ -365,6 +365,16 @@
       "invalidFormat": "憑證格式無效",
       "failToast": "重新載入失敗",
       "submit": "重新載入"
+    },
+    "rotateDialog": {
+      "title": "輪替憑證",
+      "description": "替換「{name}」已儲存的憑證。帳號及其使用紀錄會保留。",
+      "warning": "這會立即替換已儲存的憑證。",
+      "credentialsLabel": "新憑證",
+      "placeholder": "貼上新的 Anthropic 或 OpenAI API 金鑰",
+      "submit": "輪替",
+      "submitting": "輪替中…",
+      "rotatedToast": "憑證已輪替"
     }
   },
   "accountGroups": {
