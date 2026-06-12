@@ -349,7 +349,7 @@
     "reonboardFromKeychain": "從 Keychain 重新載入",
     "rotateCredentials": "輪替憑證",
     "credentialInvalidTitle": "{name} 的 API 金鑰被上游拒絕，請輪替",
-    "credentialInvalidMultiTitle": "{count} 把 API 金鑰被拒絕，請輪替",
+    "credentialInvalidMultiTitle": "{count} 個 API 金鑰被拒絕，請輪替",
     "credentialInvalidBody": "上游拒絕了已儲存的 API 金鑰。請輪替憑證讓帳號重新加入排程。",
     "reonboardSingleTitle": "「{name}」的 OAuth 憑證需要重新載入",
     "reonboardMultiTitle": "{count} 個 OAuth 帳號需要重新載入",
