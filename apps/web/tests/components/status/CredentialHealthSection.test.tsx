@@ -62,18 +62,17 @@ describe("CredentialHealthSection", () => {
     };
     listOwnQuery.mockReturnValue({ data: [invalidRow], isLoading: false, error: null });
     render(<CredentialHealthSection />);
-    // badge renders via common.credentialInvalid key (missing key → key string in test env)
-    expect(screen.getByText("common.credentialInvalid")).toBeInTheDocument();
+    // badge renders via common.credentialInvalid key → resolved string
+    expect(screen.getByText("Credential rejected — rotate")).toBeInTheDocument();
     // CTA link should be present and point to /dashboard/upstreams
-    // missing i18n key renders as the key string itself
-    const ctaLink = screen.getByRole("link", { name: "status.health.credentialInvalidCta" });
+    const ctaLink = screen.getByRole("link", { name: "Rotate your credential →" });
     expect(ctaLink).toHaveAttribute("href", "/dashboard/upstreams");
   });
 
   it("does NOT show the rotate CTA when no upstream is credential_invalid", () => {
     listOwnQuery.mockReturnValue({ data: [baseRow], isLoading: false, error: null });
     render(<CredentialHealthSection />);
-    // The CTA key string should not appear at all
-    expect(screen.queryByRole("link", { name: "status.health.credentialInvalidCta" })).not.toBeInTheDocument();
+    // The CTA should not appear at all when no upstream is credential_invalid
+    expect(screen.queryByRole("link", { name: "Rotate your credential →" })).not.toBeInTheDocument();
   });
 });

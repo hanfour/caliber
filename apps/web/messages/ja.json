@@ -27,6 +27,7 @@
     "error": "エラー",
     "rateLimited": "レート制限中",
     "overloaded": "過負荷",
+    "credentialInvalid": "認証情報が拒否されました — ローテーションしてください",
     "paused": "一時停止中",
     "page": "ページ",
     "pageOf": "{total} ページ中 {current} ページ目",
@@ -347,6 +348,9 @@
     "actionsAriaLabel": "{name} のアクション",
     "reonboardFromKeychain": "Keychain から再オンボーディング",
     "rotateCredentials": "認証情報をローテーション",
+    "credentialInvalidTitle": "{name} の API キーが上流に拒否されました — ローテーションしてください",
+    "credentialInvalidMultiTitle": "{count} 件の API キーが拒否されました — ローテーションしてください",
+    "credentialInvalidBody": "上流プロバイダーが保存された API キーを拒否しました。認証情報をローテーションしてアカウントをスケジューリングに戻してください。",
     "reonboardSingleTitle": "「{name}」の OAuth 認証情報は再オンボーディングが必要です",
     "reonboardMultiTitle": "{count} 件の OAuth アカウントが再オンボーディングを必要としています",
     "reonboardWarningBody": "refresh token が別のプロセス(ホストの Claude Code アプリ、別の Caliber インスタンス)によってローテーションされました。Caliber は自身でリフレッシュできません — Keychain から新しいバンドルを取得し、認証情報を更新して復旧してください。",
@@ -615,7 +619,8 @@
       "colStatus": "ステータス",
       "colExpiry": "有効期限",
       "colError": "最後のエラー",
-      "loadError": "認証情報の健全性を読み込めませんでした。再試行してください。"
+      "loadError": "認証情報の健全性を読み込めませんでした。再試行してください。",
+      "credentialInvalidCta": "認証情報をローテーション →"
     },
     "errorRate": {
       "title": "エラー率",

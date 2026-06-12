@@ -27,6 +27,7 @@
     "error": "Error",
     "rateLimited": "Rate limited",
     "overloaded": "Overloaded",
+    "credentialInvalid": "Credential rejected — rotate",
     "paused": "Paused",
     "page": "Page",
     "pageOf": "Page {current} of {total}",
@@ -310,6 +311,9 @@
     "actionsAriaLabel": "Actions for {name}",
     "reonboardFromKeychain": "Re-onboard from Keychain",
     "rotateCredentials": "Rotate credentials",
+    "credentialInvalidTitle": "{name}'s API key was rejected — rotate it",
+    "credentialInvalidMultiTitle": "{count} API keys were rejected — rotate them",
+    "credentialInvalidBody": "The upstream provider rejected the stored API key. Rotate the credential to bring the account back into rotation.",
     "reonboardSingleTitle": "OAuth credentials for \"{name}\" need re-onboarding",
     "reonboardMultiTitle": "{count} OAuth accounts need re-onboarding",
     "reonboardWarningBody": "The refresh token was rotated by another process (the Claude Code app on the host, or another Caliber instance). Caliber cannot refresh on its own — extract a fresh bundle from your Keychain and rotate the credential to recover.",
@@ -615,7 +619,8 @@
       "colStatus": "Status",
       "colExpiry": "Expiry",
       "colError": "Last error",
-      "loadError": "Couldn't load credential health. Please try again."
+      "loadError": "Couldn't load credential health. Please try again.",
+      "credentialInvalidCta": "Rotate your credential →"
     },
     "errorRate": {
       "title": "Error rate",

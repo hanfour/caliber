@@ -27,6 +27,7 @@
     "error": "錯誤",
     "rateLimited": "已限流",
     "overloaded": "過載",
+    "credentialInvalid": "憑證遭拒 — 請輪替",
     "paused": "已暫停",
     "page": "頁",
     "pageOf": "第 {current} 頁,共 {total} 頁",
@@ -347,6 +348,9 @@
     "actionsAriaLabel": "{name} 的操作",
     "reonboardFromKeychain": "從 Keychain 重新載入",
     "rotateCredentials": "輪替憑證",
+    "credentialInvalidTitle": "{name} 的 API 金鑰被上游拒絕，請輪替",
+    "credentialInvalidMultiTitle": "{count} 把 API 金鑰被拒絕，請輪替",
+    "credentialInvalidBody": "上游拒絕了已儲存的 API 金鑰。請輪替憑證讓帳號重新加入排程。",
     "reonboardSingleTitle": "「{name}」的 OAuth 憑證需要重新載入",
     "reonboardMultiTitle": "{count} 個 OAuth 帳號需要重新載入",
     "reonboardWarningBody": "refresh token 已被其他流程(主機上的 Claude Code 應用、其他 Caliber 實例)輪替。Caliber 無法自行刷新 — 從 Keychain 取出新的 bundle 並更新憑證以恢復。",
@@ -615,7 +619,8 @@
       "colStatus": "狀態",
       "colExpiry": "到期",
       "colError": "最後錯誤",
-      "loadError": "無法載入憑證健康，請稍後重試。"
+      "loadError": "無法載入憑證健康，請稍後重試。",
+      "credentialInvalidCta": "輪替你的憑證 →"
     },
     "errorRate": {
       "title": "錯誤率",

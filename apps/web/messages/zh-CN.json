@@ -27,6 +27,7 @@
     "error": "错误",
     "rateLimited": "已限流",
     "overloaded": "过载",
+    "credentialInvalid": "凭证被拒 — 请轮换",
     "paused": "已暂停",
     "page": "页",
     "pageOf": "第 {current} 页,共 {total} 页",
@@ -347,6 +348,9 @@
     "actionsAriaLabel": "{name} 的操作",
     "reonboardFromKeychain": "从 Keychain 重新载入",
     "rotateCredentials": "轮换凭证",
+    "credentialInvalidTitle": "{name} 的 API 密钥被上游拒绝，请轮换",
+    "credentialInvalidMultiTitle": "{count} 个 API 密钥被拒绝，请轮换",
+    "credentialInvalidBody": "上游拒绝了已存储的 API 密钥。请轮换凭证让账户重新加入调度。",
     "reonboardSingleTitle": "「{name}」的 OAuth 凭证需要重新载入",
     "reonboardMultiTitle": "{count} 个 OAuth 账户需要重新载入",
     "reonboardWarningBody": "refresh token 已被其他进程(主机上的 Claude Code 应用、其他 Caliber 实例)轮换。Caliber 无法自行刷新 — 从 Keychain 提取新的 bundle 并更新凭证以恢复。",
@@ -615,7 +619,8 @@
       "colStatus": "状态",
       "colExpiry": "到期",
       "colError": "最近错误",
-      "loadError": "无法加载凭证健康，请稍后重试。"
+      "loadError": "无法加载凭证健康，请稍后重试。",
+      "credentialInvalidCta": "轮换你的凭证 →"
     },
     "errorRate": {
       "title": "错误率",
