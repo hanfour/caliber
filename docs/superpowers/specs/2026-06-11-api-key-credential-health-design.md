@@ -33,7 +33,7 @@ So today: the prod `/v1/messages` non-stream path **never** degrades a dead key;
 |---|----------|
 | Trigger | **Threshold:** degrade after **N consecutive 401s**, `GATEWAY_UPSTREAM_AUTH_MAX_FAIL` default **3**. Reset on any 2xx. |
 | Signal | **401 only.** 403 fails over but is not a credential-death signal. |
-| Counter store | **Redis** via the suffix helper `keys.authFail(id)` (the client is already `caliber:gw:`-prefixed) — zero migration; `INCR` per 401, `DEL` on 2xx; generous safety TTL. |
+| Counter store | **Redis** via the suffix helper `authFailKey(id)` (the client is already `caliber:gw:`-prefixed) — zero migration; `INCR` per 401, `DEL` on 2xx; generous safety TTL. |
 | Degraded state | **`tempUnschedulableUntil = now + backoff` + `tempUnschedulableReason='api_key_invalid_credential'` + sanitized `errorMessage`. DO NOT touch `status`.** (codex's fatal-bug fix: `status='error'` would survive the backoff window and the `status='active'` predicate would keep the account out forever — recovery must rely on the temp predicate alone, which re-admits automatically when `tempUnschedulableUntil < now`.) |
 | Recovery | **Timed backoff** (`GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC` default **3600**) → scheduler auto-retries when the temp window expires; a 2xx clears it, a repeat 401 re-arms it (bounded churn). **Rotation (`accounts.rotate`/`rotateOwn`) clears it immediately.** |
 | Placement | **Centralized in the failover loop**, not scattered across route call sites (see below). |
@@ -47,14 +47,14 @@ The failover loop already has the two choke points we need:
 
 New module **`apps/gateway/src/runtime/upstreamAuthHealth.ts`** (best-effort, never throws into the request path — swallow Redis/DB errors):
 
-> **Redis keys via the suffix helper (codex finding #4).** The gateway Redis client is already prefixed `caliber:gw:` (`redis/keys.ts`), so keys are written as bare *suffixes* through a helper — `keys.authFail(id) => "authfail:<id>"`, `keys.authGrace(id) => "authgrace:<id>"` — NOT literal `gw:…` (which would double up to `caliber:gw:gw:…`). The api-side rotation uses the **same** suffix helpers against its own `caliber:gw:`-prefixed client (`server.ts:111`).
+> **Redis keys via a shared suffix helper (review finding).** Both Redis clients are already prefixed `caliber:gw:`, so keys are bare *suffixes* — `authFailKey(id) => "authfail:<id>"`, `authGraceKey(id) => "authgrace:<id>"` — NOT literal `gw:…` (which would double to `caliber:gw:gw:…`). Because **`apps/api` depends only on `@caliber/gateway-core`, not on `apps/gateway`** (`apps/api/package.json:27`), the two helpers are pure string builders that live in **`@caliber/gateway-core`** (a tiny module on a re-exported subpath) and are imported by BOTH `apps/gateway` (its `redis/keys.ts` re-exports them) and the `apps/api` rotation — single source of truth, no app→app dependency. They are pure (no I/O), so gateway-core stays dependency-thin.
 
 ```
 recordAuthFailure(deps, account, status) -> Promise<void>
   if status !== 401: return                      // 403 etc. → failover only, no degrade
   if account.type !== "api_key": return          // oauth handled by its own path
-  if await redis.exists(keys.authGrace(account.id)): return   // just-rotated grace window (race guard)
-  const n = await redis.incr(keys.authFail(account.id)); refresh safety TTL
+  if await redis.exists(authGraceKey(account.id)): return   // just-rotated grace window (race guard)
+  const n = await redis.incr(authFailKey(account.id)); refresh safety TTL
   metrics.upstreamAuthFailedTotal.inc({ platform: account.platform })
   if n >= GATEWAY_UPSTREAM_AUTH_MAX_FAIL:
     // CONDITIONAL write — only the healthy→degraded transition flips it
@@ -78,7 +78,7 @@ recordAuthFailure(deps, account, status) -> Promise<void>
     if (rows.length === 1) metrics.upstreamCredentialDegradedTotal.inc({ platform })  // count TRANSITIONS only
 
 clearAuthFailure(deps, account) -> Promise<void>
-  await redis.del(keys.authFail(account.id))
+  await redis.del(authFailKey(account.id))
   // self-heal: recover an account degraded for *this* reason (anti-stomp: don't clear oauth/rate-limit pauses)
   await db.update(upstreamAccounts).set({
     tempUnschedulableUntil: null, tempUnschedulableReason: null, errorMessage: null,
@@ -91,9 +91,9 @@ clearAuthFailure(deps, account) -> Promise<void>
 
 **Classifier reconciliation (`classifier.ts:18-23`):** drop the `stateUpdate: { status: 'error' }` from the 401/403 branch (keep `kind: switch_account, reason: 'auth_invalid'`). Auth health is now owned by `recordAuthFailure`; the un-recoverable `status='error'` single-strike is removed for all paths. (403 → fails over, no state change — intentional; was previously a one-strike disable.)
 
-**The one route change (`messages.ts` Anthropic non-stream, ~459):** remove the special `if (status>=400 && <500) return upstream` branch so **all non-2xx throw** into the loop (the existing `<200||>=300 → throw` at ~466 then catches them) — exactly like every other surface. This is required (codex finding #1): the loop's success path fires whenever the attempt *returns* (`failoverLoop.ts:242`), so if a 4xx is returned, `clearAuthFailure` would wrongly reset the counter on a 400/403, and "403 fails over but doesn't degrade" would not hold on this path. With all non-2xx thrown, **loop-return == genuine 2xx**, and the classifier sorts them: **400/422 → `fatal`** (surfaced to the client unchanged), **403 → `switch_account`** (failover, `recordAuthFailure` no-ops on 403), **401 → `switch_account` + `recordAuthFailure`**.
+**The one route change (`messages.ts` Anthropic non-stream, ~459):** remove the special `if (status>=400 && <500) return upstream` branch so **all non-2xx throw** into the loop (the existing `<200||>=300 → throw` at ~466 then catches them) — exactly like every other surface. This is required (codex finding #1): the loop's success path fires whenever the attempt *returns* (`failoverLoop.ts:242`), so if a 4xx is returned, `clearAuthFailure` would wrongly reset the counter on a 400/403, and "403 fails over but doesn't degrade" would not hold on this path. With all non-2xx thrown, **loop-return == genuine 2xx**, and the classifier sorts them: **400/422 → `fatal`**, **403 → `switch_account`** (failover, `recordAuthFailure` no-ops on 403), **401 → `switch_account` + `recordAuthFailure`**. Note (review precision): a `fatal` 4xx is returned to the client via `FatalUpstreamError` as the standard `{ error, detail, request_id }` wrapper with the **upstream status code preserved** and `detail` best-effort — NOT the raw upstream body/headers (`sseErrorEvents.ts:53`). So this is a small, intentional shape change for `messages` non-stream 4xx (raw body → standard wrapper), making it consistent with every other surface that already throws.
 
-**Dependency injection (codex finding #3).** `RunFailoverInput` today has `db` but **not** redis / metrics / logger / the new knobs (`failoverLoop.ts:80`, `buildFailoverInput.ts:43`). To keep this centralized (and not leak back into per-route wiring), `buildFailoverInput` gains a single `authHealth` dep bundle assembled once from `app`: `{ redis: app.redis, maxFail, backoffSec, graceSec, metrics: { authFailedTotal, credentialDegradedTotal }, logger: app.log }`. The loop passes `input.authHealth` (+ `input.db`, `account`) to `recordAuthFailure`/`clearAuthFailure`. Every route already calls `buildFailoverInput(req, app.db, {...})`, so they inherit it with no per-route change. If `authHealth` is absent (e.g. a unit test that doesn't supply it), the helpers no-op — preserving today's behavior.
+**Dependency injection (review finding).** `RunFailoverInput` today has `db` but **not** redis / metrics / logger / the new knobs, and `buildFailoverInput(req, db, fields)` only takes `req`/`db`/`fields` — it has **no `app`** (`buildFailoverInput.ts:44`). So rather than change the signature, `buildFailoverInput` reads the FastifyInstance via **`req.server`** (already-present decorations: `req.server.redis`, `req.server.gwMetrics`, `req.server.env` [decorated `server.ts:61`], `req.server.log`) and assembles the `authHealth` bundle on the returned input: `{ redis, maxFail: env.GATEWAY_UPSTREAM_AUTH_MAX_FAIL, backoffSec, graceSec, metrics: { authFailedTotal, credentialDegradedTotal }, logger }`. The loop passes `input.authHealth` to `recordAuthFailure`/`clearAuthFailure`. **Route callsites (`buildFailoverInput(req, app.db, {...})`) are truly unchanged.** If `authHealth` is absent (a unit test not supplying a decorated `req.server`), the helpers no-op — preserving today's behavior.
 
 `codexResponses.ts` wraps `makeResponsesRouteHandler` (no own upstream call) and `/v1/responses/compact` throws non-2xx — both flow through the loop, so the centralized hooks cover them automatically.
 
@@ -101,8 +101,8 @@ clearAuthFailure(deps, account) -> Promise<void>
 
 `accounts.rotate` (`accounts.ts:~600`) and `rotateOwn` (`accounts.ts:~387`) currently only re-seal `credential_vault`. Extend both (Redis is available in ctx — `context.ts:51`, prefix `caliber:gw:`):
 - Clear the degraded state **only when** `tempUnschedulableReason='api_key_invalid_credential'` (anti-stomp): set `tempUnschedulableUntil/reason/errorMessage = null`.
-- `redis.del(keys.authFail(id))` (reset the counter).
-- **Race guard (codex D):** set `keys.authGrace(id)` with TTL **`graceSec` default 120s — must be ≥ the upstream request timeout** (the slot/abort window is ~60s, so 60s is too tight; 120s gives in-flight stale-credential requests time to drain). In-flight requests still using the *old* credential can 401 right after rotate; `recordAuthFailure` honors the grace key and skips degrading during it, so a fresh rotation isn't immediately re-degraded. (Zero-schema; avoids a `resolveCredential` generation check.)
+- `redis.del(authFailKey(id))` (reset the counter).
+- **Race guard (codex D):** set `authGraceKey(id)` with TTL **`graceSec` default 120s — must be ≥ the upstream request timeout** (the slot/abort window is ~60s, so 60s is too tight; 120s gives in-flight stale-credential requests time to drain). In-flight requests still using the *old* credential can 401 right after rotate; `recordAuthFailure` honors the grace key and skips degrading during it, so a fresh rotation isn't immediately re-degraded. (Zero-schema; avoids a `resolveCredential` generation check.)
 
 ## Surfacing (UI + metrics)
 
@@ -137,11 +137,12 @@ clearAuthFailure(deps, account) -> Promise<void>
 - **Unit (`deriveAccountStatus`):** `api_key_invalid_credential` → `credential_invalid`, precedence above `paused`.
 - **Integration (`accounts.rotate`/`rotateOwn`):** rotating a credential-degraded account clears temp fields + counter + sets grace; does not stomp an unrelated (oauth/rate-limit) pause.
 - **Integration (route + testcontainer + fake upstream):** fake upstream 401s for one account → after N requests it's `tempUnschedulableReason='api_key_invalid_credential'` (a first-ever degrade on a NULL-reason healthy row **actually writes** — NULL-condition regression guard for finding #2), scheduler skips it, degraded metric **+1 exactly once** under concurrency; after the backoff window a fake-200 (or a rotate) recovers it. `messages` anthropic non-stream now throws all non-2xx: a **401** reaches the loop and degrades after N; a **400** surfaces to the client (classifier `fatal`) and does NOT touch the counter; a **403** fails over without degrading and does NOT clear the counter (finding #1 guard).
-- **Config:** the two knobs parse with defaults.
+- **Config:** the three knobs parse with defaults.
 
 **Zero schema / migration.**
 
 ## Files
 
 **New:** `apps/gateway/src/runtime/upstreamAuthHealth.ts` (+ test).
-**Modified:** `apps/gateway/src/redis/keys.ts` (`authFail`/`authGrace` suffix helpers), `apps/gateway/src/runtime/failoverLoop.ts` (success + auth_invalid hooks; `RunFailoverInput.authHealth`), `apps/gateway/src/runtime/buildFailoverInput.ts` (assemble + inject the `authHealth` bundle from `app`), `packages/gateway-core/src/stateMachine/classifier.ts` (drop 401/403 `status='error'`), `apps/gateway/src/routes/messages.ts` (anthropic non-stream: drop the 4xx-return so all non-2xx throw), `apps/api/src/trpc/routers/accounts.ts` (`rotate` + `rotateOwn` health reset + grace key, via the same suffix helpers on the api Redis client), `apps/gateway/src/plugins/metrics.ts` (2 counters), `packages/config/src/env.ts` (3 knobs) + `docker/` wiring, `apps/web/src/components/accounts/status.tsx` (`credential_invalid`), `AccountList.tsx` (banner), `apps/web/src/components/status/CredentialHealthSection.tsx` (CTA), i18n catalogs (banner/badge strings, 5 locales).
+**New:** `packages/gateway-core/src/redis/authKeys.ts` (pure `authFailKey`/`authGraceKey` suffix builders) on a re-exported subpath (+ test).
+**Modified:** `apps/gateway/src/redis/keys.ts` (re-export the two helpers), `apps/gateway/src/runtime/failoverLoop.ts` (success + auth_invalid hooks; `RunFailoverInput.authHealth`), `apps/gateway/src/runtime/buildFailoverInput.ts` (assemble + inject the `authHealth` bundle from `app`), `packages/gateway-core/src/stateMachine/classifier.ts` (drop 401/403 `status='error'`), `apps/gateway/src/routes/messages.ts` (anthropic non-stream: drop the 4xx-return so all non-2xx throw), `apps/api/src/trpc/routers/accounts.ts` (`rotate` + `rotateOwn` health reset + grace key, via the same suffix helpers on the api Redis client), `apps/gateway/src/plugins/metrics.ts` (2 counters), `packages/config/src/env.ts` (3 knobs) + `docker/` wiring, `apps/web/src/components/accounts/status.tsx` (`credential_invalid`), `AccountList.tsx` (banner), `apps/web/src/components/status/CredentialHealthSection.tsx` (CTA), i18n catalogs (banner/badge strings, 5 locales).
