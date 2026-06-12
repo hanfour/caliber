@@ -180,6 +180,15 @@ export const serverEnvSchema = z
     GATEWAY_OAUTH_MAX_FAIL: emptyAsUndefined(
       z.coerce.number().int().min(1).default(3),
     ),
+    GATEWAY_UPSTREAM_AUTH_MAX_FAIL: emptyAsUndefined(
+      z.coerce.number().int().min(1).default(3),
+    ),
+    GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(1).default(3600),
+    ),
+    GATEWAY_UPSTREAM_AUTH_GRACE_SEC: emptyAsUndefined(
+      z.coerce.number().int().min(1).default(120),
+    ),
     /**
      * Model-alias resolution: map inbound model ids to a canonical upstream
      * model via a periodically-refreshed registry. Default on. Refresh

@@ -89,6 +89,13 @@ describe("parseServerEnv", () => {
       expect(env.GATEWAY_OAUTH_MAX_FAIL).toBe(3);
     });
 
+    it("upstream-auth health knobs default 3 / 3600 / 120", () => {
+      const env = parseServerEnv({ ...valid });
+      expect(env.GATEWAY_UPSTREAM_AUTH_MAX_FAIL).toBe(3);
+      expect(env.GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC).toBe(3600);
+      expect(env.GATEWAY_UPSTREAM_AUTH_GRACE_SEC).toBe(120);
+    });
+
     it("model-alias knobs default on / 3600", () => {
       const env = parseServerEnv(valid);
       expect(env.GATEWAY_ENABLE_MODEL_ALIAS).toBe(true);
