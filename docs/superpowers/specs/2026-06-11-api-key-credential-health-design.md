@@ -1,140 +1,135 @@
 # api_key Upstream Credential Health — Design
 
-**Date:** 2026-06-11
-**Status:** Approved (brainstorming) — ready for plan
+**Date:** 2026-06-11 (revised 2026-06-12 after Claude+codex cross-review)
+**Status:** Approved (brainstorming + multi-model spec review folded in) — ready for plan
 **Issue:** #205 (launch-prep)
-**Scope:** Caliber gateway — detect a dead/rejected **api_key** upstream credential, degrade its health so the scheduler stops routing to it, and surface it for rotation.
+**Scope:** Caliber gateway — detect a dead/rejected **api_key** upstream credential, degrade its health (recoverably) so the scheduler stops routing to it, and surface it for rotation.
 
 ## Problem
 
-When an `api_key` upstream's stored credential is invalid (revoked / wrong / expired), the upstream provider returns **401/403** (`authentication_error` / `invalid x-api-key`). Today the gateway forwards that 4xx straight back to the client and records **no health state** against the account — the account stays `status='active', schedulable=true` and keeps getting scheduled, so every pool/own request that lands on it fails. There is no signal to the operator/member that the credential is dead.
+When an `api_key` upstream's stored credential is invalid (revoked / wrong / expired), the upstream returns **401** (`authentication_error` / `invalid x-api-key`). Observed in prod 2026-06-11: a pool `anthropic api_key` returned 401 yet stayed `status='active', schedulable=true` and kept being scheduled — every request that landed on it failed, with no signal to rotate.
 
-**Confirmed root cause.** The route attempt callbacks treat all 4xx as a client error and **return** the response directly instead of **throwing** it into the failover loop:
+**Two confirmed, related code facts (verified by Claude + codex, file:line):**
 
-```
-// apps/gateway/src/routes/messages.ts (and the 3 sibling routes)
-if (upstream.status >= 400 && upstream.status < 500) {
-  return upstream;   // forwarded to client; NEVER reaches the failover classifier
-}
-```
+1. **Inconsistent 401 handling across surfaces.** Only the `/v1/messages` **Anthropic non-stream** branch *returns* a 4xx (`messages.ts:459/463`) — so its 401 never reaches the failover loop, never degrades. **Every other path throws** 401 into the failover loop (chat non-stream `chatCompletions.ts:321`, responses non-stream `responses.ts:481`, messages→openai `messages.ts:1177`, all streaming paths `messages.ts:769` / `chatCompletions.ts:586` / `responses.ts:837` / `responses.ts:1338`, and `/v1/responses/compact` `responses.ts:670`).
 
-The failover classifier (`packages/gateway-core/src/stateMachine/classifier.ts:18-23`) *does* classify 401/403 as `auth_invalid` → `switch_account` with `stateUpdate.status='error'`, but that path is only reached when an attempt **throws**. A returned 4xx never reaches it, so `applyAccountStateUpdate` is never called. This is exactly why the prod pool `anthropic api_key` (401 `invalid x-api-key`) stayed `active`.
+2. **The thrown path degrades, but un-recoverably.** A thrown 401/403 is classified `auth_invalid` (`classifier.ts:18`) → the loop applies `stateUpdate: { status: 'error' }` (`failoverLoop.ts:292`). But **nothing ever resets `status='error'` back to `active`** (no `status:"active"` write exists anywhere in `apps/gateway/src/runtime`), and the scheduler requires `status='active'` (`scheduler.ts:493`). So a single 401 on a thrown path **permanently disables the account** — a pre-existing latent bug.
 
-This was surfaced during the 2026-06-11 v0.13.0 prod rotation flow and is a launch-prep reliability gap for multi-user BYOK.
+So today: the prod `/v1/messages` non-stream path **never** degrades a dead key; every other path degrades on the **first** 401 and **never recovers**. Neither is right.
 
 ## Goal & Non-Goals
 
-**Goal:** A persistently-rejecting `api_key` upstream is **auto-paused** after N consecutive auth failures, **auto-recovers** on a later success (or on credential rotation), and is **surfaced** to the operator/member with an actionable "rotate this credential" affordance. Observable via metrics.
+**Goal:** Any `api_key` upstream that the provider rejects with **401** is, after **N consecutive** failures, **temporarily** paused (recoverably) so the scheduler skips it; it **auto-recovers** on a later success or on credential **rotation**; and it is **surfaced** to operator/member with a "rotate this credential" affordance. One coherent mechanism across all surfaces. Observable via metrics. This also **fixes the latent un-recoverable `status='error'` bug** above.
 
 **Non-Goals:**
-- NOT auto-failover on a 401 (try another account in-request). 401 still returns to the client; degradation only changes *future* scheduling. (Future enhancement; larger behavior change.)
-- NOT health-tracking other 4xx (400/404/422 = client/request error, not the account's fault).
-- NOT touching the **OAuth** path — oauth already has its own `invalid_grant` / `refresh_exhausted` degradation + re-onboard flow (`apps/gateway/src/runtime/oauthRefresh.ts:538-615`). This feature is the **api_key** analog.
-- NO schema change / migration (consecutive-failure counter lives in Redis; degraded *state* reuses existing `upstream_accounts` columns).
+- NOT counting **403** (entitlement / model-policy / project 403s are not a dead key — `codex` flag). 403 still fails over but does not degrade; a finer 401-vs-403 taxonomy is a future refinement.
+- NOT the **OAuth** path — oauth has its own `invalid_grant`/`refresh_exhausted` degradation + re-onboard (`oauthRefresh.ts:538-615`). This is the api_key analog; oauth request-time 401s are out of scope here.
+- NOT changing the in-request **failover decision** beyond the one alignment below (the prod non-stream path starts failing over on 401, like every other path already does).
+- NO schema change / migration (counter in Redis; degraded state reuses existing `upstream_accounts` columns).
 
-## Decisions (brainstormed)
+## Decisions (brainstorm + Claude+codex review)
 
 | # | Decision |
 |---|----------|
-| Trigger | **Threshold:** degrade after **N consecutive** auth failures (401/403), `GATEWAY_UPSTREAM_AUTH_MAX_FAIL` default **3**. Reset on any 2xx. Avoids pausing a healthy account on a one-off auth blip. |
-| Counter store | **Redis** (`gw:authfail:<accountId>`) — zero migration; `INCR` per auth failure, `DEL` on success; generous safety TTL. The degraded *state* is written to the DB (scheduler + UI need it). |
-| Recovery | **Timed backoff:** degrade sets `tempUnschedulableUntil = now + GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC` (default **3600s**). After the window the scheduler retries; a later 2xx clears the degradation, a repeat 401 re-arms it (bounded churn — one retry per window). **Credential rotation (#203 `accounts.rotate`) also clears it immediately.** |
-| Auth-class only | Only **401/403** count. Other 4xx untouched. |
-| Failover | 401 still returns to the client (no in-request failover). Degradation only affects future scheduling. |
+| Trigger | **Threshold:** degrade after **N consecutive 401s**, `GATEWAY_UPSTREAM_AUTH_MAX_FAIL` default **3**. Reset on any 2xx. |
+| Signal | **401 only.** 403 fails over but is not a credential-death signal. |
+| Counter store | **Redis** `gw:authfail:<accountId>` — zero migration; `INCR` per 401, `DEL` on 2xx; generous safety TTL. |
+| Degraded state | **`tempUnschedulableUntil = now + backoff` + `tempUnschedulableReason='api_key_invalid_credential'` + sanitized `errorMessage`. DO NOT touch `status`.** (codex's fatal-bug fix: `status='error'` would survive the backoff window and the `status='active'` predicate would keep the account out forever — recovery must rely on the temp predicate alone, which re-admits automatically when `tempUnschedulableUntil < now`.) |
+| Recovery | **Timed backoff** (`GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC` default **3600**) → scheduler auto-retries when the temp window expires; a 2xx clears it, a repeat 401 re-arms it (bounded churn). **Rotation (`accounts.rotate`/`rotateOwn`) clears it immediately.** |
+| Placement | **Centralized in the failover loop**, not scattered across route call sites (see below). |
+| errorMessage | **Generic sanitized** string (e.g. `"upstream rejected credential (401)"`), never the provider response body (leak risk — `codex`; mirrors `oauthRefresh.ts:547` sanitize vs the raw-body copy at `upstreamErrorMapping.ts:48`). |
 
-## Detection + degradation flow (gateway runtime)
+## Architecture — centralized in the failover loop
 
-New module **`apps/gateway/src/runtime/upstreamAuthHealth.ts`** with two side-effecting helpers, called from each route's existing branches:
+The failover loop already has the two choke points we need:
+- **Success:** `scheduler.reportResult(account.id, true)` on a successful attempt return (`failoverLoop.ts:245`). Streaming attempts also return normally on completion, so this covers **all** 2xx (stream + non-stream).
+- **Failure:** the `catch` → `classifyUpstreamError` (`failoverLoop.ts:~250`). 401/403 classify as `auth_invalid`.
+
+New module **`apps/gateway/src/runtime/upstreamAuthHealth.ts`** (best-effort, never throws into the request path — swallow Redis/DB errors):
 
 ```
-recordAuthFailure(deps, account, status, bodyText?) -> Promise<void>
-  // called in the route's 4xx branch when status ∈ {401,403} (BEFORE returning to client)
-  if status not in {401,403}: return                 // other 4xx → no-op
-  const n = await redis.INCR(`gw:authfail:${account.id}`)        // refresh safety TTL
-  metrics.upstreamAuthFailedTotal.inc({ platform })
+recordAuthFailure(deps, account, status) -> Promise<void>
+  if status !== 401: return                      // 403 etc. → failover only, no degrade
+  if account.type !== "api_key": return          // oauth handled by its own path
+  if await redis.exists(`gw:authgrace:${account.id}`): return   // just-rotated grace window (race guard)
+  const n = await redis.incr(`gw:authfail:${account.id}`); refresh safety TTL
+  metrics.upstreamAuthFailedTotal.inc({ platform: account.platform })
   if n >= GATEWAY_UPSTREAM_AUTH_MAX_FAIL:
-    await db.update(upstreamAccounts).set({
-      status: "error",
+    // CONDITIONAL write — only the healthy→degraded transition flips it
+    const rows = await db.update(upstreamAccounts).set({
       tempUnschedulableUntil: now + GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC,
       tempUnschedulableReason: "api_key_invalid_credential",
-      errorMessage: truncate(bodyText ?? `upstream ${status}`, 1000),
-    }).where(id = account.id)                          // NOT schedulable=false (that's the manual kill-switch)
-    metrics.upstreamCredentialDegradedTotal.inc({ platform })   // alertable signal
+      errorMessage: "upstream rejected credential (401)",   // sanitized, generic
+    }).where(and(
+      eq(id, account.id),
+      // re-arm if not already in this state OR the window already lapsed
+      or(ne(tempUnschedulableReason,"api_key_invalid_credential"), lt(tempUnschedulableUntil, now)),
+    )).returning({ id })
+    if (rows.length === 1) metrics.upstreamCredentialDegradedTotal.inc({ platform })  // count TRANSITIONS only
 
-clearAuthFailure(deps, accountId) -> Promise<void>
-  // called on the 2xx success path of each route
-  await redis.DEL(`gw:authfail:${accountId}`)
-  // self-heal: if this account is currently degraded for a credential problem, recover it
+clearAuthFailure(deps, account) -> Promise<void>
+  await redis.del(`gw:authfail:${account.id}`)
+  // self-heal: recover an account degraded for *this* reason (anti-stomp: don't clear oauth/rate-limit pauses)
   await db.update(upstreamAccounts).set({
-    status: "active", tempUnschedulableUntil: null,
-    tempUnschedulableReason: null, errorMessage: null,
-  }).where(and(id = accountId, tempUnschedulableReason = "api_key_invalid_credential"))
+    tempUnschedulableUntil: null, tempUnschedulableReason: null, errorMessage: null,
+  }).where(and(eq(id, account.id), eq(tempUnschedulableReason, "api_key_invalid_credential")))
 ```
 
-Both helpers are **best-effort and never throw into the request path** (swallow Redis/DB errors; a health-tracking failure must never break a real response) — mirroring the gateway's existing fire-and-forget health/metric writes.
+**Loop wiring (`failoverLoop.ts`):**
+- After a successful attempt return (~245) → `await clearAuthFailure(deps, account)`.
+- In the `catch`, when `action.reason === 'auth_invalid'` → `await recordAuthFailure(deps, account, upstreamErr.status)` **instead of** applying the classifier's `status='error'` stateUpdate. Failover still proceeds (`switch_account`).
 
-**Call sites (per route, both the anthropic-upstream and openai-upstream branches):**
-- `recordAuthFailure(...)` at the 4xx-return branch (only fires for 401/403).
-- `clearAuthFailure(account.id)` on the 2xx success path (next to / after `emitUsageLog`).
+**Classifier reconciliation (`classifier.ts:18-23`):** drop the `stateUpdate: { status: 'error' }` from the 401/403 branch (keep `kind: switch_account, reason: 'auth_invalid'`). Auth health is now owned by `recordAuthFailure`; the un-recoverable `status='error'` single-strike is removed for all paths. (403 → fails over, no state change — intentional; was previously a one-strike disable.)
 
-Routes: `apps/gateway/src/routes/messages.ts`, `chatCompletions.ts`, `responses.ts`, `codexResponses.ts` (codex inherits the responses handler). Type-class restriction: only meaningful for `credential.type === "api_key"` attempts (oauth has its own path) — guard the call on the credential/account type so an oauth 401 doesn't enter this counter.
+**The one route change (`messages.ts` Anthropic non-stream, ~459):** make a **401** throw (so it reaches the loop → failover + `recordAuthFailure`) instead of being returned. Other 4xx keep returning directly (client error — unchanged). This aligns the prod path with every other surface.
 
-### Counter lifecycle ("consecutive since last success")
-- `INCR gw:authfail:<id>` on each 401/403; safety `EXPIRE` (e.g. 24h) refreshed each failure so a silent account's key is eventually reclaimed.
-- First crossing of N → degrade (DB write above). The counter is **not** deleted on degrade, so a post-backoff retry that 401s again (counter still ≥ N) re-degrades on a single failure (bounded churn) rather than needing N fresh failures.
-- Any 2xx → `DEL` counter + recover the account (clear degraded state) — the auto-heal path for a transient blip or an externally-fixed key.
-- Concurrency: multiple concurrent 401s may each see `n >= N` and each issue the degrade update — the update is idempotent (sets the same fields), so that's safe.
+`codexResponses.ts` wraps `makeResponsesRouteHandler` (no own upstream call) and `/v1/responses/compact` throws non-2xx — both flow through the loop, so the centralized hooks cover them automatically.
 
-## Recovery via rotation (#203 reset)
+## Rotation recovery + race guard
 
-`apps/api/src/trpc/routers/accounts.ts` `rotate` mutation (~545-630) currently re-seals the credential into `credential_vault` but **does not reset health** (unlike `reonboard` ~646-742 which resets status/schedulable/temp fields). This feature **extends `accounts.rotate`** so that after re-sealing it also clears credential-degradation:
-- DB: `status='active'`, `tempUnschedulableUntil=null`, `tempUnschedulableReason=null` (only when the existing reason is `api_key_invalid_credential` — don't stomp an unrelated pause), `errorMessage=null`.
-- Redis: `DEL gw:authfail:<id>` (so a freshly-rotated key starts clean). The api/trpc layer has Redis access in ctx; if not cleanly available, the gateway's next 2xx will DEL it anyway — the DB recovery is the essential part.
-
-The member self-service `rotateOwn` (~348-428) gets the same reset (mirror), so BYOK members recover their own upstream by rotating.
+`accounts.rotate` (`accounts.ts:~600`) and `rotateOwn` (`accounts.ts:~387`) currently only re-seal `credential_vault`. Extend both (Redis is available in ctx — `context.ts:51`, prefix `caliber:gw:`):
+- Clear the degraded state **only when** `tempUnschedulableReason='api_key_invalid_credential'` (anti-stomp): set `tempUnschedulableUntil/reason/errorMessage = null`.
+- `redis.del("gw:authfail:<id>")` (reset the counter).
+- **Race guard (codex D):** set `gw:authgrace:<id>` with a short TTL (e.g. 60s). In-flight requests still using the *old* credential can 401 right after rotate; `recordAuthFailure` honors the grace key and skips degrading during it, so a fresh rotation isn't immediately re-degraded. (Zero-schema; avoids needing a `resolveCredential` generation check.)
 
 ## Surfacing (UI + metrics)
 
-**Status derivation** — `apps/web/src/components/accounts/status.tsx` `deriveAccountStatus`: add a distinct state **`credential_invalid`** returned when `tempUnschedulableReason === 'api_key_invalid_credential'`, ranked above the generic `paused`/`error` so the `StatusBadge` reads "Credential rejected — rotate" instead of a benign "paused". `tempUnschedulableReason` is already in the `accounts.list` / `accounts.listOwn` tRPC output (SELECT \* projection), so no API change.
-
-**Org admin banner** — `apps/web/src/components/accounts/AccountList.tsx`: mirror the existing `oauth_invalid_grant` amber banner (lines ~241-286), filtering `tempUnschedulableReason === 'api_key_invalid_credential'`, with copy "This API key was rejected by the upstream provider — rotate it." and a button that opens the **`RotateCredentialDialog`** shipped in #203.
-
-**Member status page** — `apps/web/src/components/status/CredentialHealthSection.tsx` already renders `deriveAccountStatus` over the member's own upstreams; the new `credential_invalid` badge surfaces there automatically. Add a deep-link/CTA to the member rotate flow (`/dashboard/upstreams`, `UpstreamRotateDialog`).
-
-**Metrics** — `apps/gateway/src/plugins/metrics.ts`:
-- `gw_upstream_auth_failed_total{platform}` — every observed 401/403 from an api_key upstream.
-- `gw_upstream_credential_degraded_total{platform}` — incremented once when an account crosses the threshold and is paused (the alertable "a BYOK credential just went dead" signal; analog of `gw_oauth_refresh_dead_total`).
+- **`deriveAccountStatus`** (`status.tsx`): add `credential_invalid` to the union (`:8`), add `tempUnschedulableReason` to the input (`:29`), and rank it **above** the generic `paused` (`:60`) so the badge reads "Credential rejected — rotate" rather than a benign "paused". `tempUnschedulableReason` is already in `accounts.list`/`listOwn` output (`accounts.ts:49/265`).
+- **Org `AccountList`**: mirror the oauth_invalid_grant amber banner (`AccountList.tsx:241-286`), filtering `tempUnschedulableReason === 'api_key_invalid_credential'`, copy "This API key was rejected by the upstream — rotate it.", button opens the **`RotateCredentialDialog`** (shipped #203).
+- **Member status page `CredentialHealthSection`**: surfaces the new badge automatically via `deriveAccountStatus`; add a CTA to the member rotate flow (`/dashboard/upstreams`).
+- **Metrics** (`plugins/metrics.ts`): `gw_upstream_auth_failed_total{platform}` (every 401) + `gw_upstream_credential_degraded_total{platform}` (incremented **only on the healthy→degraded DB transition** — the alertable "a BYOK credential went dead" signal).
 
 ## Configuration
 
-- `GATEWAY_UPSTREAM_AUTH_MAX_FAIL` — consecutive 401/403 before degrade. Default **3**. (Named to avoid the existing client-side per-IP `GATEWAY_AUTH_FAIL_*` throttle knobs.)
-- `GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC` — pause window after degrade. Default **3600**.
-- Wired into `packages/config/src/env.ts` + `docker/docker-compose.yml` x-app-env + `.env.example`, mirroring the existing `GATEWAY_OAUTH_MAX_FAIL` pattern.
+- `GATEWAY_UPSTREAM_AUTH_MAX_FAIL` (default **3**) and `GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC` (default **3600**) — distinct names so they don't collide with the existing client-side per-IP `GATEWAY_AUTH_FAIL_*` throttle. Wired into `packages/config/src/env.ts` + `docker/` x-app-env + `.env.example`, mirroring `GATEWAY_OAUTH_MAX_FAIL`.
 
-## Scheduler interaction (no code change)
+## Scheduler interaction (no scheduler change)
 
-The scheduler's `buildSchedulablePredicates` (`apps/gateway/src/runtime/scheduler.ts:489-506`) already filters `status='active'` AND `tempUnschedulableUntil IS NULL OR < now`. Setting `status='error'` + `tempUnschedulableUntil=now+backoff` makes the degraded account drop out of candidates automatically and re-enter after the window. No scheduler change needed.
+`buildSchedulablePredicates` (`scheduler.ts:489-506`) already filters `tempUnschedulableUntil IS NULL OR < now` — setting only the temp fields drops the account during the window and **re-admits it automatically** when the window lapses. Because we no longer set `status='error'`, recovery works with zero scheduler change. (This is the crux of codex's fatal-bug fix.)
 
 ## Edge cases
 
-- **One-off 401** (transient upstream auth blip) → counter increments but stays < N → no degrade; a subsequent 2xx resets it. (The threshold is the guard.)
-- **Genuinely dead key** → N consecutive 401s → degrade for `backoff` → retry → 401 → re-degrade (counter persisted) → … until rotated. Client-facing failures are bounded to ≈N per backoff window, not unbounded.
-- **Rotation while degraded** → `accounts.rotate` clears state + counter → account live on next schedule.
-- **Mixed pool** → only the dead account degrades; healthy pool accounts keep serving (the whole point).
-- **oauth 401** → guarded out of this counter (oauth has its own `invalid_grant` path); no double-handling.
-- **Redis unavailable** → `recordAuthFailure`/`clearAuthFailure` swallow the error; worst case is no degradation (current behavior) — never a broken response.
+- One-off 401 → counter < N → no degrade; next 2xx resets. The threshold is the guard.
+- Dead key → N×401 → pause `backoff` → retry → 401 → re-degrade (counter persisted) → … until rotated. Client-facing failures bounded ≈N per window.
+- Rotation while degraded → state + counter cleared + grace window → live on next schedule, not immediately re-degraded by stale in-flight 401s.
+- Mixed pool → only the dead account degrades; healthy accounts keep serving.
+- oauth 401 → guarded out (`account.type` check); oauth has its own path.
+- 403 → fails over, does not degrade (avoids false-degrade on permission/model 403s).
+- Redis/DB error in the helper → swallowed; worst case = no degradation (today's behavior), never a broken response.
+- Concurrency → the degrade UPDATE is conditional + `.returning()`; only the single row-flipping request increments the degraded metric.
 
 ## Testing
 
-- **Unit** (`upstreamAuthHealth`): only 401/403 count (400/404 no-op); INCR→threshold→DB degrade fields correct; 2xx clears counter + recovers a degraded account; oauth-type guarded out; Redis/DB error swallowed (no throw).
-- **Unit** (`deriveAccountStatus`): `api_key_invalid_credential` → `credential_invalid` badge, precedence correct.
-- **Unit/integration** (`accounts.rotate` / `rotateOwn`): rotating a credential-degraded account resets status/temp fields (+ counter) so it recovers; does not stomp an unrelated pause.
-- **Integration** (route + testcontainer + fake upstream): a fake upstream that 401s for a given account → after N requests the account is `tempUnschedulableReason='api_key_invalid_credential'` + scheduler skips it + the metric incremented; a later fake-200 (or a rotate) recovers it; other 4xx (e.g. 400) does NOT degrade.
-- **Config**: the two new knobs parse with defaults.
+- **Unit (`upstreamAuthHealth`):** only 401 + only `type='api_key'` count (403 / oauth / non-401 no-op); INCR→threshold→conditional degrade writes the right temp fields and a sanitized errorMessage (never body text); 2xx clears counter + recovers a degraded account; grace key suppresses degrade; Redis/DB error swallowed (no throw); degraded metric fires once per transition under concurrent calls.
+- **Unit (`classifier`):** 401/403 → `switch_account`/`auth_invalid` with **no** `status` stateUpdate (regression guard for the removed single-strike).
+- **Unit (`deriveAccountStatus`):** `api_key_invalid_credential` → `credential_invalid`, precedence above `paused`.
+- **Integration (`accounts.rotate`/`rotateOwn`):** rotating a credential-degraded account clears temp fields + counter + sets grace; does not stomp an unrelated (oauth/rate-limit) pause.
+- **Integration (route + testcontainer + fake upstream):** fake upstream 401s for one account → after N requests it's `tempUnschedulableReason='api_key_invalid_credential'`, scheduler skips it, degraded metric +1; after the backoff window a fake-200 (or a rotate) recovers it; a 400 does NOT degrade; the messages-anthropic-non-stream 401 now reaches the loop (degrades) while other 4xx still return to the client.
+- **Config:** the two knobs parse with defaults.
 
 **Zero schema / migration.**
 
 ## Files
 
 **New:** `apps/gateway/src/runtime/upstreamAuthHealth.ts` (+ test).
-**Modified:** the 4 routes (call sites), `apps/api/src/trpc/routers/accounts.ts` (`rotate` + `rotateOwn` health reset), `apps/gateway/src/plugins/metrics.ts` (2 counters), `packages/config/src/env.ts` (2 knobs) + `docker/` wiring, `apps/web/src/components/accounts/status.tsx` (`credential_invalid`), `apps/web/src/components/accounts/AccountList.tsx` (banner), `apps/web/src/components/status/CredentialHealthSection.tsx` (CTA), i18n catalogs (banner/badge strings, 5 locales).
+**Modified:** `apps/gateway/src/runtime/failoverLoop.ts` (success + auth_invalid hooks), `packages/gateway-core/src/stateMachine/classifier.ts` (drop 401/403 `status='error'`), `apps/gateway/src/routes/messages.ts` (anthropic non-stream 401 → throw), `apps/api/src/trpc/routers/accounts.ts` (`rotate` + `rotateOwn` health reset + grace key), `apps/gateway/src/plugins/metrics.ts` (2 counters), `packages/config/src/env.ts` (2 knobs) + `docker/` wiring, `apps/web/src/components/accounts/status.tsx` (`credential_invalid`), `AccountList.tsx` (banner), `apps/web/src/components/status/CredentialHealthSection.tsx` (CTA), i18n catalogs (banner/badge strings, 5 locales).
