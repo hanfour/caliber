@@ -14,6 +14,24 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ServerEnv } from "@caliber/config";
 import { checkIdempotency } from "../runtime/idempotencyCache.js";
 
+declare module "fastify" {
+  interface FastifyRequest {
+    /**
+     * The in-flight idempotency key this request CLAIMED (cache-miss "proceed"
+     * path only). Set here whenever the check returns a non-null `idemKey`;
+     * read by `idempotencyReleasePlugin`'s `onResponse` hook to release the
+     * slot when the claimant terminates non-2xx, so a same-id retry within the
+     * TTL can re-dispatch instead of being locked out by `409`.
+     *
+     * Left undefined for duplicates (they got `409` and own no slot) and for
+     * disabled requests — so the release hook NEVER clears a marker it didn't
+     * claim. Mirrors `gwWaitEnqueued`'s claimed-then-released-in-onResponse
+     * pattern.
+     */
+    gwIdemKey?: string;
+  }
+}
+
 export interface RequestIdempotency {
   /**
    * true when a terminal reply (replay / conflict / degraded) was already
@@ -58,6 +76,14 @@ export async function checkRequestIdempotency(
     onRedisError: () => app.gwMetrics.redisErrorTotal.inc({ op: "idempotency" }),
     logger: app.log,
   });
+
+  // Stash the claimed key (proceed path only) so the release hook can clear it
+  // on a terminal non-2xx. Duplicates / replays / degraded carry idemKey=null
+  // and never set this, so the hook can only ever release a slot THIS request
+  // owns.
+  if (result.idemKey !== null) {
+    req.gwIdemKey = result.idemKey;
+  }
 
   return {
     handled:

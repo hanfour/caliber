@@ -95,6 +95,40 @@ describe("checkRequestIdempotency", () => {
     expect(res).toEqual({ handled: false, idemKey: "test-key:rid-miss" });
   });
 
+  it("miss → stashes the claimed key on req.gwIdemKey for the release hook", async () => {
+    const req = fakeReq("rid-stash");
+    await checkRequestIdempotency(
+      fakeApp(redis, counters()),
+      strictEnv,
+      req,
+      fakeReply() as unknown as FastifyReply,
+    );
+    expect(req.gwIdemKey).toBe("test-key:rid-stash");
+  });
+
+  it("in-flight duplicate (409) → does NOT stash gwIdemKey (owns no slot)", async () => {
+    await setInFlight(redis, "test-key:rid-dup2", 300);
+    const req = fakeReq("rid-dup2");
+    await checkRequestIdempotency(
+      fakeApp(redis, counters()),
+      strictEnv,
+      req,
+      fakeReply() as unknown as FastifyReply,
+    );
+    expect(req.gwIdemKey).toBeUndefined();
+  });
+
+  it("disabled (no X-Request-Id) → does NOT stash gwIdemKey", async () => {
+    const req = fakeReq();
+    await checkRequestIdempotency(
+      fakeApp(redis, counters()),
+      strictEnv,
+      req,
+      fakeReply() as unknown as FastifyReply,
+    );
+    expect(req.gwIdemKey).toBeUndefined();
+  });
+
   it("in-flight duplicate → handled (409 sent) + metric incremented", async () => {
     await setInFlight(redis, "test-key:rid-dup", 300);
     const c = counters();

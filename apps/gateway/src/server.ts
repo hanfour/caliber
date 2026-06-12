@@ -12,6 +12,7 @@ import { redisPlugin } from "./redis/client.js";
 import { apiKeyAuthPlugin } from "./middleware/apiKeyAuth.js";
 import { rateLimitPlugin } from "./middleware/rateLimitPlugin.js";
 import { waitQueuePlugin } from "./middleware/waitQueuePlugin.js";
+import { idempotencyReleasePlugin } from "./middleware/idempotencyReleasePlugin.js";
 import { groupContextPlugin } from "./middleware/groupContext.js";
 import { gatewayErrorHandler } from "./middleware/errorHandler.js";
 import { messagesRoutes } from "./routes/messages.js";
@@ -173,6 +174,7 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
   await app.register(apiKeyAuthPlugin, { env: opts.env });
   await app.register(rateLimitPlugin, { env: opts.env });
   await app.register(waitQueuePlugin, { env: opts.env });
+  await app.register(idempotencyReleasePlugin);
   await app.register(groupContextPlugin);
   await app.register(messagesRoutes, { env: opts.env });
   await app.register(chatCompletionsRoutes, { env: opts.env });
