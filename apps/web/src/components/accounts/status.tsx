@@ -43,7 +43,7 @@ export interface AccountStatusInput {
 // limited account that is also disabled is displayed as `disabled` (operator
 // turned it off — that's the truth), and an expired account wins over a
 // generic `error` because "expired" is a more specific diagnosis.
-// disabled > rate_limited > overloaded > paused > expired > error > active
+// disabled > rate_limited > overloaded > credential_invalid > paused > expired > error > active
 export function deriveAccountStatus(
   row: AccountStatusInput,
   now: Date = new Date(),
