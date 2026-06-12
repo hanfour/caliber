@@ -36,7 +36,11 @@ import {
   type SchedulerMetrics,
 } from "./scheduler.js";
 import type { SelectedAccount } from "./selectAccount.js";
-import type { AuthHealthLoopDeps } from "./upstreamAuthHealth.js";
+import {
+  clearAuthFailure,
+  recordAuthFailure,
+  type AuthHealthLoopDeps,
+} from "./upstreamAuthHealth.js";
 
 const MAX_SAME_ACCOUNT_RETRIES = 3;
 
@@ -251,6 +255,16 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
           concurrency: account.concurrency,
         });
         scheduler.reportResult(account.id, true);
+        // Centralized api_key credential-health clear: a successful attempt
+        // return is the SINGLE 2xx choke point (streaming attempts also return
+        // normally on completion), so this covers stream + non-stream. Resets
+        // the 401 counter and recovers an account we degraded for our reason.
+        if (input.authHealth) {
+          await clearAuthFailure(
+            { ...input.authHealth, db: input.db },
+            { id: account.id, type: account.type, platform: account.platform },
+          );
+        }
         await release();
         return result;
       } catch (rawErr) {
@@ -302,6 +316,17 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
             input.db,
             account.id,
             action.stateUpdate,
+          );
+        }
+        // Centralized api_key credential-health record: only the classifier's
+        // `auth_invalid` (401/403) counts (recordAuthFailure further gates to
+        // type === "api_key" + status === 401). Threshold-degrades the account
+        // recoverably; failover still proceeds via giveUp below.
+        if (action.reason === "auth_invalid" && input.authHealth) {
+          await recordAuthFailure(
+            { ...input.authHealth, db: input.db },
+            { id: account.id, type: account.type, platform: account.platform },
+            "status" in upstreamErr ? upstreamErr.status : 0,
           );
         }
         await giveUp(true);
