@@ -3,6 +3,7 @@ import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
 import {
   getCached, setCached, setInFlight, isInFlight,
+  claimInFlight, clearInFlight,
   type IdempotencyEntry,
 } from "../../src/redis/idempotency.js";
 
@@ -95,5 +96,45 @@ describe("idempotency", () => {
     expect(got).not.toBeNull();
     expect(isInFlight(got!)).toBe(false);
     expect(got).toMatchObject({ status: 201 });
+  });
+
+  // Fix A — atomic claim (SET NX EX). The first caller wins the slot; any
+  // concurrent caller for the same id loses (false) and must treat it as an
+  // in-flight conflict. This closes the GET→SET race in checkIdempotency.
+  it("claimInFlight returns true exactly once for a key (NX semantics)", async () => {
+    expect(await claimInFlight(redis, "req-claim", 300)).toBe(true);
+    expect(await claimInFlight(redis, "req-claim", 300)).toBe(false);
+    expect(await claimInFlight(redis, "req-claim", 300)).toBe(false);
+  });
+
+  it("claimInFlight writes an in-flight marker readable by getCached/isInFlight", async () => {
+    await claimInFlight(redis, "req-claim-2", 300);
+    const got = await getCached(redis, "req-claim-2");
+    expect(got).not.toBeNull();
+    expect(isInFlight(got as IdempotencyEntry)).toBe(true);
+  });
+
+  it("claimInFlight returns false when a COMPLETED entry already exists", async () => {
+    await setCached(redis, "req-claim-3", { status: 200, headers: {}, body: "" }, 300);
+    expect(await claimInFlight(redis, "req-claim-3", 300)).toBe(false);
+  });
+
+  it("claimInFlight respects ttlSec", async () => {
+    await claimInFlight(redis, "req-claim-4", 60);
+    const ttl = await redis.ttl("idem:req-claim-4");
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(60);
+  });
+
+  // Fix B — release the slot so a same-id retry can re-dispatch after a failure.
+  it("clearInFlight deletes the slot so a subsequent claimInFlight wins again", async () => {
+    expect(await claimInFlight(redis, "req-release", 300)).toBe(true);
+    await clearInFlight(redis, "req-release");
+    expect(await getCached(redis, "req-release")).toBeNull();
+    expect(await claimInFlight(redis, "req-release", 300)).toBe(true);
+  });
+
+  it("clearInFlight on an absent key is a no-op (never throws)", async () => {
+    await expect(clearInFlight(redis, "req-absent")).resolves.toBeUndefined();
   });
 });

@@ -19,6 +19,7 @@ import {
   getCached,
   setCached,
   setInFlight,
+  claimInFlight,
   isInFlight,
   type CachedResponse,
 } from "../redis/idempotency.js";
@@ -97,23 +98,27 @@ export async function checkIdempotency(
   const key = `${deps.scope}:${deps.requestKey}`;
 
   let entry;
+  // A corrupt stored entry returns null from getCached (a "miss") but the key
+  // still physically exists, so an NX claim below would wrongly lose. Track it
+  // so the miss path overwrites the garbage (the documented "fresh run") rather
+  // than 409ing forever until the corrupt key's TTL.
+  let wasMalformed = false;
   try {
     entry = await getCached(deps.redis, key, {
       logger: deps.logger,
       // surface malformed entries to the metric; getCached still treats them
       // as a miss (returns null), so a corrupt entry degrades to a fresh run.
-      onMalformed: deps.onMalformed,
+      onMalformed: () => {
+        wasMalformed = true;
+        deps.onMalformed?.();
+      },
     });
   } catch (err) {
     return failure(deps, err);
   }
 
   if (entry && isInFlight(entry)) {
-    deps.reply.code(409);
-    deps.reply.header("retry-after", "1");
-    deps.reply.send({ error: "request_in_progress", requestId: deps.requestKey });
-    deps.onResult?.("conflict");
-    return { outcome: "conflict", idemKey: null };
+    return conflict(deps);
   }
 
   if (entry) {
@@ -126,13 +131,39 @@ export async function checkIdempotency(
     return { outcome: "replayed", idemKey: null };
   }
 
-  // miss — claim the slot with an in-flight marker so concurrent duplicates 409.
+  // miss — atomically claim the slot (SET NX). The `getCached` above is a cheap
+  // fast-path for the common already-in-flight / completed cases; the NX here
+  // closes the TOCTOU window where two same-id requests both read a miss. Only
+  // the request that WINS the NX proceeds upstream; a loser (a concurrent
+  // request claimed the slot between our GET and SET) gets the same 409 as a
+  // hit-in-flight, so exactly one request ever dispatches (design §4.7).
   try {
-    await setInFlight(deps.redis, key, deps.ttlSec);
+    if (wasMalformed) {
+      // The only thing under this key was unparseable garbage — there is no
+      // valid claimant to clobber, so unconditionally overwrite it with our
+      // marker and proceed (design contract: corrupt entry → fresh run).
+      await setInFlight(deps.redis, key, deps.ttlSec);
+    } else {
+      const won = await claimInFlight(deps.redis, key, deps.ttlSec);
+      if (!won) {
+        return conflict(deps);
+      }
+    }
   } catch (err) {
     return failure(deps, err);
   }
   return { outcome: "proceed", idemKey: key };
+}
+
+/** Emit the `409 request_in_progress` conflict reply (shared by the GET-hit and
+ *  lost-NX-race paths). The body reports the RAW client X-Request-Id, never the
+ *  scoped composite key. */
+function conflict(deps: CheckIdempotencyDeps): CheckIdempotencyResult {
+  deps.reply.code(409);
+  deps.reply.header("retry-after", "1");
+  deps.reply.send({ error: "request_in_progress", requestId: deps.requestKey });
+  deps.onResult?.("conflict");
+  return { outcome: "conflict", idemKey: null };
 }
 
 function failure(
