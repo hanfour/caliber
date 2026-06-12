@@ -73,23 +73,26 @@ Returns `{ baseUrl, db, redis, fake, seed, env, teardown }`. Both drivers call i
 2. Start `redis:7-alpine` testcontainer.
 3. Start the fake upstream (`fakeUpstream.ts`) on `port: 0`.
 4. Build `ServerEnv` with `REDIS_URL` pointed at the Redis container, and `UPSTREAM_ANTHROPIC_BASE_URL` **and** `UPSTREAM_OPENAI_BASE_URL` pointed at the fake's address, plus per-scenario concurrency/wait knobs.
-5. `buildServer({ env, db })` **without** injecting `opts.redis`, then `app.listen({ port: 0, host: '127.0.0.1' })`; capture `baseUrl`.
+5. `buildServer({ env, db })` **without** injecting `opts.redis`, then `app.listen({ port: 0, host: '127.0.0.1' })`; capture `baseUrl`. (`buildServer` returns an un-listened Fastify app — only `main()` listens — so the harness owns `listen`. `port: 0` is the OS-ephemeral-port `listen` arg and is unrelated to `GATEWAY_PORT`, which the env schema still requires to be ≥1 even though it's unused here — `server.ts:133`, `env.ts:83`.)
 6. Run the seed (`seed.ts`).
 7. The harness opens **its own** Redis client to the same container (keyPrefix `caliber:gw:`) for slot-ZSET inspection + `SCAN`/`UNLINK` cleanup — separate from the gateway's internal client.
 8. `teardown()` closes the app, both containers, and the fake server.
 
 **Critical wiring constraint (verified against code).** `buildServer` infers "this is a test" from `opts.redis` being **present** and, when so, **skips BullMQ queue/worker/audit instantiation entirely** (`apps/gateway/src/server.ts:107-118`). If the harness injects Redis via `opts.redis`, `app.usageLogQueue` stays `undefined`, and every usage write is silently skipped (`usageLogging.ts:612`) — so `usage_logs` would be **empty** and C1/C5/C6 would have nothing to assert. Therefore the harness drives the gateway via the **production path**: it sets `REDIS_URL` env to the container and leaves `opts.redis` undefined, so `buildServer` builds its own real Redis client and runs the real BullMQ queue + worker against the real container. (`opts.db` injection is independent of this gate and is fine.)
 
-With the queue+worker live, the harness **drains the usage queue** (awaits queue idle) before asserting `usage_logs` rows, so attribution/billing assertions are deterministic.
+With the queue+worker live, the harness **drains the usage queue** before asserting `usage_logs` rows. There is no exposed worker-drain API and the worker batches on a ~1000ms timer (`usageLogWorker.ts:53/285`), so `drainUsageQueue.ts` polls BullMQ `getJobCounts` **and** the expected `usage_logs` row count until both settle (the pattern used by `usageLogWiring.integration.test.ts:319`). Attribution/billing assertions run only after the drain.
 
 **All five surfaces resolve their upstream base URL from `opts.env.UPSTREAM_{ANTHROPIC,OPENAI}_BASE_URL`** (not from a per-account column) — e.g. `messages.ts:151`, `chatCompletions.ts:147`, `responses.ts:210/336`. So one fake server behind those two env vars covers every surface; the seeded accounts are differentiated by the **credential token** the fake receives (the `credentialHealth.integration.test.ts` pattern). Note: `UPSTREAM_ANTHROPIC_BASE_URL` has a hard fallback to `https://api.anthropic.com` when empty (`messages.ts:152`), so the harness **must set it explicitly** or anthropic surfaces would hit the real API.
 
 ### `fakeUpstream.ts` — one server, three upstream shapes
 
-Serves the response shapes the gateway needs from each upstream:
+Serves the response shapes the gateway actually calls upstream (verified — the gateway never calls upstream `/v1/chat/completions`; the chat-completions surface pivots to Anthropic `/v1/messages` or OpenAI `/v1/responses`, and codex is forced to OpenAI Responses — `upstreamCall.ts:67`, `upstreamCallOpenai.ts:48/112`, `codexResponses.ts:37`):
 - Anthropic `POST /v1/messages` (non-stream JSON + SSE stream)
-- OpenAI `POST /v1/chat/completions`
-- OpenAI `POST /v1/responses`
+- OpenAI `POST /v1/responses` (non-stream JSON + SSE stream)
+- OpenAI `POST /v1/responses/compact` (non-stream)
+- `GET /v1/models` — see model-alias note below.
+
+**Model-alias refresh must be neutralized.** `GATEWAY_ENABLE_MODEL_ALIAS` defaults on and the registry's background refresh starts on the real-Redis boot path, fetching `${baseUrl}/v1/models` (`env.ts:199`, `server.ts:223`, `modelCatalogFetch.ts:17`). The harness either sets `GATEWAY_ENABLE_MODEL_ALIAS=false` (default — the load test does not exercise alias resolution) **or** the fake serves a static `/v1/models`. Default to disabling it.
 
 Configurable **per-route or globally**:
 - **latency**: fixed ms (and optionally a simple distribution) before responding — to create slot saturation (correctness) and to isolate gateway overhead (perf).
@@ -107,9 +110,10 @@ Runs as vitest integration tests in the serial `load` lane. Each scenario seeds 
 
 ### Cross-cutting rules
 
-- **C0 baseline = delta, always.** Each scenario scrapes Prometheus once at start, once at end, and compares the **delta**. Never assume counters are zero (prom-client retains registered metrics / initial 0-series even when serial). DB and Redis are cleaned between scenarios; Prometheus uses delta.
+- **C0 baseline = delta, always.** Each scenario reads counters once at start, once at end, and compares the **delta**. Never assume counters are zero (prom-client retains registered metrics / initial 0-series even when serial). DB and Redis are cleaned between scenarios; metrics use delta.
+- **Metrics are read in-process, not over HTTP.** The public `/metrics` route is **not** in `PUBLIC_PATHS` and returns 401 (`apiKeyAuth.ts:46/51`, asserted by `server.test.ts:75`), and `buildServer` does **not** start the private metrics listener (only `main()` calls `startMetricsServer()`, `server.ts:679`). So the harness reads the prom-client global registry directly from the in-process app — `app.metrics.client.register.getMetricsAsJSON()` (or `.metrics()`) — via `scrapeMetrics.ts`. No HTTP scrape, no private server boot.
 - **Fixture id naming.** Every org / user / upstream_account / api_key / request id carries the scenario slug, so DB joins, metric labels, and reports line up and C1/C5 can make precise joins.
-- **Isolation.** `afterEach`: `TRUNCATE` the data tables (`usage_logs`, `upstream_accounts`, `api_keys`, `credential_vault`, org/user/membership rows — migrations preserved) **and** `SCAN` + `UNLINK` the scenario Redis prefix. Cleaning only Redis is insufficient — leftover `usage_logs`/`upstream_accounts` rows would pollute subsequent delta/join assertions.
+- **Isolation.** `afterEach`: `TRUNCATE ... RESTART IDENTITY CASCADE` the data tables **and** `SCAN` + `UNLINK` the scenario Redis prefix. `usage_logs` has `RESTRICT` FKs to `users`/`api_keys`/`upstream_accounts`/`organizations`, and `request_bodies`/`request_body_facets` hang off `usage_logs`; `idempotency_records`, `credential_vault`, and account-group membership are additional dependent state (`usageLogs.ts:25`, `requestBodies.ts:9`, `requestBodyFacets.ts:26`, `idempotencyRecords.ts:23`, `credentialVault.ts:21`, `accountGroups.ts:57`). So `CASCADE` (or a fully ordered child-first list) is required — a naive truncate of `usage_logs` alone fails on the RESTRICT FKs. Migrations are preserved. Cleaning only Redis is insufficient — leftover rows would pollute subsequent delta/join assertions.
 - **Assertion sources (triangulated, no mock theater):** HTTP status + error-body shape, real `usage_logs` rows, real Prometheus counter deltas, and (where relevant) direct Redis slot-ZSET inspection.
 
 ### Scenarios
@@ -119,7 +123,7 @@ Runs as vitest integration tests in the serial `load` lane. Each scenario seeds 
 | **C0** | Harness sanity | fresh boot, baseline scrape | DB/Redis baseline clean (or unique-label delta); a single trivial 200 request flows end-to-end and writes exactly one `usage_logs` row. Smoke for the harness itself. |
 | **C1** | Attribution isolation | K members, each with their **own** BYOK upstream; fake all-200 | Concurrent N requests across members → drain queue → every `usage_logs` row's `user_id`/`account_id` matches its caller; **zero** cross-user leak (`JOIN upstream_accounts ON account_id WHERE upstream_accounts.user_id IS NOT NULL AND <> usage.user_id` = 0 rows); BYOK `own` traffic lands only on the caller's own upstream. |
 | **C1b** | own-policy, no own upstream (negative) | `own`-policy key whose user owns **no** upstream | Request returns `409 no_own_upstream`; **must not** fall through to the org pool (anti-fallback-leak). |
-| **C2** | Slot cap (deterministic) | **single account**, no other candidates (or `MAX_ACCOUNT_SWITCHES=1`); `concurrency=K`; fake slow (holds slots) | Concurrent N>K → first K acquire and proceed; the rest return a fixed `503 account_at_capacity`; **no over-allocation**; `gw_slot_acquire_total{result=over_limit}` delta matches the overflow count. No "or failover" branch. |
+| **C2** | Slot cap (deterministic) | **single account**, no other candidates; `concurrency=K`; fake slow (holds slots) | Concurrent N>K → first K acquire and proceed (200). **The no-over-allocation invariant is asserted via the metric**: `gw_slot_acquire_total{result=over_limit}` delta == N−K (the true proof — independent of HTTP shape). The shed requests return **`503 { error: "all_upstreams_failed", attempted_count: 1 }`** — **not** `account_at_capacity`: a `CapacityError` thrown inside the failover loop's `attempt` is treated as a failed attempt; with a single account the loop exhausts → `AllUpstreamsFailed`. This is the documented behavior of the existing `messages.integration.test.ts:428` test. (`account_at_capacity` only surfaces when a `CapacityError` escapes the loop entirely — a different path not exercised here.) No "or failover" branch. |
 | **C3** | Wait-queue admit/shed | `GATEWAY_MAX_WAIT=W`; fake slow; **account concurrency set high** so the only bottleneck is W (else requests hit slot 503 before queue 429) | Single user fires M>W → first W proceed, the rest return `429 wait_queue_full` (correct shape); after the queue drains, new requests admit again. |
 | **C4-L1** | Sticky — Responses `previous_response_id` | multiple accounts; same `previous_response_id` | ① same session initially all hit the **same** account; ② when the sticky target is forced to fail, that request **failovers to a healthy account**; ③ subsequent requests with the same sticky key **rebind to / stay on the new healthy account** (not back to the dead target). |
 | **C4-L2** | Sticky — Messages/Chat session header | multiple accounts; same `X-Claude-Session-Id` | Same three assertions as C4-L1, tested independently. |
@@ -192,7 +196,8 @@ apps/gateway/tests/load/
   seed.ts                 # 1 org, K members, keys across pool/own/own_then_pool + BYOK/pool upstreams; slug-namespaced ids
   scrapeMetrics.ts        # prom scrape → parse → delta helper
   assertions.ts           # shared: error-body shape, usage-log drain, metric delta, fake-count asserts (thin, NOT a framework)
-  cleanup.ts              # afterEach: TRUNCATE data tables + SCAN/UNLINK Redis prefix
+  cleanup.ts              # afterEach: TRUNCATE ... RESTART IDENTITY CASCADE + SCAN/UNLINK Redis prefix
+  drainUsageQueue.ts      # poll getJobCounts + DB row count until idle (no worker drain API; 1000ms batch timer)
   correctness/
     *.integration.test.ts # C0–C8, one file per scenario group
   vitest.load.config.ts   # serial (singleThread/maxWorkers:1); collects tests/load/correctness/**
@@ -243,6 +248,17 @@ Both require Docker / Testcontainers (Postgres + Redis containers). The correctn
 ---
 
 ## 9. Verified Findings & Remaining Plan-Stage Questions
+
+Reviewed by **Claude + codex** (both grounded in the real repo, file:line-cited; cross-verified against the code). codex independently confirmed the two High findings below and added four more (metrics scrape path, C2 capacity shape, TRUNCATE CASCADE, fake paths / model-alias) — all verified and folded into §§3–6 above.
+
+### codex-added findings (verified, folded above)
+
+- **[High] Metrics can't be HTTP-scraped from the harness.** Public `/metrics` is not in `PUBLIC_PATHS` → 401 (`apiKeyAuth.ts:46/51`, `server.test.ts:75`); `buildServer` does not start the private metrics listener (only `main()` → `startMetricsServer()`, `server.ts:679`); `metricsPlugin` uses `clearRegisterOnInit:true` (`metrics.ts:100`). → harness reads the in-process prom-client global registry directly (folded into §3/§4); reinforces the **single long-lived gateway** decision (a re-boot would `clearRegisterOnInit` and wipe counters).
+- **[High] C2 capacity shape is `all_upstreams_failed`, not `account_at_capacity`** for a single full account — verified against the existing `messages.integration.test.ts:428` which documents exactly this. C2 rewritten (assert no-over-allocation via the `over_limit` metric delta; shed requests are `503 all_upstreams_failed{attempted_count:1}`).
+- **[High] TRUNCATE needs CASCADE** — `usage_logs` RESTRICT FKs + dependent tables. Folded into §4/§6.
+- **[Med] Fake upstream paths** — the gateway never calls upstream `/v1/chat/completions`; needs `/v1/messages`, `/v1/responses`, `/v1/responses/compact` (+SSE). Plus model-alias refresh fetches `/v1/models` and must be disabled (or served). Folded into §3.
+- **[Med] Queue-drain method** — no drain API; poll `getJobCounts` + DB row count. Folded into §3/§6.
+- **[confirmed] Real-Redis justification, 60s slot caveat, C4 sticky rebind correctness, exact error shapes** — codex cross-confirmed all of these.
 
 ### Verified against the code during spec review (fold into Task 1)
 
