@@ -36,6 +36,7 @@ import {
   type SchedulerMetrics,
 } from "./scheduler.js";
 import type { SelectedAccount } from "./selectAccount.js";
+import type { AuthHealthLoopDeps } from "./upstreamAuthHealth.js";
 
 const MAX_SAME_ACCOUNT_RETRIES = 3;
 
@@ -155,6 +156,12 @@ export interface RunFailoverInput<T> {
   scheduler?: AccountScheduler;
   /** Metric sink — only consumed when an internal scheduler is created. */
   metrics?: SchedulerMetrics;
+  /**
+   * api_key credential-health deps (redis/config/metrics/logger), assembled
+   * by buildFailoverInput from req.server. Absent in unit tests that build the
+   * input by hand → the loop's auth-health hooks no-op.
+   */
+  authHealth?: AuthHealthLoopDeps;
 }
 
 const defaultSleep = (ms: number) =>
