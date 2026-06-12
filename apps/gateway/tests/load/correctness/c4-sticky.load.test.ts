@@ -54,8 +54,10 @@ it("C4-L1: OpenAI Responses previous_response_id sticks, then rebinds when the t
   const stuckTo = first.accountId;
   expect(stuckTo === a1.id || stuckTo === a2.id).toBe(true);
 
-  // Same previous_response_id → Layer 1 sticky hit on the SAME account, 3×.
-  for (let i = 0; i < 3; i++) {
+  // Same previous_response_id → Layer 1 sticky hit on the SAME account, 6×
+  // (6 consecutive same-account hits over 2 equal-weight candidates makes a
+  // no-sticky coincidence ~1/64, not ~1/8).
+  for (let i = 0; i < 6; i++) {
     const r = await postResponsesAndAccount(stack.baseUrl, stack.db, m.rawKey, ++total, PRID);
     expect(r.status).toBe(200);
     expect(r.accountId).toBe(stuckTo);
@@ -93,7 +95,8 @@ it("C4-L2: Anthropic Messages X-Claude-Session-Id sticks, then rebinds when the 
   const stuckTo = first.accountId;
   expect(stuckTo === a1.id || stuckTo === a2.id).toBe(true);
 
-  for (let i = 0; i < 3; i++) {
+  // 6× consecutive same-session hits → no-sticky coincidence ~1/64.
+  for (let i = 0; i < 6; i++) {
     const r = await postMessagesAndAccount(stack.baseUrl, stack.db, m.rawKey, ++total, SESSION);
     expect(r.status).toBe(200);
     expect(r.accountId).toBe(stuckTo);
