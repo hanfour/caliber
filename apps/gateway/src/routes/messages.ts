@@ -456,15 +456,17 @@ async function runNonStreamFailover(
           throw { status: 502, message: "unexpected_stream" };
         }
 
-        if (upstream.status >= 400 && upstream.status < 500) {
-          // 4xx errors are client errors — forward them directly without failover.
-          // No usage log: upstream returned no usage/model payload we can trust,
-          // and cost is zero anyway.
-          return upstream;
-        }
-
         if (upstream.status < 200 || upstream.status >= 300) {
-          // 5xx / unexpected non-2xx → failover-eligible transient error.
+          // Any non-2xx (4xx incl.) → THROW into the failover loop so the
+          // shared classifier decides: 400/422 → fatal (FatalUpstreamError
+          // wrapper, status preserved); 403 → switch_account (failover, no
+          // degrade); 401 → switch_account + recordAuthFailure + failover.
+          // Throwing here (vs an early `return upstream`) is required for
+          // credential-health correctness: a *returned* 4xx would be treated
+          // as a successful attempt by the loop (wrongly clearing the auth
+          // counter) and would never reach the classifier. This matches every
+          // other route surface. No usage log: upstream returned no
+          // usage/model payload we can trust, and cost is zero anyway.
           const text = upstream.body.toString("utf8");
           const ra = parseRetryAfterHeader(upstream.headers["retry-after"]);
           throw {
