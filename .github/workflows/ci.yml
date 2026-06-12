@@ -80,6 +80,27 @@ jobs:
       - name: Run gateway-core tests
         run: pnpm --filter @caliber/gateway-core test
 
+  gateway-load:
+    # Mirrors `gateway-integration`: the load correctness gate (#206) boots its
+    # OWN testcontainers (postgres + redis) via the docker daemon on
+    # ubuntu-latest — no `services:` stanza needed. Serial lane (prom-client
+    # global registry + one long-lived gateway per scenario file). Separate job
+    # for clean failure signals + parallel PR feedback.
+    runs-on: ubuntu-latest
+    needs: lint-type-test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
+      - name: Gateway load correctness gate
+        run: pnpm --filter @caliber/gateway test:load
+
   evaluator-integration:
     # Evaluator tests span multiple packages (@caliber/evaluator, @caliber/api, @caliber/gateway).
     # Separate job provides clean failure signals in GitHub PR checks. Uses same
