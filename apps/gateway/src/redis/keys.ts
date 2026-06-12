@@ -1,6 +1,7 @@
 // Single source of truth for Redis key shapes. ioredis client (Task 4.1) prepends
 // `caliber:gw:` via keyPrefix; these helpers return the suffix only.
 // All shapes match design Section 4.1 + Plan 5A §8.2.
+import { authFailKey, authGraceKey } from "@caliber/gateway-core/redis";
 export const keys = {
   slots: (scope: "user" | "account", id: string) => `slots:${scope}:${id}`,
   wait: (userId: string) => `wait:user:${userId}`,
@@ -25,4 +26,8 @@ export const keys = {
   // implicitly rotates every 60s, so we don't need cleanup.
   rlApiKey: (apiKeyId: string, minuteBucket: number) =>
     `rl:apikey:${apiKeyId}:${minuteBucket}`,
+  // api_key credential-health counters (Task 1) — suffixes shared with apps/api
+  // via @caliber/gateway-core/redis; client prepends `caliber:gw:`.
+  authFail: authFailKey,
+  authGrace: authGraceKey,
 } as const;
