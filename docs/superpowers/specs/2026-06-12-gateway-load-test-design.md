@@ -70,14 +70,19 @@ So the harness stands up a real `redis:7-alpine` testcontainer and calls `app.li
 Returns `{ baseUrl, db, redis, fake, seed, env, teardown }`. Both drivers call it. Responsibilities:
 
 1. Start Postgres testcontainer (reuse the `apps/api/tests/factories/db.ts` pattern), run `@caliber/db` migrations.
-2. Start `redis:7-alpine` testcontainer; client uses keyPrefix `caliber:gw:` (matches prod).
+2. Start `redis:7-alpine` testcontainer.
 3. Start the fake upstream (`fakeUpstream.ts`) on `port: 0`.
-4. Build `ServerEnv` with `UPSTREAM_ANTHROPIC_BASE_URL` / `UPSTREAM_OPENAI_BASE_URL` pointed at the fake's address, plus per-scenario concurrency/wait knobs.
-5. `buildServer({ env, db, redis })` then `app.listen({ port: 0, host: '127.0.0.1' })`; capture `baseUrl`.
+4. Build `ServerEnv` with `REDIS_URL` pointed at the Redis container, and `UPSTREAM_ANTHROPIC_BASE_URL` **and** `UPSTREAM_OPENAI_BASE_URL` pointed at the fake's address, plus per-scenario concurrency/wait knobs.
+5. `buildServer({ env, db })` **without** injecting `opts.redis`, then `app.listen({ port: 0, host: '127.0.0.1' })`; capture `baseUrl`.
 6. Run the seed (`seed.ts`).
-7. `teardown()` closes the app, both containers, and the fake server.
+7. The harness opens **its own** Redis client to the same container (keyPrefix `caliber:gw:`) for slot-ZSET inspection + `SCAN`/`UNLINK` cleanup — separate from the gateway's internal client.
+8. `teardown()` closes the app, both containers, and the fake server.
 
-With **real Redis**, BullMQ usage-log queue + worker are active. The harness **drains the usage queue** (awaits queue idle) before asserting `usage_logs` rows, so attribution/billing assertions are deterministic.
+**Critical wiring constraint (verified against code).** `buildServer` infers "this is a test" from `opts.redis` being **present** and, when so, **skips BullMQ queue/worker/audit instantiation entirely** (`apps/gateway/src/server.ts:107-118`). If the harness injects Redis via `opts.redis`, `app.usageLogQueue` stays `undefined`, and every usage write is silently skipped (`usageLogging.ts:612`) — so `usage_logs` would be **empty** and C1/C5/C6 would have nothing to assert. Therefore the harness drives the gateway via the **production path**: it sets `REDIS_URL` env to the container and leaves `opts.redis` undefined, so `buildServer` builds its own real Redis client and runs the real BullMQ queue + worker against the real container. (`opts.db` injection is independent of this gate and is fine.)
+
+With the queue+worker live, the harness **drains the usage queue** (awaits queue idle) before asserting `usage_logs` rows, so attribution/billing assertions are deterministic.
+
+**All five surfaces resolve their upstream base URL from `opts.env.UPSTREAM_{ANTHROPIC,OPENAI}_BASE_URL`** (not from a per-account column) — e.g. `messages.ts:151`, `chatCompletions.ts:147`, `responses.ts:210/336`. So one fake server behind those two env vars covers every surface; the seeded accounts are differentiated by the **credential token** the fake receives (the `credentialHealth.integration.test.ts` pattern). Note: `UPSTREAM_ANTHROPIC_BASE_URL` has a hard fallback to `https://api.anthropic.com` when empty (`messages.ts:152`), so the harness **must set it explicitly** or anthropic surfaces would hit the real API.
 
 ### `fakeUpstream.ts` — one server, three upstream shapes
 
@@ -237,8 +242,18 @@ Both require Docker / Testcontainers (Postgres + Redis containers). The correctn
 
 ---
 
-## 9. Open Questions for Plan Stage
+## 9. Verified Findings & Remaining Plan-Stage Questions
 
-- Exact K (member count) and N (concurrent request count) per scenario — pick the smallest values that deterministically exercise each invariant (keep CI fast).
-- Whether `test:load` runs in the existing gateway integration CI job or a new dedicated job (leaning: dedicated job, since it adds a Redis container and is serial).
-- Confirm `buildServer` cleanly supports `app.listen` + repeated boot/teardown without leaking the prom-client global registry across scenarios (may need `register.clear()` or a fresh registry per boot — investigate in Task 1).
+### Verified against the code during spec review (fold into Task 1)
+
+- **[High] prom-client registry is a process-global singleton.** The metrics plugin registers every counter against `fastify.metrics.client.register` — the prom-client **default global registry** (`apps/gateway/src/plugins/metrics.ts:100-109`, comment: "Owns the prom-client default singleton"). Booting a second gateway in the same process would re-register the same metric names against the same global registry → throw or accumulate. **Resolution:** boot **one long-lived gateway for the whole serial suite** and reuse it across scenarios — between scenarios only TRUNCATE DB + `SCAN`/`UNLINK` Redis + take metric **deltas**. This also matches the C0 delta rule and is faster than boot-per-scenario. (Scenario-specific env knobs — `MAX_WAIT`, `MAX_ACCOUNT_SWITCHES`, `UPSTREAM_AUTH_MAX_FAIL` — that can't be re-read at request time must be handled by either grouping same-env scenarios under one boot, or, where possible, expressing the variation through per-account DB columns. Task 1 must map which knobs are boot-time vs per-account and decide the grouping; if multiple boots are truly required, clear the default registry between boots via `register.clear()`.)
+- **[High] usage-queue gating** — resolved in §3: drive via `REDIS_URL` env, do **not** inject `opts.redis`, or `usage_logs` stays empty (`server.ts:107-118`, `usageLogging.ts:612`).
+- **[Med] anthropic base-URL hard fallback** — resolved in §3: the harness must set `UPSTREAM_ANTHROPIC_BASE_URL` explicitly (`messages.ts:152`).
+- **[Med] exact error-body shapes to assert** (verified): `429 { error: "wait_queue_full", maxWait }` (`waitQueuePlugin.ts:61`); `409 { error: "no_own_upstream", ... }` (`noOwnUpstream.ts:37`); `503 { error: "account_at_capacity" }` (`messages.ts:252`, thrown as `{ status:503, message:"account_at_capacity" }` `withSlotAndCredential.ts:63`); `{ error: "all_upstreams_failed", request_id }` (`messages.ts`, `sseErrorEvents.ts:188`); idempotency in-flight is **`409 request_in_progress` + Retry-After** (`idempotencyCache.ts:8`), not a bare "conflict".
+- **[Med] C4 sticky rebind is real but setup-sensitive.** `bindStickyKeys` runs at L1-hit, L2-hit, and cold-path selection (`scheduler.ts:327/367/431`); when a sticky target is **unschedulable**, select self-heals to the cold path and rebinds to the new healthy account (`scheduler.ts:431`). So C4 assertion ③ holds **only if the scenario makes the dead target genuinely unschedulable** (disable/degrade it) before the follow-up request. To assert ② (per-request failover) instead, the target fails at attempt-time while staying schedulable. The plan must set these two sub-cases up distinctly.
+
+### Remaining questions for the plan
+
+- Exact K (member count) and N (concurrent request count) per scenario — smallest values that deterministically exercise each invariant (keep CI fast).
+- Whether `test:load` runs in the existing gateway-integration CI job or a new dedicated job (leaning: **dedicated** — it adds a Redis container, runs serial, and boots a real listening port).
+- The slot 60s `EXPIRE` safety net (`slots.ts`) is far longer than any scenario; C2/C7 rely on the `finally` `releaseSlot` for prompt release and on fake latency to hold slots — confirm no scenario depends on the 60s expiry firing.
