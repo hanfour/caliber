@@ -78,8 +78,10 @@ export default defineConfig({
     hookTimeout: 120_000,
     // Serial: prom-client uses a process-global registry; parallel app
     // instances would share/clear it and race the C0 metric deltas.
+    // (Vitest 4 removed `poolOptions.threads`; use the top-level knobs.)
     fileParallelism: false,
-    poolOptions: { threads: { singleThread: true, maxThreads: 1, minThreads: 1 } },
+    maxWorkers: 1,
+    minWorkers: 1,
   },
 });
 ```
@@ -769,7 +771,7 @@ export async function bootStack(opts: BootOptions = {}): Promise<LoadStack> {
     NODE_ENV: "test", DATABASE_URL: pgC.getConnectionUri(),
     AUTH_SECRET: "test-auth-secret-min-32-chars-long!!", NEXTAUTH_URL: "http://localhost:3000",
     GOOGLE_CLIENT_ID: "x", GOOGLE_CLIENT_SECRET: "x", GITHUB_CLIENT_ID: "x", GITHUB_CLIENT_SECRET: "x",
-    BOOTSTRAP_SUPER_ADMIN_EMAIL: "a@e.com", BOOTSTRAP_DEFAULT_ORG_SLUG: "o", BOOTSTRAP_DEFAULT_ORG_NAME: "O",
+    BOOTSTRAP_SUPER_ADMIN_EMAIL: "admin@example.com", BOOTSTRAP_DEFAULT_ORG_SLUG: "test-org", BOOTSTRAP_DEFAULT_ORG_NAME: "Test Org",
     ENABLE_GATEWAY: "true", GATEWAY_BASE_URL: "http://localhost:3002",
     REDIS_URL: redisUrl,
     CREDENTIAL_ENCRYPTION_KEY: masterKey, API_KEY_HASH_PEPPER: pepper,
