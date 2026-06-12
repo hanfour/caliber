@@ -19,19 +19,19 @@ So today: the prod `/v1/messages` non-stream path **never** degrades a dead key;
 
 ## Goal & Non-Goals
 
-**Goal:** Any `api_key` upstream that the provider rejects with **401** is, after **N consecutive** failures, **temporarily** paused (recoverably) so the scheduler skips it; it **auto-recovers** on a later success or on credential **rotation**; and it is **surfaced** to operator/member with a "rotate this credential" affordance. One coherent mechanism across all surfaces. Observable via metrics. This also **fixes the latent un-recoverable `status='error'` bug** above.
+**Goal:** Any `api_key` upstream that the provider rejects with **401** is, after **N counted 401s since the last 2xx/rotation**, **temporarily** paused (recoverably) so the scheduler skips it; it **auto-recovers** on a later success or on credential **rotation**; and it is **surfaced** to operator/member with a "rotate this credential" affordance. One coherent mechanism across all surfaces. Observable via metrics. This also **fixes the latent un-recoverable `status='error'` bug** above.
 
 **Non-Goals:**
 - NOT counting **403** (entitlement / model-policy / project 403s are not a dead key — `codex` flag). 403 still fails over but does not degrade; a finer 401-vs-403 taxonomy is a future refinement.
 - NOT the **OAuth** path — oauth has its own `invalid_grant`/`refresh_exhausted` degradation + re-onboard (`oauthRefresh.ts:538-615`). This is the api_key analog; oauth request-time 401s are out of scope here.
-- NOT changing the in-request **failover decision** beyond the one alignment below (the prod non-stream path starts failing over on 401, like every other path already does).
+- NOT changing other surfaces' behavior. The `messages` non-stream change — throwing **all** non-2xx into the loop (so 401 records + fails over, 403 fails over, 400/422 become the standard fatal wrapper) — is an **intentional** alignment with every already-throwing surface, not a generic "failover on auth" redesign.
 - NO schema change / migration (counter in Redis; degraded state reuses existing `upstream_accounts` columns).
 
 ## Decisions (brainstorm + Claude+codex review)
 
 | # | Decision |
 |---|----------|
-| Trigger | **Threshold:** degrade after **N consecutive 401s**, `GATEWAY_UPSTREAM_AUTH_MAX_FAIL` default **3**. Reset on any 2xx. |
+| Trigger | **Threshold:** degrade after **N counted 401s since the last 2xx / rotation** (`GATEWAY_UPSTREAM_AUTH_MAX_FAIL` default **3**). Only a **401 increments**; only a **2xx (or rotation) resets**. A non-401 non-2xx (400/403/5xx) **neither increments nor resets** — it does not interrupt the counted-401 sequence. |
 | Signal | **401 only.** 403 fails over but is not a credential-death signal. |
 | Counter store | **Redis** via the suffix helper `authFailKey(id)` (the client is already `caliber:gw:`-prefixed) — zero migration; `INCR` per 401, `DEL` on 2xx; generous safety TTL. |
 | Degraded state | **`tempUnschedulableUntil = now + backoff` + `tempUnschedulableReason='api_key_invalid_credential'` + sanitized `errorMessage`. DO NOT touch `status`.** (codex's fatal-bug fix: `status='error'` would survive the backoff window and the `status='active'` predicate would keep the account out forever — recovery must rely on the temp predicate alone, which re-admits automatically when `tempUnschedulableUntil < now`.) |
@@ -109,7 +109,7 @@ clearAuthFailure(deps, account) -> Promise<void>
 - **`deriveAccountStatus`** (`status.tsx`): add `credential_invalid` to the union (`:8`), add `tempUnschedulableReason` to the input (`:29`), and rank it **above** the generic `paused` (`:60`) so the badge reads "Credential rejected — rotate" rather than a benign "paused". `tempUnschedulableReason` is already in `accounts.list`/`listOwn` output (`accounts.ts:49/265`).
 - **Org `AccountList`**: mirror the oauth_invalid_grant amber banner (`AccountList.tsx:241-286`), filtering `tempUnschedulableReason === 'api_key_invalid_credential'`, copy "This API key was rejected by the upstream — rotate it.", button opens the **`RotateCredentialDialog`** (shipped #203).
 - **Member status page `CredentialHealthSection`**: surfaces the new badge automatically via `deriveAccountStatus`; add a CTA to the member rotate flow (`/dashboard/upstreams`).
-- **Metrics** (`plugins/metrics.ts`): `gw_upstream_auth_failed_total{platform}` (every 401) + `gw_upstream_credential_degraded_total{platform}` (incremented **only on the healthy→degraded DB transition** — the alertable "a BYOK credential went dead" signal).
+- **Metrics** (`plugins/metrics.ts`): `gw_upstream_auth_failed_total{platform}` (every **counted, non-grace** 401 — the grace check short-circuits before the INCR + this metric) + `gw_upstream_credential_degraded_total{platform}` (incremented **only on the healthy→degraded DB transition** — the alertable "a BYOK credential went dead" signal).
 
 ## Configuration
 
