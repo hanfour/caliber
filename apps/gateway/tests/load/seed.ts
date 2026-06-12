@@ -1,8 +1,11 @@
+import { eq } from "drizzle-orm";
 import {
   organizations,
   users,
   organizationMembers,
   apiKeys,
+  accountGroups,
+  accountGroupMembers,
   upstreamAccounts,
   credentialVault,
 } from "@caliber/db/schema";
@@ -129,4 +132,31 @@ export async function seedAccount(
     authTag: sealed.authTag,
   });
   return { id: acct!.id, credToken };
+}
+
+/**
+ * Create an account_group on `platform`, add the given accounts as members,
+ * and bind the api key to it. The group's platform is what the gateway
+ * dispatches on for `/v1/responses` (openai → passthrough) and what
+ * `forcePlatform("openai")` checks for `/backend-api/codex/responses`.
+ * Returns the new group id.
+ */
+export async function seedGroup(
+  db: Database,
+  orgId: string,
+  slug: string,
+  platform: Platform,
+  apiKeyId: string,
+  accountIds: string[],
+): Promise<string> {
+  const [g] = await db
+    .insert(accountGroups)
+    .values({ orgId, name: `${slug}-grp`, platform })
+    .returning({ id: accountGroups.id });
+  const groupId = g!.id;
+  await db
+    .insert(accountGroupMembers)
+    .values(accountIds.map((accountId) => ({ groupId, accountId })));
+  await db.update(apiKeys).set({ groupId }).where(eq(apiKeys.id, apiKeyId));
+  return groupId;
 }

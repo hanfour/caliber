@@ -23,6 +23,11 @@ export interface BootOptions {
   maxWait?: number;          // GATEWAY_MAX_WAIT (default 10)
   maxSwitches?: number;      // GATEWAY_MAX_ACCOUNT_SWITCHES (default 10)
   authMaxFail?: number;      // GATEWAY_UPSTREAM_AUTH_MAX_FAIL (default 3)
+  // GATEWAY_APIKEY_RPM_LIMIT — per-api-key requests/min. Undefined keeps the
+  // config default (600); 0 disables enforcement (the perf harness sets 0 so
+  // the load test measures gateway throughput, not the rate limiter). Omitted
+  // from `env` when undefined so correctness suites keep the 600 default.
+  apikeyRpmLimit?: number;
 }
 
 export interface LoadStack {
@@ -66,6 +71,11 @@ export async function bootStack(opts: BootOptions = {}): Promise<LoadStack> {
     GATEWAY_MAX_WAIT: String(maxWait),
     GATEWAY_MAX_ACCOUNT_SWITCHES: String(maxSwitches),
     GATEWAY_UPSTREAM_AUTH_MAX_FAIL: String(authMaxFail),
+    // Only override the per-api-key rpm limit when explicitly given; otherwise
+    // the config schema default (600) applies, as correctness suites expect.
+    ...(opts.apikeyRpmLimit !== undefined
+      ? { GATEWAY_APIKEY_RPM_LIMIT: String(opts.apikeyRpmLimit) }
+      : {}),
   });
 
   // opts.redis OMITTED → production BullMQ wiring runs against the real container.

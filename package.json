@@ -26,7 +26,8 @@
     "typecheck": "turbo run typecheck",
     "ws:build": "turbo run build",
     "ws:test": "turbo run test",
-    "ws:dev": "turbo run dev --parallel"
+    "ws:dev": "turbo run dev --parallel",
+    "perf:gateway": "tsx scripts/perf-gateway.ts"
   },
   "keywords": ["claude-code", "codex", "ai", "evaluation", "performance"],
   "license": "MIT",
@@ -37,9 +38,11 @@
     "dayjs": "^1.11.13"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.1.4",
+    "autocannon": "^8.0.0",
     "tsx": "^4.19.0",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0",
