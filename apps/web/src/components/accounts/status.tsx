@@ -9,6 +9,7 @@ export type AccountStatus =
   | "disabled"
   | "rate_limited"
   | "overloaded"
+  | "credential_invalid"
   | "paused"
   | "expired"
   | "error"
@@ -32,6 +33,7 @@ export interface AccountStatusInput {
   rateLimitResetAt: Date | string | null;
   overloadUntil: Date | string | null;
   tempUnschedulableUntil: Date | string | null;
+  tempUnschedulableReason?: string | null;
   expiresAt: Date | string | null;
   errorMessage: string | null;
   status: string;
@@ -41,7 +43,7 @@ export interface AccountStatusInput {
 // limited account that is also disabled is displayed as `disabled` (operator
 // turned it off — that's the truth), and an expired account wins over a
 // generic `error` because "expired" is a more specific diagnosis.
-// disabled > rate_limited > overloaded > paused > expired > error > active
+// disabled > rate_limited > overloaded > credential_invalid > paused > expired > error > active
 export function deriveAccountStatus(
   row: AccountStatusInput,
   now: Date = new Date(),
@@ -56,6 +58,10 @@ export function deriveAccountStatus(
 
   const overloadUntil = toDate(row.overloadUntil);
   if (overloadUntil && overloadUntil > now) return "overloaded";
+
+  if (row.tempUnschedulableReason === "api_key_invalid_credential") {
+    return "credential_invalid";
+  }
 
   const pausedUntil = toDate(row.tempUnschedulableUntil);
   if (pausedUntil && pausedUntil > now) return "paused";
@@ -87,6 +93,7 @@ export const STATUS_LABEL: Record<AccountStatus, string> = {
   disabled: "Disabled",
   rate_limited: "Rate limited",
   overloaded: "Overloaded",
+  credential_invalid: "Credential rejected — rotate",
   paused: "Paused",
   expired: "Expired",
   error: "Error",
@@ -97,6 +104,7 @@ const STATUS_LABEL_KEY: Record<AccountStatus, string> = {
   disabled: "disabled",
   rate_limited: "rateLimited",
   overloaded: "overloaded",
+  credential_invalid: "credentialInvalid",
   paused: "paused",
   expired: "expired",
   error: "error",
@@ -107,6 +115,7 @@ export const STATUS_TONE: Record<AccountStatus, StatusTone> = {
   disabled: "muted",
   rate_limited: "warning",
   overloaded: "warning",
+  credential_invalid: "destructive",
   paused: "warning",
   expired: "destructive",
   error: "destructive",

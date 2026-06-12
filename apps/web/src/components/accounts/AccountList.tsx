@@ -247,6 +247,13 @@ export function AccountList({ orgId }: AccountListProps) {
     (r) => r.tempUnschedulableReason === "oauth_invalid_grant",
   );
 
+  // Surface api_key accounts whose stored credential has been rejected by
+  // the upstream provider (`api_key_invalid_credential`). The scheduler
+  // auto-pauses these; operator must rotate the credential to recover.
+  const deadCredentialAccounts = accounts.filter(
+    (r) => r.tempUnschedulableReason === "api_key_invalid_credential",
+  );
+
   return (
     <div className="space-y-4">
       {headerCta}
@@ -278,6 +285,40 @@ export function AccountList({ orgId }: AccountListProps) {
                   }
                 >
                   {t("reonboardFromKeychain")}
+                </Button>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+      {deadCredentialAccounts.length > 0 && (
+        <Card className="shadow-card border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-700/60 dark:bg-amber-950/40">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-none text-amber-600 dark:text-amber-400" />
+            <div className="flex-1 space-y-2">
+              <div className="space-y-1">
+                <p className="font-semibold text-amber-900 dark:text-amber-200">
+                  {deadCredentialAccounts.length === 1
+                    ? t("credentialInvalidTitle", { name: deadCredentialAccounts[0]!.name })
+                    : t("credentialInvalidMultiTitle", { count: deadCredentialAccounts.length })}
+                </p>
+                <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
+                  {t("credentialInvalidBody")}
+                </p>
+              </div>
+              {deadCredentialAccounts.length === 1 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-amber-400 bg-amber-100/40 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/30 dark:hover:bg-amber-900/40"
+                  onClick={() =>
+                    setRotatingAccount({
+                      id: deadCredentialAccounts[0]!.id,
+                      name: deadCredentialAccounts[0]!.name,
+                    })
+                  }
+                >
+                  {t("rotateCredentials")}
                 </Button>
               )}
             </div>

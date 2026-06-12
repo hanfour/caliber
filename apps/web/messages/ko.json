@@ -27,6 +27,7 @@
     "error": "오류",
     "rateLimited": "속도 제한",
     "overloaded": "과부하",
+    "credentialInvalid": "자격 증명 거부됨 — 교체하세요",
     "paused": "일시 중지됨",
     "page": "페이지",
     "pageOf": "{total} 페이지 중 {current} 페이지",
@@ -347,6 +348,9 @@
     "actionsAriaLabel": "{name}에 대한 작업",
     "reonboardFromKeychain": "Keychain에서 다시 온보딩",
     "rotateCredentials": "자격 증명 교체",
+    "credentialInvalidTitle": "{name}의 API 키가 거부되었습니다 — 교체하세요",
+    "credentialInvalidMultiTitle": "{count}개의 API 키가 거부되었습니다 — 교체하세요",
+    "credentialInvalidBody": "업스트림 공급자가 저장된 API 키를 거부했습니다. 자격 증명을 교체하여 계정을 다시 스케줄링에 포함시키세요.",
     "reonboardSingleTitle": "\"{name}\"의 OAuth 자격 증명을 다시 온보딩해야 합니다",
     "reonboardMultiTitle": "{count}개의 OAuth 계정이 다시 온보딩이 필요합니다",
     "reonboardWarningBody": "refresh token이 다른 프로세스(호스트의 Claude Code 앱, 다른 Caliber 인스턴스)에 의해 교체되었습니다. Caliber는 자체적으로 새로 고칠 수 없습니다 — Keychain에서 새 번들을 추출하고 자격 증명을 교체하여 복구하세요.",
@@ -615,7 +619,8 @@
       "colStatus": "상태",
       "colExpiry": "만료",
       "colError": "마지막 오류",
-      "loadError": "자격 증명 상태를 불러오지 못했습니다. 다시 시도해 주세요."
+      "loadError": "자격 증명 상태를 불러오지 못했습니다. 다시 시도해 주세요.",
+      "credentialInvalidCta": "자격 증명 교체하기 →"
     },
     "errorRate": {
       "title": "오류율",

@@ -54,4 +54,25 @@ describe("CredentialHealthSection", () => {
     render(<CredentialHealthSection />);
     expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
+
+  it("shows a rotate CTA linking to /dashboard/upstreams when an upstream is credential_invalid", () => {
+    const invalidRow = {
+      ...baseRow,
+      tempUnschedulableReason: "api_key_invalid_credential",
+    };
+    listOwnQuery.mockReturnValue({ data: [invalidRow], isLoading: false, error: null });
+    render(<CredentialHealthSection />);
+    // badge renders via common.credentialInvalid key → resolved string
+    expect(screen.getByText("Credential rejected — rotate")).toBeInTheDocument();
+    // CTA link should be present and point to /dashboard/upstreams
+    const ctaLink = screen.getByRole("link", { name: "Rotate your credential →" });
+    expect(ctaLink).toHaveAttribute("href", "/dashboard/upstreams");
+  });
+
+  it("does NOT show the rotate CTA when no upstream is credential_invalid", () => {
+    listOwnQuery.mockReturnValue({ data: [baseRow], isLoading: false, error: null });
+    render(<CredentialHealthSection />);
+    // The CTA should not appear at all when no upstream is credential_invalid
+    expect(screen.queryByRole("link", { name: "Rotate your credential →" })).not.toBeInTheDocument();
+  });
 });

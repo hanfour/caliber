@@ -230,7 +230,13 @@ describe("runFailover", () => {
     expect(rowA!.status).toBe("active");
   });
 
-  it("first account 401 → status set to error → second account succeeds", async () => {
+  it("first account 401 → fails over (NO state mutation; recoverable credential-health owns the degrade) → second account succeeds", async () => {
+    // Credential-health change: a 401 is classified `auth_invalid` with NO
+    // `stateUpdate` — the account is NOT hard-flipped to `status='error'`. The
+    // recoverable degrade (temp-unschedulable + counter) lives in the failover
+    // loop's `authHealth` hook (recordAuthFailure), which is absent on this
+    // hand-built input, so here a 401 is a pure in-memory failover (mirrors the
+    // connection-error case above): acctA stays `active`, no error fields.
     const [acctA] = await db
       .insert(upstreamAccounts)
       .values({ ...baseAccount, orgId, name: "acct-a", priority: 1 })
@@ -265,8 +271,12 @@ describe("runFailover", () => {
       .select()
       .from(upstreamAccounts)
       .where(eq(upstreamAccounts.id, acctA!.id));
-    expect(rowA!.status).toBe("error");
-    expect(rowA!.errorMessage).toMatch(/401/);
+    // 401 no longer hard-errors the account — it stays active + clean so the
+    // recoverable credential-health path can own pause/recover instead.
+    expect(rowA!.status).toBe("active");
+    expect(rowA!.errorMessage).toBeNull();
+    expect(rowA!.tempUnschedulableUntil).toBeNull();
+    expect(rowA!.tempUnschedulableReason).toBeNull();
   });
 
   it("first account 529 (overloaded) → overloadUntil set → second account succeeds", async () => {

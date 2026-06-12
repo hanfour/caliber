@@ -42,6 +42,15 @@ x-app-env: &app-env
   GATEWAY_MODEL_REGISTRY_REFRESH_SEC: ${GATEWAY_MODEL_REGISTRY_REFRESH_SEC:-}
   GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC: ${GATEWAY_MODEL_REGISTRY_FALLBACK_ANTHROPIC:-}
   GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI: ${GATEWAY_MODEL_REGISTRY_FALLBACK_OPENAI:-}
+  # api_key credential-health knobs. Shared (not gateway-only) because the
+  # gateway consumes MAX_FAIL/BACKOFF_SEC in the failover loop, but the api
+  # container reads GRACE_SEC when accounts.rotate sets the post-rotation
+  # grace window — so the operator's .env override must reach api too, or
+  # rotations silently fall back to the in-code 120s default. Soft-default
+  # to empty so the in-code defaults apply when unset.
+  GATEWAY_UPSTREAM_AUTH_MAX_FAIL: ${GATEWAY_UPSTREAM_AUTH_MAX_FAIL:-}
+  GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC: ${GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC:-}
+  GATEWAY_UPSTREAM_AUTH_GRACE_SEC: ${GATEWAY_UPSTREAM_AUTH_GRACE_SEC:-}
   # When ENABLE_GATEWAY=true, parseServerEnv requires these four to be
   # present on every service that imports @caliber/config (api, web, and
   # gateway), not just the gateway container. Defaults are empty so
@@ -192,6 +201,9 @@ services:
       GATEWAY_IDEMPOTENCY_TTL_SEC: ${GATEWAY_IDEMPOTENCY_TTL_SEC:-}
       GATEWAY_OAUTH_REFRESH_LEAD_MIN: ${GATEWAY_OAUTH_REFRESH_LEAD_MIN:-}
       GATEWAY_OAUTH_MAX_FAIL: ${GATEWAY_OAUTH_MAX_FAIL:-}
+      # GATEWAY_UPSTREAM_AUTH_{MAX_FAIL,BACKOFF_SEC,GRACE_SEC} now live in the
+      # shared x-app-env anchor (api reads GRACE_SEC on rotate) — inherited here
+      # via `<<: *app-env`, so they're not re-declared in this block.
       GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL: ${GATEWAY_ANTHROPIC_OAUTH_TOKEN_URL:-}
       # Issue #93 option B': enables keychain-re-read short-circuit on
       # OAuth refresh. Operator runs scripts/keychain-helper/install.sh

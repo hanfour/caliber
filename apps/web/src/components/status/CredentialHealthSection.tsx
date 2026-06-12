@@ -35,6 +35,14 @@ export function CredentialHealthSection() {
             </Link>
           </p>
         ) : (
+          <>
+            {data.some((row: UpstreamRow) => deriveAccountStatus(row) === "credential_invalid") && (
+              <p className="mb-3 text-sm text-muted-foreground">
+                <Link href="/dashboard/upstreams" className="text-primary underline">
+                  {t("credentialInvalidCta")}
+                </Link>
+              </p>
+            )}
           <div className="overflow-hidden rounded-md border border-border">
             <table className="w-full text-sm">
               <thead>
@@ -59,6 +67,7 @@ export function CredentialHealthSection() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </CardContent>
     </Card>

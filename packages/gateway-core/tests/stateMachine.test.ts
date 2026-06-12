@@ -15,10 +15,13 @@ describe('classifyUpstreamError', () => {
     expect(act.stateUpdate?.overloadUntil).toBeDefined()
   })
 
-  it('401 → failover + status=error', () => {
+  it('401 → failover, auth_invalid, no stateUpdate (health owned by loop)', () => {
     const act = classifyUpstreamError({ status: 401 })
     expect(act.kind).toBe('switch_account')
-    expect(act.stateUpdate?.status).toBe('error')
+    if (act.kind === 'switch_account') {
+      expect(act.reason).toBe('auth_invalid')
+      expect(act.stateUpdate).toBeUndefined()
+    }
   })
 
   it('400 → fatal (no failover)', () => {

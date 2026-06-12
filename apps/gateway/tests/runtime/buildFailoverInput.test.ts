@@ -16,8 +16,9 @@ const attempt = async (_a: SelectedAccount) => "ok";
 function makeReq(
   apiKey: Record<string, unknown> | null,
   gwGroupContext: Record<string, unknown> | null,
+  server?: Record<string, unknown>,
 ): FastifyRequest {
-  return { apiKey, gwGroupContext } as unknown as FastifyRequest;
+  return { apiKey, gwGroupContext, server } as unknown as FastifyRequest;
 }
 
 describe("buildFailoverInput", () => {
@@ -78,5 +79,54 @@ describe("buildFailoverInput", () => {
     expect(() => buildFailoverInput(req, db, { maxSwitches: 1, attempt })).toThrow(
       /req\.gwGroupContext is missing/,
     );
+  });
+
+  it("assembles authHealth from req.server decorations", () => {
+    const fakeRedis = { tag: "redis" };
+    const authFailedTotal = { inc() {} };
+    const credentialDegradedTotal = { inc() {} };
+    const logger = { warn() {} };
+    const req = makeReq(
+      { orgId: "org-1", teamId: "team-9", groupId: "grp-7", userId: "user-byok-1" },
+      { policy: "own", platform: "openai" },
+      {
+        redis: fakeRedis,
+        gwMetrics: {
+          upstreamAuthFailedTotal: authFailedTotal,
+          upstreamCredentialDegradedTotal: credentialDegradedTotal,
+        },
+        env: {
+          GATEWAY_UPSTREAM_AUTH_MAX_FAIL: 3,
+          GATEWAY_UPSTREAM_AUTH_BACKOFF_SEC: 3600,
+          GATEWAY_UPSTREAM_AUTH_GRACE_SEC: 120,
+        },
+        log: logger,
+      },
+    );
+
+    const input = buildFailoverInput(req, db, { maxSwitches: 1, attempt });
+
+    expect(input.authHealth).toBeTruthy();
+    expect(input.authHealth!.redis).toBe(fakeRedis);
+    expect(input.authHealth!.maxFail).toBe(3);
+    expect(input.authHealth!.backoffSec).toBe(3600);
+    expect(input.authHealth!.graceSec).toBe(120);
+    expect(input.authHealth!.metrics.authFailedTotal).toBe(authFailedTotal);
+    expect(input.authHealth!.metrics.credentialDegradedTotal).toBe(
+      credentialDegradedTotal,
+    );
+    expect(input.authHealth!.logger).toBe(logger);
+  });
+
+  it("authHealth is undefined when req.server.redis is absent", () => {
+    const req = makeReq(
+      { orgId: "o", teamId: null, groupId: null, userId: "u" },
+      { policy: "pool", platform: "anthropic" },
+      { env: {}, log: { warn() {} } },
+    );
+
+    const input = buildFailoverInput(req, db, { maxSwitches: 1, attempt });
+
+    expect(input.authHealth).toBeUndefined();
   });
 });

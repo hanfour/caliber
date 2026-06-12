@@ -19,6 +19,7 @@ import {
   requireMasterKeyHex,
   buildCredentialPlaintext,
   parseOauthExpiresAt,
+  resetApiKeyCredentialHealth,
 } from "./_credentials.js";
 import { oauthProcedures } from "./oauth/oauthProcedures.js";
 import { writeAudit } from "../../services/audit.js";
@@ -424,6 +425,11 @@ export const accountsRouter = router({
       });
     });
 
+    // Reseal succeeded — recover any api_key credential-degraded health the
+    // gateway set (reason-gated clear + counter DEL + grace window). Outside
+    // the tx: it's a recovery side-effect, not part of the reseal atom.
+    await resetApiKeyCredentialHealth(ctx, existing.id);
+
     return { id: existing.id, rotatedAt };
   }),
 
@@ -625,6 +631,10 @@ export const accountsRouter = router({
         orgId: existing.orgId,
         metadata: { type: existing.type },
       });
+
+      // Reseal succeeded — recover any api_key credential-degraded health the
+      // gateway set (reason-gated clear + counter DEL + grace window).
+      await resetApiKeyCredentialHealth(ctx, existing.id);
 
       return { id: existing.id, rotatedAt };
     }),

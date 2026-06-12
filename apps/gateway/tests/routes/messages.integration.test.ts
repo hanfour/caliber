@@ -340,7 +340,7 @@ describe("POST /v1/messages", () => {
     await app.close();
   });
 
-  it("4. upstream 4xx is forwarded to caller", async () => {
+  it("4. upstream 4xx (400) → fatal client_error wrapper, status preserved", async () => {
     const orgId = await seedOrg();
     const userId = await seedUser(orgId);
     const rawKey = `ak_4xx_${Math.random().toString(36).slice(2)}`;
@@ -365,8 +365,21 @@ describe("POST /v1/messages", () => {
       payload: { model: "claude-3-haiku-20240307", max_tokens: 10 },
     });
 
+    // Task 8: the anthropic non-stream path no longer returns the raw upstream
+    // 4xx body. It now THROWS every non-2xx into the failover loop so the
+    // shared classifier handles it — matching every other route surface and
+    // enabling credential-health (a *returned* 4xx would wrongly clear the
+    // auth-failure counter). A 400 classifies as `fatal` / `client_error`, so
+    // the route renders the FatalUpstreamError wrapper `{error, detail,
+    // request_id}` with the upstream status (400) preserved; the original
+    // upstream body is surfaced verbatim under `detail`.
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ type: "error" });
+    expect(res.json()).toMatchObject({
+      error: "client_error",
+      detail:
+        '{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}',
+    });
+    expect(res.json()).toHaveProperty("request_id");
     await app.close();
   });
 

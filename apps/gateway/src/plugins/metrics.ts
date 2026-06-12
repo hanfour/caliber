@@ -80,6 +80,10 @@ export interface GatewayMetrics {
   modelAliasBucketDriftTotal: Counter<"platform">;
   modelRegistryFetchTotal: Counter<"platform" | "bucket_type" | "result">;
   modelRegistryFallbackUsedTotal: Counter<"platform" | "bucket_type">;
+
+  // Credential health
+  upstreamAuthFailedTotal: Counter<"platform">;
+  upstreamCredentialDegradedTotal: Counter<"platform">;
 }
 
 declare module "fastify" {
@@ -471,6 +475,20 @@ async function metricsPluginBody(
     registers: [register],
   });
 
+  const upstreamAuthFailedTotal = new Counter({
+    name: "gw_upstream_auth_failed_total",
+    help: "Upstream api_key 401s counted toward credential-health degradation (excludes grace-window).",
+    labelNames: ["platform"] as const,
+    registers: [register],
+  });
+
+  const upstreamCredentialDegradedTotal = new Counter({
+    name: "gw_upstream_credential_degraded_total",
+    help: "api_key upstreams paused on the healthy->degraded transition (a credential went dead).",
+    labelNames: ["platform"] as const,
+    registers: [register],
+  });
+
   // Materialize zero values so unlabeled metrics appear in scrape output
   waitQueueDepth.set(0);
   idempotencyHitTotal.inc(0);
@@ -559,5 +577,7 @@ async function metricsPluginBody(
     modelAliasBucketDriftTotal,
     modelRegistryFetchTotal,
     modelRegistryFallbackUsedTotal,
+    upstreamAuthFailedTotal,
+    upstreamCredentialDegradedTotal,
   });
 }
