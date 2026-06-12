@@ -18,7 +18,6 @@ export function classifyUpstreamError(err: UpstreamError): FailoverAction {
   if (status === 401 || status === 403) {
     return {
       kind: 'switch_account',
-      stateUpdate: { status: 'error', errorMessage: err.message ?? `upstream ${status}` },
       reason: 'auth_invalid',
     }
   }
