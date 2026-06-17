@@ -379,6 +379,18 @@
       "submit": "Rotate",
       "submitting": "Rotating…",
       "rotatedToast": "Credential rotated"
+    },
+    "editDialog": {
+      "title": "Edit account",
+      "description": "Update the scheduling settings for \"{name}\".",
+      "nameLabel": "Name",
+      "priorityLabel": "Priority",
+      "concurrencyLabel": "Concurrency",
+      "schedulableLabel": "Schedulable",
+      "schedulableHint": "When off, the scheduler skips this account.",
+      "submitting": "Saving…",
+      "updatedToast": "Account updated",
+      "invalidRequest": "Invalid request"
     }
   },
   "accountGroups": {

@@ -379,6 +379,18 @@
       "submit": "ローテーション",
       "submitting": "ローテーション中…",
       "rotatedToast": "認証情報をローテーションしました"
+    },
+    "editDialog": {
+      "title": "アカウントを編集",
+      "description": "「{name}」のスケジュール設定を更新します。",
+      "nameLabel": "名前",
+      "priorityLabel": "優先度",
+      "concurrencyLabel": "並行数",
+      "schedulableLabel": "スケジュール可能",
+      "schedulableHint": "オフの場合、スケジューラーはこのアカウントをスキップします。",
+      "submitting": "保存中…",
+      "updatedToast": "アカウントを更新しました",
+      "invalidRequest": "リクエストが無効です"
     }
   },
   "accountGroups": {

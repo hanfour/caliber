@@ -29,6 +29,7 @@ import {
 import { StatusBadge, deriveAccountStatus } from "./status";
 import { ReonboardDialog } from "./ReonboardDialog";
 import { RotateCredentialDialog } from "./RotateCredentialDialog";
+import { EditAccountDialog, type EditableAccount } from "./EditAccountDialog";
 
 type AccountRow = inferRouterOutputs<AppRouter>["accounts"]["list"][number];
 
@@ -38,6 +39,7 @@ interface AccountRowActionsProps {
   onDelete: (row: AccountRow) => void;
   onReonboard: (row: AccountRow) => void;
   onRotate: (row: AccountRow) => void;
+  onEdit: (row: AccountRow) => void;
   isDeleting: boolean;
 }
 
@@ -47,6 +49,7 @@ function AccountRowActions({
   onDelete,
   onReonboard,
   onRotate,
+  onEdit,
   isDeleting,
 }: AccountRowActionsProps) {
   const { can } = usePermissions();
@@ -95,8 +98,7 @@ function AccountRowActions({
           </DropdownMenuItem>
         )}
         {/* Rotate (api_key-only): re-seals a fresh credential into the vault
-            via accounts.rotate. OAuth accounts use re-onboard above. The Edit
-            flow still lands in a follow-up PR (kept disabled below). */}
+            via accounts.rotate. OAuth accounts use re-onboard above. */}
         {canRotate && row.type !== "oauth" && (
           <DropdownMenuItem onSelect={() => onRotate(row)}>
             <Key className="h-4 w-4" />
@@ -104,11 +106,8 @@ function AccountRowActions({
           </DropdownMenuItem>
         )}
         {canUpdate && (
-          <DropdownMenuItem disabled>
+          <DropdownMenuItem onSelect={() => onEdit(row)}>
             {tCommon("edit")}
-            <span className="ml-auto text-[10px] text-muted-foreground">
-              {tCommon("comingSoon")}
-            </span>
           </DropdownMenuItem>
         )}
         {canDelete && (
@@ -152,6 +151,9 @@ export function AccountList({ orgId }: AccountListProps) {
     id: string;
     name: string;
   } | null>(null);
+  const [editingAccount, setEditingAccount] = useState<EditableAccount | null>(
+    null,
+  );
 
   const del = trpc.accounts.delete.useMutation({
     onSuccess: () => {
@@ -397,6 +399,15 @@ export function AccountList({ orgId }: AccountListProps) {
                       onRotate={(r) =>
                         setRotatingAccount({ id: r.id, name: r.name })
                       }
+                      onEdit={(r) =>
+                        setEditingAccount({
+                          id: r.id,
+                          name: r.name,
+                          priority: r.priority,
+                          concurrency: r.concurrency,
+                          schedulable: r.schedulable,
+                        })
+                      }
                       isDeleting={deletingId === row.id}
                     />
                   </td>
@@ -415,6 +426,11 @@ export function AccountList({ orgId }: AccountListProps) {
         account={rotatingAccount}
         orgId={orgId}
         onClose={() => setRotatingAccount(null)}
+      />
+      <EditAccountDialog
+        account={editingAccount}
+        orgId={orgId}
+        onClose={() => setEditingAccount(null)}
       />
     </div>
   );

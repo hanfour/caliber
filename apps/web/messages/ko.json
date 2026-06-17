@@ -379,6 +379,18 @@
       "submit": "교체",
       "submitting": "교체 중…",
       "rotatedToast": "자격 증명이 교체되었습니다"
+    },
+    "editDialog": {
+      "title": "계정 편집",
+      "description": "\"{name}\"의 스케줄링 설정을 업데이트합니다.",
+      "nameLabel": "이름",
+      "priorityLabel": "우선순위",
+      "concurrencyLabel": "동시 실행 수",
+      "schedulableLabel": "스케줄 가능",
+      "schedulableHint": "끄면 스케줄러가 이 계정을 건너뜁니다.",
+      "submitting": "저장 중…",
+      "updatedToast": "계정이 업데이트되었습니다",
+      "invalidRequest": "잘못된 요청입니다"
     }
   },
   "accountGroups": {

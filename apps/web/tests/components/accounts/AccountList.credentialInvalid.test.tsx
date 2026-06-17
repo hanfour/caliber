@@ -12,6 +12,7 @@ vi.mock("@/lib/trpc/client", () => ({
       delete: { useMutation: vi.fn() },
       rotate: { useMutation: vi.fn() },
       reonboard: { useMutation: vi.fn() },
+      update: { useMutation: vi.fn() },
     },
   },
 }));
@@ -44,6 +45,9 @@ const useRotateMutation = trpc.accounts.rotate.useMutation as unknown as ReturnT
 const useReonboardMutation = trpc.accounts.reonboard.useMutation as unknown as ReturnType<
   typeof vi.fn
 >;
+const useUpdateMutation = trpc.accounts.update.useMutation as unknown as ReturnType<
+  typeof vi.fn
+>;
 
 const deadCredentialAccount = {
   id: "acc-dead-1",
@@ -62,6 +66,7 @@ beforeEach(() => {
   useDeleteMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
   useRotateMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
   useReonboardMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+  useUpdateMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
 });
 
 describe("AccountList — api_key_invalid_credential banner", () => {

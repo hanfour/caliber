@@ -379,6 +379,18 @@
       "submit": "輪替",
       "submitting": "輪替中…",
       "rotatedToast": "憑證已輪替"
+    },
+    "editDialog": {
+      "title": "編輯帳號",
+      "description": "更新「{name}」的排程設定。",
+      "nameLabel": "名稱",
+      "priorityLabel": "優先順序",
+      "concurrencyLabel": "並行數",
+      "schedulableLabel": "可排程",
+      "schedulableHint": "關閉時，排程器會略過此帳號。",
+      "submitting": "儲存中…",
+      "updatedToast": "帳號已更新",
+      "invalidRequest": "請求無效"
     }
   },
   "accountGroups": {
