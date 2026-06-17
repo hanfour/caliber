@@ -379,6 +379,18 @@
       "submit": "轮换",
       "submitting": "轮换中…",
       "rotatedToast": "凭证已轮换"
+    },
+    "editDialog": {
+      "title": "编辑账户",
+      "description": "更新「{name}」的调度设置。",
+      "nameLabel": "名称",
+      "priorityLabel": "优先级",
+      "concurrencyLabel": "并发数",
+      "schedulableLabel": "可调度",
+      "schedulableHint": "关闭时，调度器会跳过此账户。",
+      "submitting": "保存中…",
+      "updatedToast": "账户已更新",
+      "invalidRequest": "请求无效"
     }
   },
   "accountGroups": {
