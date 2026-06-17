@@ -23,8 +23,16 @@ export default function OrganizationLayout({
 }) {
   const pathname = usePathname() ?? "";
   const params = useParams();
-  const orgId = params?.id as string;
-  const { data: org } = trpc.organizations.get.useQuery({ id: orgId });
+  // The url param can be a slug OR a UUID. Resolve to the canonical org once
+  // here (mirrors the #202 accounts-page fix) so the breadcrumb, the
+  // permission checks (scopeId is a UUID), and the tab links all work on both
+  // /organizations/<slug> and /organizations/<uuid>.
+  const identifier = params?.id as string;
+  const { data: org } = trpc.organizations.resolveIdentifier.useQuery(
+    { identifier },
+    { enabled: !!identifier },
+  );
+  const orgId = org?.id;
   const { data: session } = trpc.me.session.useQuery();
 
   const isSuperAdmin =
@@ -110,11 +118,11 @@ export default function OrganizationLayout({
           {tabs
             .filter((t) => t.visible(perm))
             .map((t) => {
-              const href = `/dashboard/organizations/${orgId}${t.href}`;
+              const href = `/dashboard/organizations/${identifier}${t.href}`;
               const active =
                 pathname === href ||
                 (t.href === "" &&
-                  pathname === `/dashboard/organizations/${orgId}`);
+                  pathname === `/dashboard/organizations/${identifier}`);
               return (
                 <Link
                   key={t.label}
