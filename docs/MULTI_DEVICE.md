@@ -195,11 +195,11 @@ Docker network. This replaces ad-hoc `cloudflared tunnel --url` one-liners
 with a stable, TLS-terminated hostname you control — no VPN required on
 any client device.
 
-See [§6](#6-cloudflare-named-tunnel-public-access) for the full setup runbook,
+See [§5](#5-cloudflare-named-tunnel-public-access) for the full setup runbook,
 env knobs, and the brute-force throttle / budget-webhook controls that ship
 with it.
 
-**Quick caveat** (expanded in §6): the public hostname is reachable by
+**Quick caveat** (expanded in §5): the public hostname is reachable by
 anyone. Issue short-TTL keys, monitor `/dashboard/status` and
 `gw_llm_*` Prometheus metrics, and revoke leaked keys immediately.
 
