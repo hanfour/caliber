@@ -108,6 +108,29 @@ describe("checkIdempotency", () => {
     expect(res.idemKey).toBe("keyB:rid-z");
   });
 
+  // Fix A — TOCTOU race. The GET reads a miss, but a concurrent request claims
+  // the slot before this one's atomic SET NX runs → the SET loses (key exists),
+  // so we must emit the SAME 409 conflict rather than proceeding upstream
+  // (which would double-dispatch). Simulated by a redis whose GET returns a miss
+  // while the key already holds a marker, so SET NX returns null.
+  it("miss-then-lost-race (claim NX fails) → 409 request_in_progress, NOT proceed", async () => {
+    // Pre-seed a real marker so SET NX will fail, but force GET to report a miss
+    // to reproduce the window where this caller read empty before claiming.
+    await setInFlight(redis, "k:rid-race", 300);
+    const racing = Object.assign(Object.create(Object.getPrototypeOf(redis)), redis, {
+      get: () => Promise.resolve(null), // GET sees a miss…
+      set: (...args: unknown[]) => (redis.set as (...a: unknown[]) => unknown)(...args), // …but real SET NX loses
+    }) as unknown as Redis;
+    const reply = fakeReply();
+    const onResult: string[] = [];
+    const res = await checkIdempotency({ redis: racing, ttlSec: 300, failClosed: true, scope: "k", requestKey: "rid-race", reply, onResult: (r) => onResult.push(r) });
+    expect(res).toEqual({ outcome: "conflict", idemKey: null });
+    expect(reply.calls.status).toBe(409);
+    expect(reply.calls.headers["retry-after"]).toBe("1");
+    expect(reply.calls.body).toMatchObject({ error: "request_in_progress", requestId: "rid-race" });
+    expect(onResult).toEqual(["conflict"]);
+  });
+
   it("409 body reports the RAW X-Request-Id, not the scoped composite", async () => {
     await setInFlight(redis, "keyA:rid-dup", 300);
     const reply = fakeReply();
