@@ -91,7 +91,7 @@ export function EnrollmentTokenDialog({ open, onOpenChange }: Props) {
               <DialogTitle>{t("issuedTitle")}</DialogTitle>
               <DialogDescription>{t("issuedDescription")}</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4">
               <div
                 role="alert"
                 className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
@@ -108,7 +108,7 @@ export function EnrollmentTokenDialog({ open, onOpenChange }: Props) {
                 <div className="flex items-stretch gap-2">
                   <code
                     id="enrollToken"
-                    className="flex-1 select-all break-all rounded-md border border-input bg-muted/50 px-3 py-2 font-mono text-xs"
+                    className="min-w-0 flex-1 select-all break-all rounded-md border border-input bg-muted/50 px-3 py-2 font-mono text-xs"
                   >
                     {issued.token}
                   </code>
@@ -130,7 +130,7 @@ export function EnrollmentTokenDialog({ open, onOpenChange }: Props) {
                 <div className="flex items-stretch gap-2">
                   <pre
                     id="enrollCurl"
-                    className="flex-1 select-all overflow-x-auto rounded-md border border-input bg-muted/50 px-3 py-2 font-mono text-xs"
+                    className="min-w-0 flex-1 select-all overflow-x-auto rounded-md border border-input bg-muted/50 px-3 py-2 font-mono text-xs"
                   >
                     {buildCurl(issued.token)}
                   </pre>
