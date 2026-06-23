@@ -4,13 +4,26 @@ import { users, organizations, organizationMembers } from "@caliber/db";
 import { protectedProcedure, router } from "../procedures.js";
 
 export const meRouter = router({
-  session: protectedProcedure.query(({ ctx }) => ({
-    user: ctx.user,
-    assignments: ctx.perm.assignments,
-    coveredOrgs: [...ctx.perm.coveredOrgs],
-    coveredDepts: [...ctx.perm.coveredDepts],
-    coveredTeams: [...ctx.perm.coveredTeams],
-  })),
+  // ctx.user only carries { id, email } (sourced from the auth session). Read
+  // the user's editable profile fields (name/image) fresh from the DB so the UI
+  // reflects updateProfile changes without a re-login.
+  session: protectedProcedure.query(async ({ ctx }) => {
+    const [row] = await ctx.db
+      .select({ name: users.name, image: users.image })
+      .from(users)
+      .where(eq(users.id, ctx.user.id));
+    return {
+      user: {
+        ...ctx.user,
+        name: row?.name ?? null,
+        image: row?.image ?? null,
+      },
+      assignments: ctx.perm.assignments,
+      coveredOrgs: [...ctx.perm.coveredOrgs],
+      coveredDepts: [...ctx.perm.coveredDepts],
+      coveredTeams: [...ctx.perm.coveredTeams],
+    };
+  }),
   updateProfile: protectedProcedure
     .input(
       z.object({
