@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyList } from "@/components/apiKeys/ApiKeyList";
 
@@ -56,8 +56,12 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (session?.user) {
-      // placeholder; me.session returns user id/email but updateProfile works against users table
-      reset({ name: "", image: "" });
+      // Pre-fill from the user's current profile (me.session now returns
+      // name/image from the DB) so the form shows what's actually saved.
+      reset({
+        name: session.user.name ?? "",
+        image: session.user.image ?? "",
+      });
     }
   }, [session, reset]);
 
@@ -105,13 +109,21 @@ export default function ProfilePage() {
       <Card className="shadow-card">
         <CardHeader className="flex flex-row items-center gap-4">
           <Avatar className="h-14 w-14">
+            {session.user.image && (
+              <AvatarImage
+                src={session.user.image}
+                alt={session.user.name ?? session.user.email}
+              />
+            )}
             <AvatarFallback className="bg-primary text-primary-foreground">
-              {session.user.email.charAt(0).toUpperCase()}
+              {(session.user.name || session.user.email).charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
           <div>
-            <CardTitle>{session.user.email}</CardTitle>
-            <CardDescription>{t("signedInVia")}</CardDescription>
+            <CardTitle>{session.user.name || session.user.email}</CardTitle>
+            <CardDescription>
+              {session.user.name ? session.user.email : t("signedInVia")}
+            </CardDescription>
           </div>
         </CardHeader>
         <CardContent>

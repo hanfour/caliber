@@ -10,13 +10,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { trpc } from '@/lib/trpc/client'
 
 export function UserMenu() {
   const { data: session } = trpc.me.session.useQuery()
   const email = session?.user?.email ?? '...'
-  const initial = email.charAt(0).toUpperCase()
+  const name = session?.user?.name ?? undefined
+  const image = session?.user?.image ?? undefined
+  const displayName = name || email
+  const initial = displayName.charAt(0).toUpperCase()
 
   async function handleSignOut() {
     // POST to next-auth signout endpoint to clear session cookie
@@ -32,6 +35,7 @@ export function UserMenu() {
           aria-label="User menu"
         >
           <Avatar className="h-8 w-8">
+            {image && <AvatarImage src={image} alt={displayName} />}
             <AvatarFallback className="bg-primary text-xs text-primary-foreground">
               {initial}
             </AvatarFallback>
@@ -39,7 +43,10 @@ export function UserMenu() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">{email}</DropdownMenuLabel>
+        <DropdownMenuLabel className="font-normal">
+          {name && <div className="text-sm font-medium">{name}</div>}
+          <div className="text-xs text-muted-foreground">{email}</div>
+        </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/dashboard/profile" className="cursor-pointer">
