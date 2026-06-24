@@ -32,6 +32,7 @@ import {
 import {
   createScheduler,
   NoSchedulableAccountsError,
+  probeRateLimitReset,
   type AccountScheduler,
   type SchedulerMetrics,
 } from "./scheduler.js";
@@ -59,6 +60,21 @@ export class FatalUpstreamError extends Error {
   ) {
     super(`fatal upstream: ${reason} (${statusCode})`);
     this.name = "FatalUpstreamError";
+  }
+}
+
+/**
+ * Terminal failure where every candidate upstream is rate-limited (HTTP 429)
+ * and nothing else is wrong — a TRANSIENT, retry-after-a-bit situation rather
+ * than the generic all_upstreams_failed collapse. Route handlers map this to a
+ * clean `429` + `Retry-After` so agentic clients (Claude Code, codex) back off
+ * and retry instead of treating it as a hard error. `retryAfterSec` is the
+ * shortest wait across the rate-limited candidates (>= 1).
+ */
+export class RateLimitedError extends Error {
+  constructor(public readonly retryAfterSec: number) {
+    super(`all candidate upstreams rate-limited (retry after ${retryAfterSec}s)`);
+    this.name = "RateLimitedError";
   }
 }
 
@@ -175,6 +191,22 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
   const sleep = input.sleep ?? defaultSleep;
   const failed: string[] = [];
   const failedSet = new Set<string>();
+  // Rate-limit terminal tracking: if EVERY give-up is a 429 (no fatal / auth /
+  // overload / connection failure), the terminal result is a transient
+  // RateLimitedError (→ 429 + Retry-After) instead of AllUpstreamsFailed (→ 503).
+  let sawNonRateLimitFailure = false;
+  const rateLimitResets: Date[] = [];
+  // Returns the terminal error to throw: a transient RateLimitedError when every
+  // give-up was a 429, else the generic AllUpstreamsFailed. Callers `throw` the
+  // result so TS sees both sites as control-flow terminal.
+  const terminalError = (): RateLimitedError | AllUpstreamsFailed => {
+    if (!sawNonRateLimitFailure && rateLimitResets.length > 0) {
+      const soonest = rateLimitResets.reduce((a, b) => (a < b ? a : b));
+      const sec = Math.max(1, Math.ceil((soonest.getTime() - Date.now()) / 1000));
+      return new RateLimitedError(sec);
+    }
+    return new AllUpstreamsFailed(failed);
+  };
   const scheduler =
     input.scheduler ??
     createScheduler({
@@ -184,19 +216,20 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
     });
 
   for (let switchCount = 0; switchCount < input.maxSwitches; switchCount++) {
+    const scheduleReq = {
+      orgId: input.orgId,
+      teamId: input.teamId,
+      groupPlatform: input.platform,
+      groupId: input.groupId ?? undefined,
+      routingPolicy: input.routingPolicy,
+      userId: input.userId,
+      previousResponseId: input.previousResponseId,
+      sessionHash: input.sessionHash,
+      excludedAccountIds: failedSet,
+    };
     let scheduled;
     try {
-      scheduled = await scheduler.select({
-        orgId: input.orgId,
-        teamId: input.teamId,
-        groupPlatform: input.platform,
-        groupId: input.groupId ?? undefined,
-        routingPolicy: input.routingPolicy,
-        userId: input.userId,
-        previousResponseId: input.previousResponseId,
-        sessionHash: input.sessionHash,
-        excludedAccountIds: failedSet,
-      });
+      scheduled = await scheduler.select(scheduleReq);
     } catch (err) {
       if (err instanceof NoSchedulableAccountsError) {
         // BYOK §4.1 existence-vs-schedulability split. For a bare `own`
@@ -225,9 +258,19 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
             throw new NoOwnUpstreamError(input.platform);
           }
           // else: an own upstream exists but is unschedulable → fall through
-          // to the existing transient/503 no-schedulable path below.
+          // to the rate-limit probe + transient/503 no-schedulable path below.
         }
-        throw new AllUpstreamsFailed(failed);
+        // Path-2 rate-limit: the scheduler excluded EVERY candidate. If that's
+        // purely because they're in their rate-limit window, surface a transient
+        // RateLimitedError (→ 429 + Retry-After) instead of AllUpstreamsFailed
+        // (→ 503), so the client backs off rather than treating it as dead.
+        const rlReset = await probeRateLimitReset(
+          input.db,
+          scheduleReq,
+          failedSet,
+        );
+        if (rlReset) rateLimitResets.push(rlReset);
+        throw terminalError();
       }
       throw err;
     }
@@ -311,6 +354,17 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
         }
 
         // switch_account
+        // Track WHY we gave up: a pure-429 run terminates as RateLimitedError;
+        // anything else (auth_invalid / overloaded / transient_5xx) forces the
+        // generic AllUpstreamsFailed.
+        if (
+          action.reason === "rate_limited" &&
+          action.stateUpdate?.rateLimitResetAt
+        ) {
+          rateLimitResets.push(new Date(action.stateUpdate.rateLimitResetAt));
+        } else {
+          sawNonRateLimitFailure = true;
+        }
         if (action.stateUpdate) {
           await applyAccountStateUpdate(
             input.db,
@@ -336,10 +390,17 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
 
     if (exhaustedSameAccount) {
       // 3 retries on connection/timeout exhausted — try a different account.
+      // Connection/timeout exhaustion is not a rate-limit, so this run can no
+      // longer terminate as a clean RateLimitedError.
+      sawNonRateLimitFailure = true;
       await giveUp(true);
     }
   }
 
+  // maxSwitches reached: we stopped BEFORE the scheduler ran dry, so untried
+  // candidates may still exist — never collapse to RateLimitedError here (we
+  // can't claim "all candidates rate-limited"). Only the genuine-exhaustion
+  // NoSchedulableAccountsError path (above) emits the transient 429.
   throw new AllUpstreamsFailed(failed);
 }
 

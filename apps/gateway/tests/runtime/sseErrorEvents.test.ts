@@ -14,6 +14,7 @@ import {
 import {
   AllUpstreamsFailed,
   FatalUpstreamError,
+  RateLimitedError,
 } from "../../src/runtime/failoverLoop.js";
 
 describe("serializeAnthropicSseError", () => {
@@ -151,6 +152,41 @@ describe("respondStreamFailoverCollapse", () => {
     ]);
     expect(f.ends[0]).toContain('"error":"all_upstreams_failed"');
     expect(f.ends[0]).toContain('"request_id":"req-x"');
+  });
+
+  it("RateLimitedError + headersSent → SSE rate_limited error chunk + end", () => {
+    const f = makeFakeReply(true);
+    const err = new RateLimitedError(42);
+    respondStreamFailoverCollapse(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      f.reply as any,
+      err,
+      "req-rl",
+      serializeChatSseError,
+    );
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toContain("rate_limited");
+    expect(f.writes[0]).toContain("42s");
+    expect(f.reply.raw.end).toHaveBeenCalled();
+    expect(f.writeHeads).toHaveLength(0);
+  });
+
+  it("RateLimitedError + no headers → JSON 429 + Retry-After header", () => {
+    const f = makeFakeReply(false);
+    const err = new RateLimitedError(30);
+    respondStreamFailoverCollapse(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      f.reply as any,
+      err,
+      "req-rl2",
+      serializeChatSseError,
+    );
+    expect(f.writeHeads).toEqual([
+      [429, { "content-type": "application/json", "retry-after": "30" }],
+    ]);
+    expect(f.ends[0]).toContain('"error":"rate_limited"');
+    expect(f.ends[0]).toContain('"retry_after":30');
+    expect(f.ends[0]).toContain('"request_id":"req-rl2"');
   });
 
   it("FatalUpstreamError + no headers → JSON err.statusCode", () => {

@@ -19,7 +19,20 @@
 // for now (matches 4A); Part 8 will move it into the scheduler once the
 // caller side is refactored to consume `release()` directly.
 
-import { and, asc, eq, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { accountGroupMembers, accountGroups, upstreamAccounts } from "@caliber/db";
 import type { Database } from "@caliber/db";
@@ -486,15 +499,14 @@ interface CandidateRow {
  * Encapsulates the "schedulable now" definition (active, not deleted, not
  * rate-limited / overloaded / temp-unschedulable).
  */
-function buildSchedulablePredicates(nowDate: Date) {
-  return [
+function buildSchedulablePredicates(
+  nowDate: Date,
+  opts: { ignoreRateLimit?: boolean } = {},
+): Array<SQL | undefined> {
+  const preds: Array<SQL | undefined> = [
     isNull(upstreamAccounts.deletedAt),
     eq(upstreamAccounts.schedulable, true),
     eq(upstreamAccounts.status, "active"),
-    or(
-      isNull(upstreamAccounts.rateLimitedAt),
-      lt(upstreamAccounts.rateLimitResetAt, nowDate),
-    ),
     or(
       isNull(upstreamAccounts.overloadUntil),
       lt(upstreamAccounts.overloadUntil, nowDate),
@@ -503,7 +515,18 @@ function buildSchedulablePredicates(nowDate: Date) {
       isNull(upstreamAccounts.tempUnschedulableUntil),
       lt(upstreamAccounts.tempUnschedulableUntil, nowDate),
     ),
-  ] as const;
+  ];
+  // The rate-limit window is dropped for the `probeRateLimitReset` path, which
+  // deliberately INCLUDES rate-limited candidates to discover the soonest reset.
+  if (!opts.ignoreRateLimit) {
+    preds.push(
+      or(
+        isNull(upstreamAccounts.rateLimitedAt),
+        lt(upstreamAccounts.rateLimitResetAt, nowDate),
+      ),
+    );
+  }
+  return preds;
 }
 
 function teamPredicateFor(teamId: string | null) {
@@ -549,11 +572,12 @@ export async function listSchedulableCandidates(
   db: Database,
   req: ScheduleRequest,
   excluded: ReadonlySet<string>,
+  opts: { ignoreRateLimit?: boolean } = {},
 ): Promise<CandidateRow[]> {
   const nowDate = new Date();
   const baseConditions = [
     eq(upstreamAccounts.orgId, req.orgId),
-    ...buildSchedulablePredicates(nowDate),
+    ...buildSchedulablePredicates(nowDate, opts),
   ];
   if (excluded.size > 0) {
     baseConditions.push(notInArray(upstreamAccounts.id, [...excluded]));
@@ -696,6 +720,49 @@ export async function listSchedulableCandidates(
     priority: r.priority,
     groupId: null,
   }));
+}
+
+/**
+ * Path-2 rate-limit probe. When `select()` returns NO schedulable candidate,
+ * this answers "is that emptiness purely because the candidates are rate-limited
+ * right now?" — by re-listing candidates with the rate-limit window IGNORED, then
+ * taking the soonest `rate_limit_reset_at` among those currently rate-limited.
+ *
+ * Returns that reset `Date`, or `null` when there are no candidates at all OR
+ * none are currently rate-limited (the emptiness is for some other reason —
+ * dead/overloaded/temp-unschedulable). The failover loop turns a non-null
+ * result into a transient `RateLimitedError` (→ 429 + Retry-After) instead of
+ * the generic `AllUpstreamsFailed` (→ 503). Reuses the SAME ownership / group /
+ * platform candidate logic as the normal path so the probe can never surface a
+ * row that wasn't actually a candidate for this request.
+ */
+export async function probeRateLimitReset(
+  db: Database,
+  req: ScheduleRequest,
+  excluded: ReadonlySet<string>,
+): Promise<Date | null> {
+  const candidates = await listSchedulableCandidates(db, req, excluded, {
+    ignoreRateLimit: true,
+  });
+  if (candidates.length === 0) return null;
+  const [row] = await db
+    .select({
+      soonest: sql<Date | null>`min(${upstreamAccounts.rateLimitResetAt})`,
+    })
+    .from(upstreamAccounts)
+    .where(
+      and(
+        inArray(
+          upstreamAccounts.id,
+          candidates.map((c) => c.id),
+        ),
+        isNotNull(upstreamAccounts.rateLimitedAt),
+        gt(upstreamAccounts.rateLimitResetAt, new Date()),
+      ),
+    );
+  // pg returns the MIN() aggregate as a string, not a Date — coerce so callers
+  // can call `.getTime()` on it.
+  return row?.soonest ? new Date(row.soonest) : null;
 }
 
 export async function loadSchedulableAccount(

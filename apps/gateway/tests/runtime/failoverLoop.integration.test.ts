@@ -27,6 +27,7 @@ import {
   runFailover,
   AllUpstreamsFailed,
   FatalUpstreamError,
+  RateLimitedError,
 } from "../../src/runtime/failoverLoop.js";
 
 const require = createRequire(import.meta.url);
@@ -141,6 +142,119 @@ describe("runFailover", () => {
     const resetAt = row!.rateLimitResetAt!.getTime();
     expect(resetAt).toBeGreaterThan(Date.now() + 50_000);
     expect(resetAt).toBeLessThan(Date.now() + 70_000);
+  });
+
+  it("ALL accounts 429 → throws RateLimitedError (not AllUpstreamsFailed) with soonest retry-after", async () => {
+    await db
+      .insert(upstreamAccounts)
+      .values({ ...baseAccount, orgId, name: "rl-a", priority: 1 });
+    await db
+      .insert(upstreamAccounts)
+      .values({ ...baseAccount, orgId, name: "rl-b", priority: 2 });
+
+    // Every attempt is rate-limited. With no non-429 failure the loop must
+    // collapse to a transient RateLimitedError → routes map it to 429+Retry-After.
+    const attempt = vi.fn().mockRejectedValue({ status: 429, retryAfter: 60 });
+
+    let caught: unknown;
+    try {
+      await runFailover({
+        db: db as never,
+        orgId,
+        teamId: null,
+        platform: "anthropic",
+        routingPolicy: "pool" as const,
+        userId: null,
+        maxSwitches: 10,
+        attempt,
+        sleep: vi.fn().mockResolvedValue(undefined),
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(RateLimitedError);
+    expect(caught).not.toBeInstanceOf(AllUpstreamsFailed);
+    // soonest reset ≈ now + 60s → retryAfterSec in (50, 60]
+    const sec = (caught as RateLimitedError).retryAfterSec;
+    expect(sec).toBeGreaterThan(50);
+    expect(sec).toBeLessThanOrEqual(60);
+  });
+
+  it("mixed 429 + 401 (auth_invalid) → AllUpstreamsFailed, NOT RateLimitedError", async () => {
+    await db
+      .insert(upstreamAccounts)
+      .values({ ...baseAccount, orgId, name: "mix-a", priority: 1 });
+    await db
+      .insert(upstreamAccounts)
+      .values({ ...baseAccount, orgId, name: "mix-b", priority: 2 });
+
+    // One 429 (rate-limited) + one 401 (auth_invalid). A non-rate-limit failure
+    // is present, so retrying-after-a-bit won't fix it → stay generic 503.
+    const attempt = vi
+      .fn()
+      .mockRejectedValueOnce({ status: 429, retryAfter: 60 })
+      .mockRejectedValueOnce({ status: 401, message: "unauthorized" });
+
+    let caught: unknown;
+    try {
+      await runFailover({
+        db: db as never,
+        orgId,
+        teamId: null,
+        platform: "anthropic",
+        routingPolicy: "pool" as const,
+        userId: null,
+        maxSwitches: 10,
+        attempt,
+        sleep: vi.fn().mockResolvedValue(undefined),
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(AllUpstreamsFailed);
+    expect(caught).not.toBeInstanceOf(RateLimitedError);
+  });
+
+  it("upstream ALREADY rate-limited (scheduler pre-excludes it) → RateLimitedError via probe, attempt never called", async () => {
+    const resetAt = new Date(Date.now() + 60_000);
+    await db.insert(upstreamAccounts).values({
+      ...baseAccount,
+      orgId,
+      name: "prerl-a",
+      priority: 1,
+      rateLimitedAt: new Date(),
+      rateLimitResetAt: resetAt,
+    });
+
+    // Account is inside its rate-limit window → the scheduler excludes it →
+    // NoSchedulableAccountsError. The path-2 probe must recognise this as a
+    // rate-limit (429 + Retry-After), NOT a generic all_upstreams_failed (503).
+    const attempt = vi.fn();
+
+    let caught: unknown;
+    try {
+      await runFailover({
+        db: db as never,
+        orgId,
+        teamId: null,
+        platform: "anthropic",
+        routingPolicy: "pool" as const,
+        userId: null,
+        maxSwitches: 10,
+        attempt,
+        sleep: vi.fn().mockResolvedValue(undefined),
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(RateLimitedError);
+    expect(attempt).not.toHaveBeenCalled();
+    const sec = (caught as RateLimitedError).retryAfterSec;
+    expect(sec).toBeGreaterThan(50);
+    expect(sec).toBeLessThanOrEqual(60);
   });
 
   it("first connection error → retry succeeds same account → sleep called once", async () => {
@@ -368,9 +482,10 @@ describe("runFailover", () => {
       .values({ ...baseAccount, orgId, name: "acct-b", priority: 2 })
       .returning();
 
-    const attempt = vi
-      .fn()
-      .mockRejectedValue({ status: 429, retryAfter: 60 });
+    // 503 is a switchable error that is NOT a rate-limit, so the terminal stays
+    // AllUpstreamsFailed. (The all-429 case now yields RateLimitedError — covered
+    // by the dedicated "ALL accounts 429" test above.)
+    const attempt = vi.fn().mockRejectedValue({ status: 503 });
 
     await expect(
       runFailover({

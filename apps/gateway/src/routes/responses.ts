@@ -43,11 +43,14 @@ import {
   AllUpstreamsFailed,
   FatalUpstreamError,
   NoOwnUpstreamError,
+  RateLimitedError,
 } from "../runtime/failoverLoop.js";
 import { buildFailoverInput } from "../runtime/buildFailoverInput.js";
 import {
   noOwnUpstreamReplyBody,
   NO_OWN_UPSTREAM_STATUS,
+  rateLimitedReplyBody,
+  RATE_LIMITED_STATUS,
 } from "../runtime/noOwnUpstream.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import {
@@ -567,6 +570,13 @@ export function makeResponsesRouteHandler(
           .send(noOwnUpstreamReplyBody(err.platform, requestId));
         return;
       }
+      if (err instanceof RateLimitedError) {
+        reply
+          .header("retry-after", String(err.retryAfterSec))
+          .code(RATE_LIMITED_STATUS)
+          .send(rateLimitedReplyBody(err.retryAfterSec, requestId));
+        return;
+      }
       if (err instanceof AllUpstreamsFailed) {
         reply.code(503).send({
           error: "all_upstreams_failed",
@@ -700,6 +710,13 @@ export function makeResponsesCompactRouteHandler(
         reply
           .code(NO_OWN_UPSTREAM_STATUS)
           .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
+      if (err instanceof RateLimitedError) {
+        reply
+          .header("retry-after", String(err.retryAfterSec))
+          .code(RATE_LIMITED_STATUS)
+          .send(rateLimitedReplyBody(err.retryAfterSec, requestId));
         return;
       }
       if (err instanceof AllUpstreamsFailed) {
@@ -1191,6 +1208,13 @@ async function runOpenaiResponsesPassthroughFailover(
       reply
         .code(NO_OWN_UPSTREAM_STATUS)
         .send(noOwnUpstreamReplyBody(err.platform, requestId));
+      return;
+    }
+    if (err instanceof RateLimitedError) {
+      reply
+        .header("retry-after", String(err.retryAfterSec))
+        .code(RATE_LIMITED_STATUS)
+        .send(rateLimitedReplyBody(err.retryAfterSec, requestId));
       return;
     }
     if (err instanceof AllUpstreamsFailed) {

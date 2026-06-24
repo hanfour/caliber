@@ -14,11 +14,14 @@ import {
   AllUpstreamsFailed,
   FatalUpstreamError,
   NoOwnUpstreamError,
+  RateLimitedError,
 } from "../runtime/failoverLoop.js";
 import { buildFailoverInput } from "../runtime/buildFailoverInput.js";
 import {
   noOwnUpstreamReplyBody,
   NO_OWN_UPSTREAM_STATUS,
+  rateLimitedReplyBody,
+  RATE_LIMITED_STATUS,
 } from "../runtime/noOwnUpstream.js";
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { sessionHashFromHeaders } from "../runtime/stickyKeys.js";
@@ -260,6 +263,13 @@ export function makeMessagesAnthropicHandler(
         reply
           .code(NO_OWN_UPSTREAM_STATUS)
           .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
+      if (err instanceof RateLimitedError) {
+        reply
+          .header("retry-after", String(err.retryAfterSec))
+          .code(RATE_LIMITED_STATUS)
+          .send(rateLimitedReplyBody(err.retryAfterSec, requestId));
         return;
       }
       if (err instanceof AllUpstreamsFailed) {
@@ -979,6 +989,19 @@ async function runStreamingFailover(
         );
         return;
       }
+      if (err instanceof RateLimitedError) {
+        // Transient: all candidates rate-limited. Rate-limit collapse happens
+        // before any upstream bytes, so headers aren't sent — emit 429 +
+        // Retry-After over the hijacked socket so the client backs off.
+        reply.raw.writeHead(RATE_LIMITED_STATUS, {
+          "content-type": "application/json",
+          "retry-after": String(err.retryAfterSec),
+        });
+        reply.raw.end(
+          JSON.stringify(rateLimitedReplyBody(err.retryAfterSec, requestId)),
+        );
+        return;
+      }
       const status = err instanceof FatalUpstreamError ? err.statusCode : 503;
       reply.raw.writeHead(status, { "content-type": "application/json" });
       const body =
@@ -1279,6 +1302,13 @@ export function makeMessagesOpenaiHandler(
         reply
           .code(NO_OWN_UPSTREAM_STATUS)
           .send(noOwnUpstreamReplyBody(err.platform, requestId));
+        return;
+      }
+      if (err instanceof RateLimitedError) {
+        reply
+          .header("retry-after", String(err.retryAfterSec))
+          .code(RATE_LIMITED_STATUS)
+          .send(rateLimitedReplyBody(err.retryAfterSec, requestId));
         return;
       }
       if (err instanceof AllUpstreamsFailed) {
