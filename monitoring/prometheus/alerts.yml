@@ -77,16 +77,35 @@ groups:
   interval: 1m
   rules:
     - alert: GatewayAllUpstreamsFailed
+      # NOTE: metric is http_request_duration_seconds_count (fastify-metrics),
+      # NOT http_requests_total (which the gateway does not export).
       expr: |
-        sum(rate(http_requests_total{job="caliber-gateway", status_code="503"}[5m])) > 0.5
+        sum(rate(http_request_duration_seconds_count{job="caliber-gateway", status_code="503"}[5m])) > 0.5
       for: 5m
       labels:
         severity: critical
         service: gateway
       annotations:
         summary: "Gateway returning 503 (all_upstreams_failed) at >0.5 rps for 5+ min"
-        description: "Either every upstream account is rate-limited / OAuth-invalid / revoked, or the scheduler can't pick any. Check accounts table for status='active' rows; inspect oauth_invalid count."
-        runbook: "(check upstream_accounts.status; rotate / re-onboard if needed)"
+        description: "Either every upstream account is rate-limited / OAuth-invalid / revoked, the scheduler can't pick any, OR clients are requesting a model no upstream serves (model drift). Check upstream_accounts.status='active'; inspect usage_logs for the failing requested_model + status_code."
+        runbook: "(check upstream_accounts.status; rotate / re-onboard if needed; or fix the requested model)"
+
+    # Early-warning, volume-relative variant — catches model drift from agentic
+    # tool/version upgrades before it becomes a full all-upstreams-failed outage.
+    - alert: GatewayErrorRateElevated
+      expr: |
+        sum(rate(http_request_duration_seconds_count{job="caliber-gateway", status_code=~"5.."}[10m]))
+        /
+        clamp_min(sum(rate(http_request_duration_seconds_count{job="caliber-gateway"}[10m])), 0.001)
+        > 0.1
+      for: 10m
+      labels:
+        severity: warning
+        service: gateway
+      annotations:
+        summary: "Gateway 5xx error rate >10% for 10min — likely model drift or upstream failure"
+        description: "A sustained share of /v1/* requests are failing (5xx). Most common cause after an agentic-tool or model upgrade: clients requesting a model the upstream no longer serves (e.g. sub2api Codex serves only gpt-5.x / *-codex, NOT gpt-4o*). DIAGNOSE: SELECT status_code, requested_model, count(*) FROM usage_logs WHERE created_at > now() - interval '15 min' GROUP BY 1,2 ORDER BY 3 DESC; — the failing requested_model is the drifted one. Also check upstream_accounts health."
+        runbook: "(inspect usage_logs failing requested_model; switch clients to a supported model / alias, or add the model upstream)"
 
     - alert: GatewaySlotAcquireFailures
       expr: |
