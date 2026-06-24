@@ -39,3 +39,32 @@ export function noOwnUpstreamReplyBody(
     request_id: requestId,
   };
 }
+
+/** HTTP status for the all-candidates-rate-limited transient error. */
+export const RATE_LIMITED_STATUS = 429 as const;
+
+export interface RateLimitedBody {
+  error: "rate_limited";
+  message: string;
+  retry_after: number;
+  request_id: string;
+}
+
+/**
+ * Build the JSON body for a `rate_limited` 429 — emitted when EVERY candidate
+ * upstream is rate-limited (transient). Callers MUST also set a
+ * `Retry-After: <seconds>` response header so agentic clients (Claude Code,
+ * codex) back off and retry instead of treating it as a hard failure. Unlike
+ * `all_upstreams_failed` (503), this signals "try again shortly", not "dead".
+ */
+export function rateLimitedReplyBody(
+  retryAfterSec: number,
+  requestId: string,
+): RateLimitedBody {
+  return {
+    error: "rate_limited",
+    message: `All upstreams are rate-limited — retry after ${retryAfterSec}s`,
+    retry_after: retryAfterSec,
+    request_id: requestId,
+  };
+}

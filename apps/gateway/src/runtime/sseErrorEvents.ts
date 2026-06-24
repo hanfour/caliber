@@ -26,10 +26,13 @@ import {
   AllUpstreamsFailed,
   FatalUpstreamError,
   NoOwnUpstreamError,
+  RateLimitedError,
 } from "./failoverLoop.js";
 import {
   noOwnUpstreamReplyBody,
   NO_OWN_UPSTREAM_STATUS,
+  rateLimitedReplyBody,
+  RATE_LIMITED_STATUS,
 } from "./noOwnUpstream.js";
 
 /**
@@ -169,6 +172,29 @@ export function respondStreamFailoverCollapse(
       );
     } else {
       reply.raw.end();
+    }
+    return;
+  }
+  if (err instanceof RateLimitedError) {
+    // Transient: every candidate upstream is rate-limited. Surface a 429 +
+    // Retry-After so agentic clients back off, NOT a 503 they treat as dead.
+    if (reply.raw.headersSent) {
+      reply.raw.write(
+        serializeSseError(
+          "rate_limited",
+          `all upstreams rate-limited — retry after ${err.retryAfterSec}s`,
+          requestId,
+        ),
+      );
+      reply.raw.end();
+    } else {
+      reply.raw.writeHead(RATE_LIMITED_STATUS, {
+        "content-type": "application/json",
+        "retry-after": String(err.retryAfterSec),
+      });
+      reply.raw.end(
+        JSON.stringify(rateLimitedReplyBody(err.retryAfterSec, requestId)),
+      );
     }
     return;
   }
