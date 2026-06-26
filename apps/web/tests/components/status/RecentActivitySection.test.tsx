@@ -24,7 +24,7 @@ const listRow = {
   cacheCreationTokens: 0, cacheReadTokens: 0, inputCost: "0", outputCost: "0",
   cacheCreationCost: "0", cacheReadCost: "0", totalCost: "0.0030000000", stream: false,
   statusCode: 200, durationMs: 1400, firstTokenMs: null, bufferReleasedAtMs: null,
-  upstreamRetries: 0, createdAt: "2026-06-08T14:02:00Z",
+  upstreamRetries: 0, createdAt: "2026-06-08T14:02:00Z", notionalCost: "0.1500000000",
 };
 
 describe("RecentActivitySection", () => {
@@ -44,7 +44,8 @@ describe("RecentActivitySection", () => {
     // Cost rendered via formatUsd (Decimal-based), not the raw numeric(20,10)
     // string: summary line shows "$0.12", row cost cell shows "$0.00".
     expect(screen.getByText("48 requests · $0.12")).toBeInTheDocument();
-    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    expect(screen.getByText("$0.00")).toBeInTheDocument(); // actual cost (OAuth)
+    expect(screen.getByText("$0.15")).toBeInTheDocument(); // est. cost column
   });
 
   it("renders the section error message when the list query errors", () => {

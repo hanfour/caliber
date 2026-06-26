@@ -655,6 +655,7 @@
       "colStatus": "状态",
       "colLatency": "延迟",
       "colCost": "成本",
+      "colEstCost": "预估费用",
       "loadError": "无法加载最近活动，请稍后重试。",
       "summaryLoadError": "无法加载摘要。"
     },
