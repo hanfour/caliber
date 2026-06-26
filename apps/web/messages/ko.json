@@ -168,7 +168,19 @@
     "slug": "슬러그",
     "slugPlaceholder": "acme",
     "createNew": "만들기",
-    "creating": "만드는 중…"
+    "creating": "만드는 중…",
+    "tabs": {
+      "overview": "개요",
+      "departments": "부서",
+      "teams": "팀",
+      "members": "멤버",
+      "invites": "초대",
+      "accounts": "계정",
+      "accountGroups": "계정 그룹",
+      "usage": "사용량",
+      "evaluator": "Evaluator",
+      "audit": "감사"
+    }
   },
   "org": {
     "tabs": {

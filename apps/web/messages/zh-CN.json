@@ -168,7 +168,19 @@
     "slug": "短代号",
     "slugPlaceholder": "acme",
     "createNew": "创建",
-    "creating": "创建中…"
+    "creating": "创建中…",
+    "tabs": {
+      "overview": "总览",
+      "departments": "部门",
+      "teams": "团队",
+      "members": "成员",
+      "invites": "邀请",
+      "accounts": "账号",
+      "accountGroups": "账号分组",
+      "usage": "用量",
+      "evaluator": "评估器",
+      "audit": "审计"
+    }
   },
   "org": {
     "tabs": {
