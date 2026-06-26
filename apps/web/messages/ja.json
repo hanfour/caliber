@@ -168,7 +168,19 @@
     "slug": "スラッグ",
     "slugPlaceholder": "acme",
     "createNew": "作成",
-    "creating": "作成中…"
+    "creating": "作成中…",
+    "tabs": {
+      "overview": "概要",
+      "departments": "部門",
+      "teams": "チーム",
+      "members": "メンバー",
+      "invites": "招待",
+      "accounts": "アカウント",
+      "accountGroups": "アカウントグループ",
+      "usage": "使用量",
+      "evaluator": "Evaluator",
+      "audit": "監査"
+    }
   },
   "org": {
     "tabs": {

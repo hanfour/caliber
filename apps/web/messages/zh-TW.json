@@ -168,7 +168,19 @@
     "slug": "代稱",
     "slugPlaceholder": "acme",
     "createNew": "建立",
-    "creating": "建立中…"
+    "creating": "建立中…",
+    "tabs": {
+      "overview": "總覽",
+      "departments": "部門",
+      "teams": "團隊",
+      "members": "成員",
+      "invites": "邀請",
+      "accounts": "帳號",
+      "accountGroups": "帳號群組",
+      "usage": "用量",
+      "evaluator": "評估器",
+      "audit": "稽核"
+    }
   },
   "org": {
     "tabs": {

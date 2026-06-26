@@ -168,7 +168,19 @@
     "slug": "Slug",
     "slugPlaceholder": "acme",
     "createNew": "Create",
-    "creating": "Creating…"
+    "creating": "Creating…",
+    "tabs": {
+      "overview": "Overview",
+      "departments": "Departments",
+      "teams": "Teams",
+      "members": "Members",
+      "invites": "Invites",
+      "accounts": "Accounts",
+      "accountGroups": "Account groups",
+      "usage": "Usage",
+      "evaluator": "Evaluator",
+      "audit": "Audit"
+    }
   },
   "org": {
     "tabs": {

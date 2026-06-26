@@ -3,12 +3,15 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 
 interface Tab {
   href: string;
-  label: string;
+  // Key under the `organizations.tabs` i18n namespace — resolved with the
+  // useTranslations hook below so the tab bar follows the active locale.
+  labelKey: string;
   visible: (p: {
     isSuperAdmin: boolean;
     isOrgAdmin: boolean;
@@ -21,6 +24,7 @@ export default function OrganizationLayout({
 }: {
   children: ReactNode;
 }) {
+  const t = useTranslations("organizations");
   const pathname = usePathname() ?? "";
   const params = useParams();
   // The url param can be a slug OR a UUID. Resolve to the canonical org once
@@ -53,42 +57,42 @@ export default function OrganizationLayout({
     ) ?? false;
 
   const tabs: Tab[] = [
-    { href: "", label: "Overview", visible: () => true },
-    { href: "/departments", label: "Departments", visible: () => true },
-    { href: "/teams", label: "Teams", visible: () => true },
+    { href: "", labelKey: "tabs.overview", visible: () => true },
+    { href: "/departments", labelKey: "tabs.departments", visible: () => true },
+    { href: "/teams", labelKey: "tabs.teams", visible: () => true },
     {
       href: "/members",
-      label: "Members",
+      labelKey: "tabs.members",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin || p.hasDeptOrTeamMgr,
     },
     {
       href: "/invites",
-      label: "Invites",
+      labelKey: "tabs.invites",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
     },
     {
       href: "/accounts",
-      label: "Accounts",
+      labelKey: "tabs.accounts",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
     },
     {
       href: "/account-groups",
-      label: "Account groups",
+      labelKey: "tabs.accountGroups",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
     },
     {
       href: "/usage",
-      label: "Usage",
+      labelKey: "tabs.usage",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
     },
     {
       href: "/evaluator/status",
-      label: "Evaluator",
+      labelKey: "tabs.evaluator",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
     },
     {
       href: "/audit",
-      label: "Audit",
+      labelKey: "tabs.audit",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
     },
   ];
@@ -116,16 +120,16 @@ export default function OrganizationLayout({
       <div className="border-b border-border">
         <nav className="flex gap-1 overflow-x-auto">
           {tabs
-            .filter((t) => t.visible(perm))
-            .map((t) => {
-              const href = `/dashboard/organizations/${identifier}${t.href}`;
+            .filter((tab) => tab.visible(perm))
+            .map((tab) => {
+              const href = `/dashboard/organizations/${identifier}${tab.href}`;
               const active =
                 pathname === href ||
-                (t.href === "" &&
+                (tab.href === "" &&
                   pathname === `/dashboard/organizations/${identifier}`);
               return (
                 <Link
-                  key={t.label}
+                  key={tab.labelKey}
                   href={href}
                   className={cn(
                     "relative -mb-px border-b-2 px-3 py-2 text-sm transition-colors",
@@ -134,7 +138,7 @@ export default function OrganizationLayout({
                       : "border-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {t.label}
+                  {t(tab.labelKey)}
                 </Link>
               );
             })}
