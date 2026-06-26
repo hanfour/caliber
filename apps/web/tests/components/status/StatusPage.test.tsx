@@ -26,6 +26,9 @@ vi.mock("@/components/status/ErrorRateSection", () => ({
 vi.mock("@/components/status/RecentActivitySection", () => ({
   RecentActivitySection: () => <div data-testid="activity-section" />,
 }));
+vi.mock("@/components/status/ByKeySection", () => ({
+  ByKeySection: () => <div data-testid="bykey-section" />,
+}));
 import StatusPage from "@/app/dashboard/status/page";
 
 describe("StatusPage", () => {
@@ -33,10 +36,11 @@ describe("StatusPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the three sections", () => {
+  it("renders all sections", () => {
     render(<StatusPage />);
     expect(screen.getByTestId("health-section")).toBeInTheDocument();
     expect(screen.getByTestId("error-section")).toBeInTheDocument();
+    expect(screen.getByTestId("bykey-section")).toBeInTheDocument();
     expect(screen.getByTestId("activity-section")).toBeInTheDocument();
   });
 

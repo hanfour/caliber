@@ -689,6 +689,21 @@
       "7d": "過去 7 日間",
       "30d": "過去 30 日間",
       "90d": "過去 90 日間"
+    },
+    "byKey": {
+      "title": "キー別の使用量",
+      "description": "API キーごと（通常 1 キー = 1 プロジェクト）の使用量。OAuth／サブスクリプションのリクエストはコスト $0 ですが、リクエスト数とトークンは記録されます。",
+      "loadError": "キー別使用量を読み込めませんでした",
+      "empty": "キー別の使用量はまだありません",
+      "unknownKey": "（不明なキー）",
+      "colKey": "キー",
+      "colOwner": "所有者",
+      "colRequests": "リクエスト数",
+      "colInput": "入力トークン",
+      "colOutput": "出力トークン",
+      "colCacheWrite": "キャッシュ書込",
+      "colCacheRead": "キャッシュ読込",
+      "colCost": "コスト"
     }
   },
   "evaluator": {

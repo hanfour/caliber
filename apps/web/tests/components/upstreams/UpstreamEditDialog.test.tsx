@@ -12,7 +12,7 @@ import { UpstreamEditDialog } from "@/components/upstreams/UpstreamEditDialog";
 import { trpc } from "@/lib/trpc/client";
 const useMutation = trpc.accounts.updateOwn.useMutation as unknown as ReturnType<typeof vi.fn>;
 
-const row = { id: "a1", name: "Old", schedulable: true, priority: 50 };
+const row = { id: "a1", name: "Old", schedulable: true, priority: 50, concurrency: 5 };
 
 describe("UpstreamEditDialog", () => {
   it("submits priority as a number (valueAsNumber/coerce), not a string", async () => {
@@ -29,6 +29,9 @@ describe("UpstreamEditDialog", () => {
       expect(arg.id).toBe("a1");
       expect(arg.priority).toBe(10);
       expect(typeof arg.priority).toBe("number");
+      // concurrency (untouched) is submitted from the reset value as a number
+      expect(arg.concurrency).toBe(5);
+      expect(typeof arg.concurrency).toBe("number");
     });
   });
 });

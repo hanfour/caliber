@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { CredentialHealthSection } from "@/components/status/CredentialHealthSection";
 import { ErrorRateSection } from "@/components/status/ErrorRateSection";
+import { ByKeySection } from "@/components/status/ByKeySection";
 import { RecentActivitySection } from "@/components/status/RecentActivitySection";
 
 export default function StatusPage() {
@@ -33,6 +34,7 @@ export default function StatusPage() {
       </div>
       <CredentialHealthSection />
       <ErrorRateSection />
+      <ByKeySection />
       <RecentActivitySection />
     </div>
   );
