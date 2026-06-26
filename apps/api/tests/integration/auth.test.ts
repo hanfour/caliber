@@ -12,6 +12,7 @@ import Fastify from "fastify";
 import { cookiesPlugin } from "../../src/plugins/cookies.js";
 import { authPlugin } from "../../src/plugins/auth.js";
 import { sessions, users } from "@caliber/db";
+import { ignorePoolTeardownErrors } from "../factories/db.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
@@ -25,7 +26,9 @@ let insertedUserId: string;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
-  pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+  pool = ignorePoolTeardownErrors(
+    new pg.Pool({ connectionString: container.getConnectionUri() }),
+  );
   const db = drizzle(pool, { schema: { users, sessions } });
   await migrate(db, { migrationsFolder });
 
