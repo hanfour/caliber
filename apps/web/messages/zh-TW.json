@@ -703,7 +703,8 @@
       "colOutput": "輸出 Token",
       "colCacheWrite": "快取寫入",
       "colCacheRead": "快取讀取",
-      "colCost": "費用"
+      "colCost": "費用",
+      "colEstCost": "預估費用"
     }
   },
   "evaluator": {

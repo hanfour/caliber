@@ -703,7 +703,8 @@
       "colOutput": "출력 토큰",
       "colCacheWrite": "캐시 쓰기",
       "colCacheRead": "캐시 읽기",
-      "colCost": "비용"
+      "colCost": "비용",
+      "colEstCost": "예상 비용"
     }
   },
   "evaluator": {

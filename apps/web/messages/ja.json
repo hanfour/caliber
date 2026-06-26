@@ -703,7 +703,8 @@
       "colOutput": "出力トークン",
       "colCacheWrite": "キャッシュ書込",
       "colCacheRead": "キャッシュ読込",
-      "colCost": "コスト"
+      "colCost": "コスト",
+      "colEstCost": "推定コスト"
     }
   },
   "evaluator": {
