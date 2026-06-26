@@ -141,6 +141,13 @@
       "when": 1780647201127,
       "tag": "0019_curly_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1782445676286,
+      "tag": "0020_add_opus_4_8_pricing",
+      "breakpoints": true
     }
   ]
 }
