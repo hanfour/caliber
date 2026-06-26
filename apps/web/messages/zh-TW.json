@@ -689,6 +689,21 @@
       "7d": "最近 7 天",
       "30d": "最近 30 天",
       "90d": "最近 90 天"
+    },
+    "byKey": {
+      "title": "依金鑰的用量",
+      "description": "每把 API 金鑰（通常對應一個專案）的用量明細。OAuth／訂閱請求的費用為 $0，但請求數與 Token 仍可追蹤。",
+      "loadError": "無法載入金鑰用量",
+      "empty": "尚無金鑰用量資料",
+      "unknownKey": "（未知金鑰）",
+      "colKey": "金鑰",
+      "colOwner": "擁有者",
+      "colRequests": "請求數",
+      "colInput": "輸入 Token",
+      "colOutput": "輸出 Token",
+      "colCacheWrite": "快取寫入",
+      "colCacheRead": "快取讀取",
+      "colCost": "費用"
     }
   },
   "evaluator": {

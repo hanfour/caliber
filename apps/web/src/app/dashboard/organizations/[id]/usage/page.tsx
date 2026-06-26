@@ -13,6 +13,7 @@ import {
 } from "@/components/usage/TimeRangePicker";
 import { UsageSummaryCards } from "@/components/usage/UsageSummaryCards";
 import { UsageChart } from "@/components/usage/UsageChart";
+import { UsageByKeyTable } from "@/components/usage/UsageByKeyTable";
 import { UsageTable } from "@/components/usage/UsageTable";
 
 // TODO: tabs for team/member scope switching. The server accepts
@@ -71,6 +72,16 @@ export default function OrgUsagePage() {
           </CardHeader>
           <CardContent>
             <UsageChart byModel={summaryQuery.data?.byModel ?? []} />
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardHeader className="space-y-0">
+            <CardTitle className="text-sm font-medium">{t("byKey.title")}</CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">{t("byKey.description")}</p>
+          </CardHeader>
+          <CardContent>
+            <UsageByKeyTable rows={summaryQuery.data?.byKey ?? []} showOwner={true} />
           </CardContent>
         </Card>
 

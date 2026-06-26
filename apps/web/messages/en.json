@@ -689,6 +689,21 @@
       "7d": "Last 7 days",
       "30d": "Last 30 days",
       "90d": "Last 90 days"
+    },
+    "byKey": {
+      "title": "Usage by key",
+      "description": "Per-API-key usage (each key usually maps to one project). OAuth/subscription requests cost $0, but request count and tokens are still tracked.",
+      "loadError": "Failed to load per-key usage",
+      "empty": "No per-key usage yet",
+      "unknownKey": "(unknown key)",
+      "colKey": "Key",
+      "colOwner": "Owner",
+      "colRequests": "Requests",
+      "colInput": "Input tokens",
+      "colOutput": "Output tokens",
+      "colCacheWrite": "Cache write",
+      "colCacheRead": "Cache read",
+      "colCost": "Cost"
     }
   },
   "evaluator": {

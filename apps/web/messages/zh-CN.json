@@ -689,6 +689,21 @@
       "7d": "最近 7 天",
       "30d": "最近 30 天",
       "90d": "最近 90 天"
+    },
+    "byKey": {
+      "title": "按密钥的用量",
+      "description": "每把 API 密钥（通常对应一个项目）的用量明细。OAuth／订阅请求费用为 $0，但请求数与 Token 仍可追踪。",
+      "loadError": "无法加载密钥用量",
+      "empty": "暂无密钥用量数据",
+      "unknownKey": "（未知密钥）",
+      "colKey": "密钥",
+      "colOwner": "拥有者",
+      "colRequests": "请求数",
+      "colInput": "输入 Token",
+      "colOutput": "输出 Token",
+      "colCacheWrite": "缓存写入",
+      "colCacheRead": "缓存读取",
+      "colCost": "费用"
     }
   },
   "evaluator": {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { usageLogs } from "@caliber/db";
+import { usageLogs, apiKeys, users } from "@caliber/db";
 import { can, type Action } from "@caliber/auth";
 import type { UserPermissions } from "@caliber/auth";
 import { protectedProcedure, router } from "../procedures.js";
@@ -21,6 +21,10 @@ const MAX_PAGE_SIZE = 200;
 // almost always <50; capping keeps the response payload bounded for orgs
 // that fan out across many requested models.
 const MAX_BY_MODEL_GROUPS = 50;
+
+// Cap how many byKey (per-API-key) groups we surface in `summary`. Keys per
+// user/org is small in practice; 100 is generous headroom.
+const MAX_BY_KEY_GROUPS = 100;
 
 // Discriminated scope: tags every query with a kind (own / user / team / org)
 // plus the IDs the WHERE filter and the RBAC check both need. Keeping the IDs
@@ -222,6 +226,31 @@ export const usageRouter = router({
         .orderBy(desc(sql`SUM(${usageLogs.totalCost})`))
         .limit(MAX_BY_MODEL_GROUPS);
 
+      // Per-API-key breakdown (1 key ≈ 1 project for BYOK users). Joins the
+      // key name + owner email so the admin (scope=org) can see who owns each
+      // key; for scope=own every row is the caller's. NOTE: cost is $0 for
+      // OAuth/subscription-routed requests (flat-rate, not per-token) — only
+      // metered pool-API-key usage carries a non-zero cost.
+      const byKey = await ctx.db
+        .select({
+          apiKeyId: usageLogs.apiKeyId,
+          keyName: apiKeys.name,
+          ownerEmail: users.email,
+          requests: sql<number>`COUNT(*)::int`,
+          costUsd: sql<string>`COALESCE(SUM(${usageLogs.totalCost}), 0)::text`,
+          inputTokens: sql<number>`COALESCE(SUM(${usageLogs.inputTokens}), 0)::int`,
+          outputTokens: sql<number>`COALESCE(SUM(${usageLogs.outputTokens}), 0)::int`,
+          cacheCreationTokens: sql<number>`COALESCE(SUM(${usageLogs.cacheCreationTokens}), 0)::int`,
+          cacheReadTokens: sql<number>`COALESCE(SUM(${usageLogs.cacheReadTokens}), 0)::int`,
+        })
+        .from(usageLogs)
+        .leftJoin(apiKeys, eq(apiKeys.id, usageLogs.apiKeyId))
+        .leftJoin(users, eq(users.id, apiKeys.userId))
+        .where(where)
+        .groupBy(usageLogs.apiKeyId, apiKeys.name, users.email)
+        .orderBy(desc(sql`COUNT(*)`))
+        .limit(MAX_BY_KEY_GROUPS);
+
       // Decimal columns intentionally returned as strings (the canonical
       // Drizzle representation for `numeric(20, 10)`). Converting to JS
       // number here would lose precision for high-cost orgs and break
@@ -235,6 +264,7 @@ export const usageRouter = router({
         totalCacheCreationTokens: totals?.totalCacheCreationTokens ?? 0,
         totalCacheReadTokens: totals?.totalCacheReadTokens ?? 0,
         byModel,
+        byKey,
       };
     }),
 
