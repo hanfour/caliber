@@ -99,6 +99,18 @@ describe('teams router', () => {
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
   })
 
+  it('create accepts a 2-character slug (client/server slug regex parity)', async () => {
+    const org = await makeOrg(t.db)
+    const admin = await makeUser(t.db, {
+      role: 'org_admin',
+      scopeType: 'organization',
+      scopeId: org.id
+    })
+    const caller = await callerFor(t.db, admin.id)
+    const team = await caller.teams.create({ orgId: org.id, name: 'QA', slug: 'qa' })
+    expect(team?.slug).toBe('qa')
+  })
+
   it('update rejects a departmentId from a different org', async () => {
     const orgA = await makeOrg(t.db)
     const orgB = await makeOrg(t.db)

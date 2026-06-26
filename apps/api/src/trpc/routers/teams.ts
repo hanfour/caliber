@@ -13,7 +13,11 @@ import {
 } from '../../services/tenancy.js'
 import { mapServiceError } from '../errors.js'
 
-const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)
+// 2–63 chars: [a-z0-9], hyphens allowed in the middle, no leading/trailing
+// hyphen. Kept in lockstep with the client schema (apps/web teams page) and the
+// organizations/departments routers — a stricter server min silently 400s slugs
+// the form accepted.
+const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/)
 const uuid = z.string().uuid()
 
 export const teamsRouter = router({

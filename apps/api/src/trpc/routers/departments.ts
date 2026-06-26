@@ -8,7 +8,10 @@ import {
   router
 } from '../procedures.js'
 
-const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)
+// 2–63 chars, kept in lockstep with the client schema and the
+// organizations/teams routers (a stricter server min silently 400s slugs the
+// form accepted).
+const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/)
 const uuid = z.string().uuid()
 
 export const departmentsRouter = router({
