@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Database } from "@caliber/db";
-import { apiKeys, upstreamAccounts, usageLogs } from "@caliber/db";
+import { apiKeys, upstreamAccounts, usageLogs, modelPricing } from "@caliber/db";
 import { resolvePermissions } from "@caliber/auth";
 import type { ServerEnv } from "@caliber/config";
 import {
@@ -667,6 +667,96 @@ describe("usage router", () => {
     await expect(
       caller.usage.list({ scope: { type: "own" }, pageSize: 201 }),
     ).rejects.toThrow();
+  });
+
+  // Self-contained pricing for a UNIQUE test model so the notional cost is
+  // deterministic + can't collide with the seeded snapshot. $3/M in, $15/M out.
+  async function seedTestModelPricing(modelId: string): Promise<void> {
+    await t.db.insert(modelPricing).values({
+      platform: "anthropic",
+      modelId,
+      inputPerMillionMicros: 3_000_000n,
+      outputPerMillionMicros: 15_000_000n,
+      cached5mPerMillionMicros: null,
+      cached1hPerMillionMicros: null,
+      cachedInputPerMillionMicros: null,
+      cacheReadPerMillionMicros: null,
+      effectiveFrom: new Date("2020-01-01T00:00:00Z"),
+    });
+  }
+
+  // REGRESSION GUARD for the v0.16.8 500: the byKey `notionalCostUsd` SQL had an
+  // unbalanced paren (typecheck can't see SQL-string syntax). This test EXECUTES
+  // the query against real postgres, so a paren/syntax error fails it.
+  it("summary.byKey: per-key breakdown with a notional cost from current pricing", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: u.id, orgId: org.id });
+    await seedTestModelPricing("test-bykey-model");
+
+    // 1M input + 1M output → 1M*3M + 1M*15M = 1.8e13 micros; /1e12 = $18.
+    await insertUsageRow(t.db, {
+      userId: u.id,
+      apiKeyId: key,
+      accountId: account,
+      orgId: org.id,
+      upstreamModel: "test-bykey-model",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      totalCost: "0.0000000000",
+    });
+
+    const caller = await callerFor({ db: t.db, userId: u.id });
+    const summary = await caller.usage.summary({ scope: { type: "own" } });
+
+    expect(summary.byKey).toHaveLength(1);
+    const row = summary.byKey[0]!;
+    expect(row.apiKeyId).toBe(key);
+    expect(row.requests).toBe(1);
+    expect(row.inputTokens).toBe(1_000_000);
+    expect(row.outputTokens).toBe(1_000_000);
+    expect(Number(row.notionalCostUsd)).toBeCloseTo(18, 4);
+    expect(Number(row.costUsd)).toBe(0); // actual cost stays $0 (subscription)
+  });
+
+  // REGRESSION GUARD for the per-row notional cost in usage.list (v0.16.9).
+  it("list: each row carries a per-row notional cost", async () => {
+    const org = await makeOrg(t.db);
+    const u = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: u.id, orgId: org.id });
+    await seedTestModelPricing("test-list-model");
+
+    await insertUsageRow(t.db, {
+      userId: u.id,
+      apiKeyId: key,
+      accountId: account,
+      orgId: org.id,
+      upstreamModel: "test-list-model",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+
+    const caller = await callerFor({ db: t.db, userId: u.id });
+    const page = await caller.usage.list({
+      scope: { type: "own" },
+      page: 1,
+      pageSize: 10,
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(Number(page.items[0]!.notionalCost)).toBeCloseTo(18, 4);
   });
 });
 

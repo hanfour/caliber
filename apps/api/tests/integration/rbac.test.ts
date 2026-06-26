@@ -13,6 +13,7 @@ import { cookiesPlugin } from "../../src/plugins/cookies.js";
 import { authPlugin } from "../../src/plugins/auth.js";
 import { requirePerm } from "../../src/plugins/rbac.js";
 import { users, sessions, organizations, roleAssignments } from "@caliber/db";
+import { ignorePoolTeardownErrors } from "../factories/db.js";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
@@ -28,7 +29,9 @@ let orgId: string;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
-  pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+  pool = ignorePoolTeardownErrors(
+    new pg.Pool({ connectionString: container.getConnectionUri() }),
+  );
   const db = drizzle(pool);
   await migrate(db, { migrationsFolder });
 

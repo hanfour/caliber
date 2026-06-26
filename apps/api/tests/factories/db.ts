@@ -12,9 +12,29 @@ export const migrationsFolder = path.resolve(
   'drizzle'
 )
 
+/**
+ * Attach a no-op 'error' listener so async pool-level errors during teardown
+ * don't fail the run.
+ *
+ * node-postgres re-emits an idle client's connection error on the Pool itself.
+ * When a testcontainer Postgres is stopped in afterAll — or reaped at the end
+ * of the run — any still-idle pooled client receives a FATAL 57P01
+ * ("terminating connection due to administrator command"). With no listener,
+ * Node throws that 'error' event as an uncaught exception, which Vitest counts
+ * as a failed run even when every test passed. A genuine mid-test connection
+ * fault still rejects its own awaited query, so this only swallows expected
+ * teardown noise. Mirrors the redis.on('error') guard in src/server.ts.
+ */
+export function ignorePoolTeardownErrors(pool: pg.Pool): pg.Pool {
+  pool.on('error', () => {})
+  return pool
+}
+
 export async function setupTestDb() {
   const container = await new PostgreSqlContainer('postgres:16-alpine').start()
-  const pool = new pg.Pool({ connectionString: container.getConnectionUri() })
+  const pool = ignorePoolTeardownErrors(
+    new pg.Pool({ connectionString: container.getConnectionUri() })
+  )
   const db = drizzle(pool, { schema })
   await migrate(db as never, { migrationsFolder })
   return {

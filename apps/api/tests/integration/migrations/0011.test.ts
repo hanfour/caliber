@@ -51,8 +51,13 @@ describe("migration 0011 model_pricing.cache_read_per_million_micros", () => {
       SELECT model_id, cache_read_per_million_micros
       FROM model_pricing
       WHERE platform = 'anthropic'
+        AND model_id IN (
+          'claude-haiku-4-5', 'claude-opus-4-7', 'claude-sonnet-4-6'
+        )
       ORDER BY model_id
     `);
+    // Scope to the 3 seeds migration 0011 backfills — 0020 later adds
+    // claude-opus-4-8 (also anthropic), which an unscoped count would catch.
     expect(rows.rows.length).toBe(3);
     const byModel = Object.fromEntries(
       rows.rows.map((r) => [r.model_id, r.cache_read_per_million_micros]),
