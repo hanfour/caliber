@@ -703,7 +703,8 @@
       "colOutput": "Output tokens",
       "colCacheWrite": "Cache write",
       "colCacheRead": "Cache read",
-      "colCost": "Cost"
+      "colCost": "Cost",
+      "colEstCost": "Est. cost"
     }
   },
   "evaluator": {

@@ -44,6 +44,7 @@ export function UsageByKeyTable({
             <th scope="col" className="px-3 py-2 text-right font-medium">{t("colCacheWrite")}</th>
             <th scope="col" className="px-3 py-2 text-right font-medium">{t("colCacheRead")}</th>
             <th scope="col" className="px-3 py-2 text-right font-medium">{t("colCost")}</th>
+            <th scope="col" className="px-3 py-2 text-right font-medium">{t("colEstCost")}</th>
           </tr>
         </thead>
         <tbody>
@@ -59,6 +60,7 @@ export function UsageByKeyTable({
               <td className="px-3 py-2 text-right font-mono text-xs">{fmtNum(r.cacheCreationTokens)}</td>
               <td className="px-3 py-2 text-right font-mono text-xs">{fmtNum(r.cacheReadTokens)}</td>
               <td className="px-3 py-2 text-right font-mono text-xs">{formatUsd(r.costUsd)}</td>
+              <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">{formatUsd(r.notionalCostUsd)}</td>
             </tr>
           ))}
         </tbody>

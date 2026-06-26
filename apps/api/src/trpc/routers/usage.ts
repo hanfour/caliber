@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { usageLogs, apiKeys, users } from "@caliber/db";
+import { usageLogs, apiKeys, users, modelPricing } from "@caliber/db";
 import { can, type Action } from "@caliber/auth";
 import type { UserPermissions } from "@caliber/auth";
 import { protectedProcedure, router } from "../procedures.js";
@@ -238,6 +238,20 @@ export const usageRouter = router({
           ownerEmail: users.email,
           requests: sql<number>`COUNT(*)::int`,
           costUsd: sql<string>`COALESCE(SUM(${usageLogs.totalCost}), 0)::text`,
+          // Notional cost: what this usage WOULD cost at current API rates,
+          // mirroring computeCost() (billable input excludes cache-classified
+          // tokens; cache reads fall back to the input rate when no cache_read
+          // rate exists). Lets OAuth/subscription usage (actual cost $0) show a
+          // dollar estimate. Pricing is micros/million tokens (1 USD = 1e6
+          // micros), so tokens×micros / 1e12 = dollars.
+          notionalCostUsd: sql<string>`COALESCE(SUM(
+            GREATEST(${usageLogs.inputTokens} - ${usageLogs.cacheCreation5mTokens} - ${usageLogs.cacheCreation1hTokens} - ${usageLogs.cacheReadTokens} - ${usageLogs.cachedInputTokens}, 0) * COALESCE(${modelPricing.inputPerMillionMicros}, 0)
+            + ${usageLogs.outputTokens} * COALESCE(${modelPricing.outputPerMillionMicros}, 0)
+            + ${usageLogs.cacheReadTokens} * COALESCE(${modelPricing.cacheReadPerMillionMicros}, ${modelPricing.inputPerMillionMicros}, 0)
+            + ${usageLogs.cacheCreation5mTokens} * COALESCE(${modelPricing.cached5mPerMillionMicros}, 0)
+            + ${usageLogs.cacheCreation1hTokens} * COALESCE(${modelPricing.cached1hPerMillionMicros}, 0)
+            + ${usageLogs.cachedInputTokens} * COALESCE(${modelPricing.cachedInputPerMillionMicros}, 0)
+          ), 0) / 1000000000000.0)::text`,
           inputTokens: sql<number>`COALESCE(SUM(${usageLogs.inputTokens}), 0)::int`,
           outputTokens: sql<number>`COALESCE(SUM(${usageLogs.outputTokens}), 0)::int`,
           cacheCreationTokens: sql<number>`COALESCE(SUM(${usageLogs.cacheCreationTokens}), 0)::int`,
@@ -246,6 +260,17 @@ export const usageRouter = router({
         .from(usageLogs)
         .leftJoin(apiKeys, eq(apiKeys.id, usageLogs.apiKeyId))
         .leftJoin(users, eq(users.id, apiKeys.userId))
+        // Current pricing per row's model for the notional-cost estimate. In
+        // the ON clause (not WHERE) so a model with no pricing row keeps the
+        // usage row (its notional terms just COALESCE to 0).
+        .leftJoin(
+          modelPricing,
+          and(
+            eq(modelPricing.platform, usageLogs.platform),
+            eq(modelPricing.modelId, usageLogs.upstreamModel),
+            isNull(modelPricing.effectiveTo),
+          ),
+        )
         .where(where)
         .groupBy(usageLogs.apiKeyId, apiKeys.name, users.email)
         .orderBy(desc(sql`COUNT(*)`))

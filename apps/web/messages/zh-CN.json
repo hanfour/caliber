@@ -703,7 +703,8 @@
       "colOutput": "输出 Token",
       "colCacheWrite": "缓存写入",
       "colCacheRead": "缓存读取",
-      "colCost": "费用"
+      "colCost": "费用",
+      "colEstCost": "预估费用"
     }
   },
   "evaluator": {
