@@ -18,10 +18,11 @@ const schema = z.object({
   name: z.string().min(1, "validation.custom.shared.nameRequired").max(255),
   schedulable: z.boolean(),
   priority: z.coerce.number().int().min(0).max(1000),
+  concurrency: z.coerce.number().int().min(1).max(1000),
 });
 type FormValues = z.infer<typeof schema>;
 
-interface AccountLike { id: string; name: string; schedulable: boolean; priority: number; }
+interface AccountLike { id: string; name: string; schedulable: boolean; priority: number; concurrency: number; }
 interface Props { open: boolean; account: AccountLike | null; onOpenChange: (open: boolean) => void; }
 
 export function UpstreamEditDialog({ open, account, onOpenChange }: Props) {
@@ -31,11 +32,11 @@ export function UpstreamEditDialog({ open, account, onOpenChange }: Props) {
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
     resolver: useTranslatedZodResolver(schema),
-    defaultValues: { name: "", schedulable: true, priority: 50 },
+    defaultValues: { name: "", schedulable: true, priority: 50, concurrency: 20 },
   });
 
   useEffect(() => {
-    if (open && account) reset({ name: account.name, schedulable: account.schedulable, priority: account.priority });
+    if (open && account) reset({ name: account.name, schedulable: account.schedulable, priority: account.priority, concurrency: account.concurrency });
   }, [open, account, reset]);
 
   const updateOwn = trpc.accounts.updateOwn.useMutation({
@@ -51,7 +52,7 @@ export function UpstreamEditDialog({ open, account, onOpenChange }: Props) {
   });
 
   const onSubmit = (v: FormValues) =>
-    updateOwn.mutateAsync({ id: account!.id, name: v.name, schedulable: v.schedulable, priority: v.priority });
+    updateOwn.mutateAsync({ id: account!.id, name: v.name, schedulable: v.schedulable, priority: v.priority, concurrency: v.concurrency });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -71,6 +72,12 @@ export function UpstreamEditDialog({ open, account, onOpenChange }: Props) {
             <Label htmlFor="edPriority">{t("priorityLabel")}</Label>
             <Input id="edPriority" type="number" min={0} max={1000} {...register("priority")} />
             {errors.priority && <p className="text-xs text-destructive">{errors.priority.message}</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edConcurrency">{t("concurrencyLabel")}</Label>
+            <Input id="edConcurrency" type="number" min={1} max={1000} {...register("concurrency")} />
+            <p className="text-xs text-muted-foreground">{t("concurrencyHint")}</p>
+            {errors.concurrency && <p className="text-xs text-destructive">{errors.concurrency.message}</p>}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{tCommon("cancel")}</Button>

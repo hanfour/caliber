@@ -589,6 +589,8 @@
       "nameLabel": "名稱",
       "schedulableLabel": "啟用（可供路由）",
       "priorityLabel": "優先序（越小越優先）",
+      "concurrencyLabel": "並發上限",
+      "concurrencyHint": "同時可送往此上游的最大請求數；agentic 工具（含 sub-agent）會同時發多個請求，過低會被擋而需重試。建議 20 以上。",
       "submit": "儲存",
       "submitting": "儲存中…",
       "savedToast": "已更新上游憑證"

@@ -589,6 +589,8 @@
       "nameLabel": "이름",
       "schedulableLabel": "활성화（라우팅에 사용 가능）",
       "priorityLabel": "우선순위（낮을수록 우선）",
+      "concurrencyLabel": "동시 실행 한도",
+      "concurrencyHint": "이 업스트림에 동시에 보낼 수 있는 최대 요청 수. 에이전트 도구(서브 에이전트 포함)는 동시에 여러 요청을 보내므로 너무 낮으면 제한되어 재시도가 발생합니다. 20 이상 권장.",
       "submit": "저장",
       "submitting": "저장 중…",
       "savedToast": "업스트림 자격증명이 업데이트되었습니다"
