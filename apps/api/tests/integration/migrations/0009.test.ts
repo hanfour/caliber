@@ -76,8 +76,15 @@ describe("migration 0009 model_pricing", () => {
     }>(sql`
       SELECT platform, model_id, effective_from
       FROM model_pricing
+      WHERE model_id IN (
+        'claude-haiku-4-5', 'claude-opus-4-7', 'claude-sonnet-4-6',
+        'gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'
+      )
       ORDER BY platform, model_id
     `);
+    // Scope to the model_ids migration 0009 seeds — later pricing migrations
+    // (e.g. 0020 adds claude-opus-4-8) legitimately add rows to model_pricing,
+    // so a whole-table count here would be brittle to every future model.
     expect(all.rows.length).toBe(7);
 
     const byPlatform = all.rows.reduce<Record<string, string[]>>((acc, r) => {
@@ -113,6 +120,9 @@ describe("migration 0009 model_pricing", () => {
              cached_input_per_million_micros
       FROM model_pricing
       WHERE platform = 'anthropic'
+        AND model_id IN (
+          'claude-haiku-4-5', 'claude-opus-4-7', 'claude-sonnet-4-6'
+        )
     `);
     expect(rows.rows.length).toBe(3);
     for (const r of rows.rows) {
