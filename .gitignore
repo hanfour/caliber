@@ -23,4 +23,7 @@ test-results/
 
 # Alertmanager local config (template lives at ops/alertmanager/alertmanager.yml.example)
 ops/alertmanager/alertmanager.yml
+
+# Docker Compose host-local override (per-host port/env tweaks; not for the repo)
+docker/docker-compose.override.yml
 .superpowers/
