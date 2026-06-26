@@ -244,7 +244,7 @@ export const usageRouter = router({
           // rate exists). Lets OAuth/subscription usage (actual cost $0) show a
           // dollar estimate. Pricing is micros/million tokens (1 USD = 1e6
           // micros), so tokens×micros / 1e12 = dollars.
-          notionalCostUsd: sql<string>`COALESCE(SUM(
+          notionalCostUsd: sql<string>`(COALESCE(SUM(
             GREATEST(${usageLogs.inputTokens} - ${usageLogs.cacheCreation5mTokens} - ${usageLogs.cacheCreation1hTokens} - ${usageLogs.cacheReadTokens} - ${usageLogs.cachedInputTokens}, 0) * COALESCE(${modelPricing.inputPerMillionMicros}, 0)
             + ${usageLogs.outputTokens} * COALESCE(${modelPricing.outputPerMillionMicros}, 0)
             + ${usageLogs.cacheReadTokens} * COALESCE(${modelPricing.cacheReadPerMillionMicros}, ${modelPricing.inputPerMillionMicros}, 0)
