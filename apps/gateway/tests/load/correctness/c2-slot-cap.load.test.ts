@@ -24,12 +24,37 @@ it("C2: single account concurrency=K — K proceed, N-K shed at the slot layer (
 
   const ok = results.filter((r) => r.status === 200).length;
   const shed = results.filter((r) => r.status === 503);
+  // THE no-over-allocation invariant: exactly K requests hold a slot (each held
+  // 800ms), the rest shed. ok===K is what proves the cap engaged — never >K
+  // concurrent. Robust under concurrency (the K winners acquire before any loser
+  // mutates account state).
   expect(ok).toBe(K);
   expect(shed.length).toBe(N - K);
-  // Single account exhausts the failover loop → all_upstreams_failed (NOT account_at_capacity).
-  expect(shed.every((r) => r.json?.error === "all_upstreams_failed")).toBe(true);
 
-  // The real no-over-allocation invariant: over_limit rejections == N-K.
+  // A slot-capped shed terminates as one of THREE timing-dependent but
+  // semantically-equivalent "no capacity, retry shortly" 503s — confirmed by
+  // capturing the live shapes on CI:
+  //   - all_upstreams_failed   : the loser attempted, slot acquire failed
+  //     (CapacityError→synthetic 500→switch_account), then re-select excluded
+  //     the now-failed single account → AllUpstreamsFailed(attempted=[acct]).
+  //   - no_upstream_available  : a concurrent loser had already marked the
+  //     account transiently unschedulable, so this loser's scheduler.select
+  //     found zero candidates BEFORE attempting → AllUpstreamsFailed(attempted=[]).
+  //   - account_at_capacity    : the per-attempt CapacityError surfaced directly
+  //     (the shape C1 documents for the same slot-cap mechanism).
+  // Asserting one exact string is what made this gate flaky (~40-50% on CI).
+  const CAPACITY_SHED = [
+    "all_upstreams_failed",
+    "no_upstream_available",
+    "account_at_capacity",
+  ];
+  for (const r of shed) expect(CAPACITY_SHED).toContain(r.json?.error);
+
+  // Slot-layer sanity: over_limit rejections never EXCEED the sheddable count
+  // (each loser hits acquireSlot at most once — 500→switch_account, no
+  // retry_same). Not an equality: a loser that sheds as no_upstream_available is
+  // excluded at selection and never reaches the slot layer, so the exact count
+  // is timing-dependent. The real guarantee is ok===K above.
   const after = await counterValue(stack.app.gwMetrics.slotAcquireTotal, { scope: "account", result: "over_limit" });
-  expect(after - before).toBe(N - K);
+  expect(after - before).toBeLessThanOrEqual(N - K);
 });
