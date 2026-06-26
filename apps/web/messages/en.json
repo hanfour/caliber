@@ -655,6 +655,7 @@
       "colStatus": "Status",
       "colLatency": "Latency",
       "colCost": "Cost",
+      "colEstCost": "Est. cost",
       "loadError": "Couldn't load recent activity. Please try again.",
       "summaryLoadError": "Couldn't load the summary."
     },

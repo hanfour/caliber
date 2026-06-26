@@ -655,6 +655,7 @@
       "colStatus": "ステータス",
       "colLatency": "レイテンシ",
       "colCost": "コスト",
+      "colEstCost": "推定コスト",
       "loadError": "最近のアクティビティを読み込めませんでした。再試行してください。",
       "summaryLoadError": "サマリーを読み込めませんでした。"
     },

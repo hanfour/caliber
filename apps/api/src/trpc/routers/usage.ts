@@ -323,8 +323,29 @@ export const usageRouter = router({
 
       const [items, countRow] = await Promise.all([
         ctx.db
-          .select(listColumns)
+          .select({
+            ...listColumns,
+            // Per-row notional cost at current API pricing (see usage.summary
+            // byKey for rationale). Paren structure mirrors byKey exactly —
+            // (COALESCE(<sum>, 0) / 1e12)::text — to stay balanced.
+            notionalCost: sql<string>`(COALESCE(
+              GREATEST(${usageLogs.inputTokens} - ${usageLogs.cacheCreation5mTokens} - ${usageLogs.cacheCreation1hTokens} - ${usageLogs.cacheReadTokens} - ${usageLogs.cachedInputTokens}, 0) * COALESCE(${modelPricing.inputPerMillionMicros}, 0)
+              + ${usageLogs.outputTokens} * COALESCE(${modelPricing.outputPerMillionMicros}, 0)
+              + ${usageLogs.cacheReadTokens} * COALESCE(${modelPricing.cacheReadPerMillionMicros}, ${modelPricing.inputPerMillionMicros}, 0)
+              + ${usageLogs.cacheCreation5mTokens} * COALESCE(${modelPricing.cached5mPerMillionMicros}, 0)
+              + ${usageLogs.cacheCreation1hTokens} * COALESCE(${modelPricing.cached1hPerMillionMicros}, 0)
+              + ${usageLogs.cachedInputTokens} * COALESCE(${modelPricing.cachedInputPerMillionMicros}, 0)
+            , 0) / 1000000000000.0)::text`,
+          })
           .from(usageLogs)
+          .leftJoin(
+            modelPricing,
+            and(
+              eq(modelPricing.platform, usageLogs.platform),
+              eq(modelPricing.modelId, usageLogs.upstreamModel),
+              isNull(modelPricing.effectiveTo),
+            ),
+          )
           .where(where)
           .orderBy(desc(usageLogs.createdAt), desc(usageLogs.id))
           .limit(input.pageSize)
