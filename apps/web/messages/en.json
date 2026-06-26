@@ -589,6 +589,8 @@
       "nameLabel": "Name",
       "schedulableLabel": "Enabled (available for routing)",
       "priorityLabel": "Priority (lower is preferred)",
+      "concurrencyLabel": "Concurrency limit",
+      "concurrencyHint": "Max simultaneous requests to this upstream. Agentic tools (incl. sub-agents) fire many at once — too low gets throttled and retried. 20+ recommended.",
       "submit": "Save",
       "submitting": "Saving…",
       "savedToast": "Upstream credential updated"

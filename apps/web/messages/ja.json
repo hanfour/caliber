@@ -589,6 +589,8 @@
       "nameLabel": "名前",
       "schedulableLabel": "有効（ルーティングに使用可能）",
       "priorityLabel": "優先度（低いほど優先）",
+      "concurrencyLabel": "同時実行数の上限",
+      "concurrencyHint": "このアップストリームへ同時に送信できる最大リクエスト数。エージェント型ツール（サブエージェント含む）は同時に多数送るため、低すぎると制限され再試行が発生します。20 以上を推奨。",
       "submit": "保存",
       "submitting": "保存中…",
       "savedToast": "アップストリーム認証情報を更新しました"

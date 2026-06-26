@@ -137,7 +137,10 @@ export const accountsRouter = router({
           expiresAt: oauthExpiresAt,
           schedulable: input.schedulable ?? true,
           priority: input.priority ?? 50,
-          concurrency: input.concurrency ?? 3,
+          // Default raised 3 → 20: 3 was far too low for agentic clients
+          // (Claude Code + sub-agents fire many concurrent requests); a low cap
+          // surfaces as gateway `account_at_capacity` 503s the client must retry.
+          concurrency: input.concurrency ?? 20,
           rateMultiplier:
             input.rateMultiplier !== undefined
               ? input.rateMultiplier.toString()
@@ -287,6 +290,7 @@ export const accountsRouter = router({
       name: z.string().min(1).max(255).optional(),
       schedulable: z.boolean().optional(),
       priority: z.number().int().min(0).max(1000).optional(),
+      concurrency: z.number().int().min(1).max(1000).optional(),
     }),
     () => ({ type: "account.register_own" as const }),
   ).mutation(async ({ ctx, input }) => {
@@ -317,6 +321,7 @@ export const accountsRouter = router({
         name: input.name ?? existing.name,
         schedulable: input.schedulable ?? existing.schedulable,
         priority: input.priority ?? existing.priority,
+        concurrency: input.concurrency ?? existing.concurrency,
         updatedAt: new Date(),
       })
       .where(eq(upstreamAccounts.id, input.id))
@@ -333,6 +338,7 @@ export const accountsRouter = router({
         name: row.name,
         schedulable: row.schedulable,
         priority: row.priority,
+        concurrency: row.concurrency,
       },
     });
 
