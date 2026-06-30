@@ -69,7 +69,15 @@ test("member can toggle 'Score as project' on an own key and it persists", async
   await expect(toggle).not.toBeChecked();
 
   // ── 2. Toggle on, then verify it persists across a reload ────────────────
-  await toggle.check();
+  // The checkbox is a *controlled* component: `checked` is driven by the
+  // `apiKeys.listOwn` query result, not local DOM/React state.  Clicking it
+  // fires `setEvaluateAsProject` whose onSuccess invalidates `listOwn` and
+  // triggers a refetch — an async server round-trip.  `toggle.check()` has a
+  // built-in synchronous postcondition (element must be checked immediately
+  // after the click) that a controlled checkbox cannot satisfy until the
+  // refetch completes; use `toggle.click()` instead, then let the web-first
+  // `toBeChecked()` assertion auto-retry until the refetch propagates.
+  await toggle.click();
   await expect(toggle).toBeChecked();
 
   await page.reload();
