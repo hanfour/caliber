@@ -93,6 +93,9 @@ export function createEvaluatorWorker(
         llmEvalEnabled: org?.llmEvalEnabled ?? false,
         metrics: opts.metrics,
         onBudgetEvent: opts.onBudgetEvent,
+        // PR3: per-key grain fields (absent → per-person path, byte-identical)
+        apiKeyId: payload.apiKeyId,
+        keyNameSnapshot: payload.keyNameSnapshot,
       });
     },
     {

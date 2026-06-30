@@ -53,6 +53,17 @@ const ISO_DATETIME = z.string().datetime();
  * Job payload validated at enqueue time. Carries evaluation request metadata:
  * org and user scope, evaluation period (start/end as ISO strings), period
  * type (daily/weekly/monthly), and audit trail of who triggered it.
+ *
+ * PR3 adds optional per-key fields:
+ *   - `apiKeyId`: when set, scopes the evaluation to a single api_key (per-key
+ *     grain).  When absent, the per-person grain is used (byte-identical).
+ *   - `keyNameSnapshot`: snapshot of `api_keys.name` at enqueue time.  Stored
+ *     in `evaluation_reports_by_key.key_name_snapshot` so the report label
+ *     survives future renames/revocations.  Required when `apiKeyId` is set;
+ *     ignored otherwise.
+ *
+ * NOTE: jobId derivation (cron enumeration, 4-part format) is handled in PR4.
+ * This PR only adds the payload fields so the worker can thread them through.
  */
 export const EvaluatorJobPayload = z.object({
   orgId: UUID,
@@ -62,6 +73,10 @@ export const EvaluatorJobPayload = z.object({
   periodType: z.enum(["daily", "weekly", "monthly"]),
   triggeredBy: z.enum(["cron", "admin_rerun", "manual"]),
   triggeredByUser: UUID.nullable().default(null),
+  /** Per-key grain (PR3): api_key UUID to evaluate. Absent → per-person. */
+  apiKeyId: UUID.optional(),
+  /** Per-key grain (PR3): snapshot of the key name at enqueue time. */
+  keyNameSnapshot: z.string().optional(),
 });
 
 export type EvaluatorJobPayload = z.infer<typeof EvaluatorJobPayload>;
