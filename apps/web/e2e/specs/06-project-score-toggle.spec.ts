@@ -52,7 +52,10 @@ test("member can toggle 'Score as project' on an own key and it persists", async
   await page.goto("/dashboard/profile");
 
   await page.getByRole("button", { name: "New key" }).click();
-  await page.getByLabel("Name").fill("e2e-project-key");
+  // Use the input's id directly: the profile page also has a "Name" label
+  // (Display name field), so getByLabel("Name") resolves to 2 elements.
+  // '#apiKeyName' is unique — see ApiKeyCreateDialog.tsx id="apiKeyName".
+  await page.locator("#apiKeyName").fill("e2e-project-key");
   await page.getByRole("button", { name: "Generate key" }).click();
 
   // Close the one-time reveal panel.
