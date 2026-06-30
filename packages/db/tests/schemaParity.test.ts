@@ -12,7 +12,7 @@ import {
 } from '../src/schema/evaluationReportsByKey.js'
 
 describe('evaluationReportScoreColumns parity', () => {
-  const sharedKeys = Object.keys(evaluationReportScoreColumns)
+  const sharedKeys = Object.keys(evaluationReportScoreColumns())
 
   it('shared keys are a subset of evaluationReports columns', () => {
     const reportCols = Object.keys(evaluationReports)

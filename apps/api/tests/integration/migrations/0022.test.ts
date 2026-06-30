@@ -93,5 +93,6 @@ describe("migration 0021/0022 — per-project scoring DB layer", () => {
     expect(r.rows).toHaveLength(1);
     expect(String(r.rows[0]!.indexdef)).toContain("UNIQUE");
     expect(String(r.rows[0]!.indexdef)).toContain("WHERE");
+    expect(String(r.rows[0]!.indexdef)).toContain("ref_id IS NOT NULL");
   });
 });

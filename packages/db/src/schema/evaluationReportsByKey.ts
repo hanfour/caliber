@@ -22,14 +22,17 @@ import { apiKeys } from './apiKeys.js'
  * Usage:
  *   const myTable = pgTable('my_table', {
  *     id: uuid('id').primaryKey().defaultRandom(),
- *     ...evaluationReportScoreColumns(organizations, users, teams, rubrics, upstreamAccounts),
+ *     ...evaluationReportScoreColumns(),
  *     // table-specific extras ...
  *   })
  *
- * We expose these as a plain record of Drizzle column builders so both tables
- * share the same construction logic without any runtime overhead.
+ * Implemented as a factory function (not a static object) so that each
+ * pgTable call gets FRESH Drizzle column-builder instances. Drizzle back-
+ * mutates a builder's internal `.table` reference when the builder is spread
+ * into pgTable; sharing the same instances across two tables would produce
+ * silently wrong SQL for any query that references those columns.
  */
-export const evaluationReportScoreColumns = {
+export const evaluationReportScoreColumns = () => ({
   orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
   teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
@@ -58,7 +61,7 @@ export const evaluationReportScoreColumns = {
   sourceBreakdown: jsonb('source_breakdown'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-} as const
+})
 
 /**
  * Per-api-key evaluation reports table.
@@ -72,7 +75,7 @@ export const evaluationReportsByKey = pgTable(
   'evaluation_reports_by_key',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    ...evaluationReportScoreColumns,
+    ...evaluationReportScoreColumns(),
     // Per-key extras
     apiKeyId: uuid('api_key_id')
       .notNull()
