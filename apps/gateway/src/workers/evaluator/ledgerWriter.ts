@@ -21,6 +21,7 @@
  * See spec §6 (Cost budget infrastructure).
  */
 
+import { sql } from "drizzle-orm";
 import type { Database } from "@caliber/db";
 import { llmUsageEvents } from "@caliber/db";
 import type { LedgerRow } from "@caliber/evaluator";
@@ -41,17 +42,33 @@ export function createLedgerWriter(
   metrics?: Pick<GatewayMetrics, "gwLlmCostUsdTotal">,
 ): (row: LedgerRow) => Promise<void> {
   return async (row) => {
-    await db.insert(llmUsageEvents).values({
-      orgId: row.orgId,
-      eventType: row.eventType,
-      model: row.model,
-      tokensInput: row.tokensInput,
-      tokensOutput: row.tokensOutput,
-      // numeric/decimal column accepts string in Drizzle
-      costUsd: String(row.costUsd),
-      refType: row.refType ?? null,
-      refId: row.refId ?? null,
-    });
+    await db
+      .insert(llmUsageEvents)
+      .values({
+        orgId: row.orgId,
+        eventType: row.eventType,
+        model: row.model,
+        tokensInput: row.tokensInput,
+        tokensOutput: row.tokensOutput,
+        // numeric/decimal column accepts string in Drizzle
+        costUsd: String(row.costUsd),
+        refType: row.refType ?? null,
+        refId: row.refId ?? null,
+      })
+      // Guard against BullMQ crash-window retries double-inserting the same
+      // facet-extraction row. Mirrors writeDeepAnalysisLedger's use of the
+      // same partial unique index (llm_usage_dedup_idx) on
+      // (ref_type, ref_id, event_type) WHERE ref_id IS NOT NULL.
+      // Rows with a null ref_id are NOT covered by the partial index and are
+      // allowed to insert freely (no dedup attempt).
+      .onConflictDoNothing({
+        target: [
+          llmUsageEvents.refType,
+          llmUsageEvents.refId,
+          llmUsageEvents.eventType,
+        ],
+        where: sql`${llmUsageEvents.refId} IS NOT NULL`,
+      });
     metrics?.gwLlmCostUsdTotal.inc(
       {
         org_id: row.orgId,

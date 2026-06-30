@@ -151,6 +151,33 @@ describe("createLedgerWriter (integration)", () => {
     expect(rows.rows[0]!.count).toBe("2");
   });
 
+  it("dedup: writing the same (ref_type, ref_id, event_type) twice results in exactly one row", async () => {
+    // Regression guard for BullMQ crash-window retries. The partial unique
+    // index llm_usage_dedup_idx on (ref_type, ref_id, event_type) WHERE ref_id
+    // IS NOT NULL should cause the second write to be a no-op via
+    // onConflictDoNothing — matching the deep-analysis ledger dedup contract.
+    const write = createLedgerWriter(db);
+    const dupRow = {
+      orgId,
+      eventType: "facet_extraction",
+      model: "claude-haiku-4-5",
+      tokensInput: 100,
+      tokensOutput: 50,
+      costUsd: 0.0002,
+      refType: "request_body_facet",
+      refId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    } as const;
+
+    await write(dupRow);
+    // Second identical write (simulating a crash-window retry).
+    await write(dupRow);
+
+    const rows = await db.execute<{ count: string }>(
+      sql`SELECT COUNT(*)::text AS count FROM llm_usage_events WHERE org_id = ${orgId}`,
+    );
+    expect(rows.rows[0]!.count).toBe("1");
+  });
+
   it("increments gwLlmCostUsdTotal with the right labels and value when metrics are provided (Plan 4C, Part 7)", async () => {
     const inc = vi.fn();
     // We only exercise `.inc`; the full prom-client Counter type is unneeded.
