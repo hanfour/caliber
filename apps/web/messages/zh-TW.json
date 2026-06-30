@@ -492,6 +492,16 @@
     "sharedLabel": "共享",
     "rateLabel": "速率 ×{multiplier}"
   },
+  "apiKeys": {
+    "evaluateAsProject": {
+      "label": "以專案計分",
+      "enabledToast": "已啟用專案計分",
+      "disabledToast": "已停用專案計分",
+      "errorToast": "更新專案計分設定失敗",
+      "helperText": "LLM 評估費用計入組織每月預算。",
+      "ariaLabel": "切換「{name}」的專案計分"
+    }
+  },
   "memberApiKeys": {
     "ownTitle": "你的 API 金鑰",
     "ownDescription": "由你自行簽發、自行使用。原始值僅在建立時顯示一次。",
@@ -1035,6 +1045,17 @@
       "thirtyDayWindowSummaryOneMember": "30 天視窗 · {reports} 份報告 跨 1 位成員",
       "thirtyDayWindowSummaryBothOne": "30 天視窗 · 1 份報告 跨 1 位成員",
       "noReports": "最近 30 天沒有評估報告。"
+    },
+    "projects": {
+      "title": "專案分數",
+      "description": "已加入專案評估的 API 金鑰各鍵分數。",
+      "selectPlaceholder": "選擇專案金鑰…",
+      "noKeys": "尚未有金鑰加入專案計分。",
+      "noKeysHint": "在 API 金鑰上切換「以專案計分」以開始追蹤各專案分數。",
+      "revokedBadge": "已撤銷",
+      "viewScore": "查看專案分數",
+      "noReport": "尚無報告。分數由每晚排程任務產生。",
+      "keyLabel": "專案：{name}"
     }
   },
   "audit": {

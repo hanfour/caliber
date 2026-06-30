@@ -18,6 +18,7 @@ import { EvidenceRow } from "./EvidenceRow";
 import { ExportDialog } from "./ExportDialog";
 import { DeleteRequestDialog } from "./DeleteRequestDialog";
 import { FacetSummaryCard } from "./FacetSummaryCard";
+import { ProjectScoreSection } from "./ProjectScoreSection";
 import type { ScorePoint } from "./TrendChart";
 import type { SignalHitDisplay } from "./EvidenceRow";
 
@@ -334,6 +335,9 @@ export function ProfileEvaluation() {
           </CardContent>
         </Card>
       )}
+
+      {/* Per-project (per-key) scores for keys opted into project evaluation */}
+      <ProjectScoreSection />
 
       {/* Export + Delete buttons */}
       <div className="flex flex-wrap items-center gap-3 pt-2">

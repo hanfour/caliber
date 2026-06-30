@@ -492,6 +492,16 @@
     "sharedLabel": "共有",
     "rateLabel": "レート ×{multiplier}"
   },
+  "apiKeys": {
+    "evaluateAsProject": {
+      "label": "プロジェクトとしてスコア",
+      "enabledToast": "プロジェクトスコアを有効化しました",
+      "disabledToast": "プロジェクトスコアを無効化しました",
+      "errorToast": "プロジェクトスコア設定の更新に失敗しました",
+      "helperText": "LLM評価コストは組織の月次予算に計上されます。",
+      "ariaLabel": "「{name}」のプロジェクトスコアを切り替え"
+    }
+  },
   "memberApiKeys": {
     "ownTitle": "あなたの API キー",
     "ownDescription": "あなた自身が発行し使用するキー。原文は作成時に一度だけ表示されます。",
@@ -1035,6 +1045,17 @@
       "thirtyDayWindowSummaryOneMember": "30 日間ウィンドウ · {reports} 件のレポート × 1 名のメンバー",
       "thirtyDayWindowSummaryBothOne": "30 日間ウィンドウ · 1 件のレポート × 1 名のメンバー",
       "noReports": "直近 30 日間の評価レポートが見つかりません。"
+    },
+    "projects": {
+      "title": "プロジェクトスコア",
+      "description": "プロジェクト評価にオプトインしたAPIキーのスコア。",
+      "selectPlaceholder": "プロジェクトキーを選択…",
+      "noKeys": "プロジェクトスコアにオプトインしたキーはありません。",
+      "noKeysHint": "APIキーで「プロジェクトとしてスコア」を有効にしてプロジェクトスコアの追跡を開始します。",
+      "revokedBadge": "失効済み",
+      "viewScore": "プロジェクトスコアを表示",
+      "noReport": "まだレポートがありません。スコアは毎晩生成されます。",
+      "keyLabel": "プロジェクト: {name}"
     }
   },
   "audit": {

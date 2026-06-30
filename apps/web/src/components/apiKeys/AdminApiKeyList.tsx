@@ -41,6 +41,7 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
   const utils = trpc.useUtils();
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const t = useTranslations("memberApiKeys");
+  const tApiKeys = useTranslations("apiKeys");
   const tCommon = useTranslations("common");
   const confirm = useConfirm();
   const {
@@ -48,6 +49,25 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
     isLoading,
     error,
   } = trpc.apiKeys.listOrg.useQuery({ orgId, userId: targetUserId });
+
+  const setEvaluateAsProject = trpc.apiKeys.setEvaluateAsProject.useMutation({
+    onSuccess: (_data, variables) => {
+      toast.success(
+        variables.enabled
+          ? tApiKeys("evaluateAsProject.enabledToast")
+          : tApiKeys("evaluateAsProject.disabledToast"),
+      );
+      utils.apiKeys.listOrg.invalidate({ orgId, userId: targetUserId });
+    },
+    onError: (e) => {
+      const code = (e.data as { code?: string } | undefined)?.code;
+      toast.error(
+        code === "FORBIDDEN"
+          ? tCommon("insufficientPermission")
+          : tApiKeys("evaluateAsProject.errorToast"),
+      );
+    },
+  });
 
   const revoke = trpc.apiKeys.revoke.useMutation({
     onSuccess: () => {
@@ -118,6 +138,13 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
             <th scope="col" className="px-3 py-2 text-left font-medium">
               {t("lastUsed")}
             </th>
+            <th
+              scope="col"
+              className="px-3 py-2 text-center font-medium"
+              title={tApiKeys("evaluateAsProject.helperText")}
+            >
+              {tApiKeys("evaluateAsProject.label")}
+            </th>
             <th scope="col" className="px-3 py-2 text-right font-medium"></th>
           </tr>
         </thead>
@@ -153,6 +180,24 @@ export function AdminApiKeyList({ orgId, targetUserId }: Props) {
                   title={lastUsedTitle}
                 >
                   {formatRelative(row.lastUsedAt)}
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 cursor-pointer accent-primary"
+                    checked={row.evaluateAsProject}
+                    disabled={setEvaluateAsProject.isPending}
+                    title={tApiKeys("evaluateAsProject.helperText")}
+                    aria-label={tApiKeys("evaluateAsProject.ariaLabel", {
+                      name: row.name,
+                    })}
+                    onChange={(e) =>
+                      setEvaluateAsProject.mutate({
+                        id: row.id,
+                        enabled: e.target.checked,
+                      })
+                    }
+                  />
                 </td>
                 <td className="px-3 py-2 text-right">
                   <Button
