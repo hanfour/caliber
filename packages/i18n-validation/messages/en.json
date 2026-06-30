@@ -82,6 +82,10 @@
       "accountGroups": {
         "accountOrgMismatch": "Account does not belong to this group's org",
         "accountPlatformMismatch": "Account platform \"{accountPlatform}\" does not match group platform \"{groupPlatform}\""
+      },
+      "apiKeys": {
+        "perUserProjectEvalLimitReached": "Per-user project-scoring limit reached ({max}). Disable another key first.",
+        "perOrgProjectEvalLimitReached": "Per-org project-scoring limit reached ({max}). Disable another key first."
       }
     }
   }

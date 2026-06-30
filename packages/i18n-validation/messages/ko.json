@@ -82,6 +82,10 @@
       "accountGroups": {
         "accountOrgMismatch": "계정이 이 그룹의 조직에 속하지 않습니다",
         "accountPlatformMismatch": "계정 플랫폼 \"{accountPlatform}\"이(가) 그룹 플랫폼 \"{groupPlatform}\"과(와) 일치하지 않습니다"
+      },
+      "apiKeys": {
+        "perUserProjectEvalLimitReached": "사용자별 프로젝트 평가 한도에 도달했습니다（{max}）. 다른 키를 먼저 비활성화하세요.",
+        "perOrgProjectEvalLimitReached": "조직별 프로젝트 평가 한도에 도달했습니다（{max}）. 다른 키를 먼저 비활성화하세요."
       }
     }
   }

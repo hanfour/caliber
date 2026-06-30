@@ -82,6 +82,10 @@
       "accountGroups": {
         "accountOrgMismatch": "帳號不屬於此群組所在的組織",
         "accountPlatformMismatch": "帳號平台「{accountPlatform}」與群組平台「{groupPlatform}」不一致"
+      },
+      "apiKeys": {
+        "perUserProjectEvalLimitReached": "已達每人專案評分上限（{max}），請先關閉其他金鑰。",
+        "perOrgProjectEvalLimitReached": "已達組織專案評分上限（{max}），請先關閉其他金鑰。"
       }
     }
   }

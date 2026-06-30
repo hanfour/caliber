@@ -954,4 +954,137 @@ describe("apiKeys router", () => {
     const orgRow = org_.find((r) => r.id === issued.id)!;
     expect(orgRow.evaluateAsProject).toBe(true);
   });
+
+  // ── PR7: per-user and per-org opt-in count caps ───────────────────────────
+
+  it("setEvaluateAsProject: opt-in succeeds while under the per-user cap", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({
+      db: t.db,
+      userId: user.id,
+      redis,
+      // Cap=1: the very first key is allowed.
+      env: { ...defaultTestEnv, EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 1, MAX_PROJECT_KEYS_PER_ORG: 50 },
+    });
+    const k = await caller.apiKeys.issueOwn({ name: "under-cap-key" });
+    await expect(
+      caller.apiKeys.setEvaluateAsProject({ id: k.id, enabled: true }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it("setEvaluateAsProject: (N+1)th opt-in for user → BAD_REQUEST (per-user cap)", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    // Cap=1 → first key allowed, second rejected.
+    const caller = await callerFor({
+      db: t.db,
+      userId: user.id,
+      redis,
+      env: { ...defaultTestEnv, EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 1, MAX_PROJECT_KEYS_PER_ORG: 50 },
+    });
+    const k1 = await caller.apiKeys.issueOwn({ name: "cap-user-key-1" });
+    const k2 = await caller.apiKeys.issueOwn({ name: "cap-user-key-2" });
+
+    await caller.apiKeys.setEvaluateAsProject({ id: k1.id, enabled: true });
+
+    await expect(
+      caller.apiKeys.setEvaluateAsProject({ id: k2.id, enabled: true }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("setEvaluateAsProject: (N+1)th opt-in for org → BAD_REQUEST (per-org cap)", async () => {
+    const org = await makeOrg(t.db);
+    const userA = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const userB = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    // Org cap=1, user cap=10 → org limit fires first on the second opt-in.
+    const callerA = await callerFor({
+      db: t.db,
+      userId: userA.id,
+      redis,
+      env: { ...defaultTestEnv, EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 10, MAX_PROJECT_KEYS_PER_ORG: 1 },
+    });
+    const callerB = await callerFor({
+      db: t.db,
+      userId: userB.id,
+      redis,
+      env: { ...defaultTestEnv, EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 10, MAX_PROJECT_KEYS_PER_ORG: 1 },
+    });
+    const kA = await callerA.apiKeys.issueOwn({ name: "cap-org-key-a" });
+    const kB = await callerB.apiKeys.issueOwn({ name: "cap-org-key-b" });
+
+    await callerA.apiKeys.setEvaluateAsProject({ id: kA.id, enabled: true });
+
+    await expect(
+      callerB.apiKeys.setEvaluateAsProject({ id: kB.id, enabled: true }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("setEvaluateAsProject: disable always allowed even when org is at cap", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    // Cap=1, user has one opted-in key. Disabling it must succeed.
+    const caller = await callerFor({
+      db: t.db,
+      userId: user.id,
+      redis,
+      env: { ...defaultTestEnv, EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 1, MAX_PROJECT_KEYS_PER_ORG: 1 },
+    });
+    const k = await caller.apiKeys.issueOwn({ name: "disable-at-cap-key" });
+    await caller.apiKeys.setEvaluateAsProject({ id: k.id, enabled: true });
+
+    // At cap — but disabling must always succeed.
+    await expect(
+      caller.apiKeys.setEvaluateAsProject({ id: k.id, enabled: false }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it("setEvaluateAsProject: re-enabling an already-opted-in key is idempotent (not rejected by cap)", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    // Cap=1. Key is already opted-in. Re-enabling it must NOT be rejected.
+    const caller = await callerFor({
+      db: t.db,
+      userId: user.id,
+      redis,
+      env: { ...defaultTestEnv, EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 1, MAX_PROJECT_KEYS_PER_ORG: 1 },
+    });
+    const k = await caller.apiKeys.issueOwn({ name: "idempotent-reon-key" });
+    await caller.apiKeys.setEvaluateAsProject({ id: k.id, enabled: true });
+
+    // The key is already at=true. Re-enabling must be a no-op, not BAD_REQUEST.
+    await expect(
+      caller.apiKeys.setEvaluateAsProject({ id: k.id, enabled: true }),
+    ).resolves.toMatchObject({ ok: true });
+  });
 });

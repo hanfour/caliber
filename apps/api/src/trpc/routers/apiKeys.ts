@@ -6,6 +6,7 @@ import { apiKeys, organizationMembers } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import { generateApiKey, hashApiKey } from "@caliber/gateway-core";
 import { can } from "@caliber/auth";
+import { formatValidationKey } from "@caliber/i18n-validation";
 import {
   protectedProcedure,
   permissionProcedure,
@@ -489,12 +490,17 @@ export const apiKeysRouter = router({
       return { ok: true as const };
     }),
 
-  // Per-key "score as project" opt-in toggle (PR5). RBAC mirrors `revoke`:
-  // the key owner may toggle their own key, or an org_admin any key in their
-  // org (enforced by the `api_key.evaluate_as_project_set` action). NOT_FOUND
-  // covers missing/already-revoked rows (no existence leak); FORBIDDEN when
-  // found but the caller lacks permission — identical to `revoke`. The per-ORG
-  // opt-in cap is deliberately NOT enforced here (PR7).
+  // Per-key "score as project" opt-in toggle (PR5 + PR7 caps).
+  // RBAC mirrors `revoke`: the key owner may toggle their own key, or an
+  // org_admin any key in their org (enforced by the
+  // `api_key.evaluate_as_project_set` action). NOT_FOUND covers
+  // missing/already-revoked rows (no existence leak); FORBIDDEN when found but
+  // the caller lacks permission — identical to `revoke`.
+  //
+  // PR7 caps (enforced only on enable; disable is always allowed):
+  //   - EVALUATOR_MAX_PROJECT_KEYS_PER_USER: per-user opt-in limit.
+  //   - MAX_PROJECT_KEYS_PER_ORG: per-org opt-in limit.
+  // Re-enabling an already-opted-in key is idempotent — not counted again.
   setEvaluateAsProject: protectedProcedure
     .input(z.object({ id: uuid, enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -505,6 +511,7 @@ export const apiKeysRouter = router({
           orgId: apiKeys.orgId,
           ownerUserId: apiKeys.userId,
           revokedAt: apiKeys.revokedAt,
+          evaluateAsProject: apiKeys.evaluateAsProject,
         })
         .from(apiKeys)
         .where(eq(apiKeys.id, input.id))
@@ -521,6 +528,54 @@ export const apiKeysRouter = router({
         })
       ) {
         throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      // PR7 — enforce opt-in count caps ONLY when enabling AND the key is not
+      // already opted-in (idempotent re-enable must not count the key twice).
+      if (input.enabled && !existing.evaluateAsProject) {
+        // Per-user cap
+        const maxPerUser = ctx.env.EVALUATOR_MAX_PROJECT_KEYS_PER_USER;
+        const [userCountRow] = await ctx.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(apiKeys)
+          .where(
+            and(
+              eq(apiKeys.userId, existing.ownerUserId),
+              eq(apiKeys.evaluateAsProject, true),
+              isNull(apiKeys.revokedAt),
+            ),
+          );
+        if ((userCountRow?.n ?? 0) >= maxPerUser) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: formatValidationKey(
+              "validation.custom.apiKeys.perUserProjectEvalLimitReached",
+              { max: maxPerUser },
+            ),
+          });
+        }
+
+        // Per-org cap
+        const maxPerOrg = ctx.env.MAX_PROJECT_KEYS_PER_ORG;
+        const [orgCountRow] = await ctx.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(apiKeys)
+          .where(
+            and(
+              eq(apiKeys.orgId, existing.orgId),
+              eq(apiKeys.evaluateAsProject, true),
+              isNull(apiKeys.revokedAt),
+            ),
+          );
+        if ((orgCountRow?.n ?? 0) >= maxPerOrg) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: formatValidationKey(
+              "validation.custom.apiKeys.perOrgProjectEvalLimitReached",
+              { max: maxPerOrg },
+            ),
+          });
+        }
       }
 
       await ctx.db
