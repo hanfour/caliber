@@ -33,6 +33,7 @@ import {
   requestBodies,
   rubrics,
   evaluationReports,
+  evaluationReportsByKey,
   gdprDeleteRequests,
   auditLogs,
   devices,
@@ -129,6 +130,9 @@ beforeEach(async () => {
   );
   await db.execute(
     sql`TRUNCATE TABLE evaluation_reports RESTART IDENTITY CASCADE`,
+  );
+  await db.execute(
+    sql`TRUNCATE TABLE evaluation_reports_by_key RESTART IDENTITY CASCADE`,
   );
   await db.execute(
     sql`TRUNCATE TABLE request_bodies RESTART IDENTITY CASCADE`,
@@ -228,6 +232,42 @@ async function seedEvaluationReport(): Promise<string> {
     .returning({ id: evaluationReports.id });
 
   return report!.id;
+}
+
+async function seedEvaluationReportByKey(): Promise<string> {
+  const periodStart = new Date("2024-03-01T00:00:00.000Z");
+  const periodEnd = new Date("2024-03-02T00:00:00.000Z");
+
+  const [report] = await db
+    .insert(evaluationReportsByKey)
+    .values({
+      orgId,
+      userId,
+      apiKeyId,
+      keyNameSnapshot: "gdpr-by-key-snapshot",
+      teamId: null,
+      periodStart,
+      periodEnd,
+      periodType: "daily",
+      rubricId,
+      rubricVersion: "1.0.0",
+      totalScore: "0.8500",
+      sectionScores: {},
+      signalsSummary: {},
+      dataQuality: {},
+      triggeredBy: "cron",
+      triggeredByUser: null,
+    })
+    .returning({ id: evaluationReportsByKey.id });
+
+  return report!.id;
+}
+
+async function countReportsByKey(): Promise<number> {
+  const rows = await db.execute(
+    sql`SELECT COUNT(*)::int AS cnt FROM evaluation_reports_by_key`,
+  );
+  return (rows.rows[0] as { cnt: number }).cnt;
 }
 
 async function countBodies(): Promise<number> {
@@ -469,6 +509,46 @@ describe("executeGdprDeletions", () => {
     expect(rows.rows).toHaveLength(1);
     expect(rows.rows[0]!.metadata.clientSessionsDeleted).toBe(1);
     expect(rows.rows[0]!.metadata.clientEventsDeleted).toBe(4);
+  });
+
+  it("7. 'bodies_and_reports' scope ALSO deletes evaluation_reports_by_key; 'bodies' scope leaves them", async () => {
+    // --- bodies scope: by-key reports must be retained ---
+    await seedUsageAndBody();
+    await seedEvaluationReportByKey();
+    await db.insert(gdprDeleteRequests).values({
+      orgId,
+      userId,
+      scope: "bodies",
+      approvedAt: new Date(),
+      approvedByUserId: userId,
+    });
+
+    expect(await countReportsByKey()).toBe(1);
+    const bodiesResult = await executeGdprDeletions({ db });
+    expect(bodiesResult.reportsByKeyDeleted).toBe(0);
+    expect(await countReportsByKey()).toBe(1);
+
+    // --- bodies_and_reports scope: by-key reports must be purged ---
+    await db.insert(gdprDeleteRequests).values({
+      orgId,
+      userId,
+      scope: "bodies_and_reports",
+      approvedAt: new Date(),
+      approvedByUserId: userId,
+    });
+
+    const result = await executeGdprDeletions({ db });
+    expect(result.reportsByKeyDeleted).toBe(1);
+    expect(await countReportsByKey()).toBe(0);
+
+    // Audit metadata carries the per-key count.
+    const rows = await db.execute<{ metadata: Record<string, number> }>(sql`
+      SELECT metadata FROM audit_logs
+      WHERE action = 'gdpr.delete_executed'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    expect(rows.rows[0]!.metadata.reportsByKeyDeleted).toBe(1);
   });
 
   it("6. tenant isolation: other users' sessions in the same org are NOT affected", async () => {

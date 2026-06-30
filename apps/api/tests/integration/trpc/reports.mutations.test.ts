@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { Database } from "@caliber/db";
 import {
   evaluationReports,
+  evaluationReportsByKey,
   gdprDeleteRequests,
   rubrics,
   upstreamAccounts,
@@ -159,6 +160,48 @@ async function seedReport(
       triggeredByUser: null,
     })
     .returning({ id: evaluationReports.id });
+  return row!.id;
+}
+
+async function seedReportByKey(
+  db: Database,
+  opts: {
+    orgId: string;
+    userId: string;
+    apiKeyId: string;
+    rubricId: string;
+    periodStart: Date;
+    periodEnd: Date;
+  },
+) {
+  seedCounter += 1;
+  const [row] = await db
+    .insert(evaluationReportsByKey)
+    .values({
+      orgId: opts.orgId,
+      userId: opts.userId,
+      apiKeyId: opts.apiKeyId,
+      keyNameSnapshot: `snap-${seedCounter}`,
+      teamId: null,
+      rubricId: opts.rubricId,
+      rubricVersion: "1.0.0",
+      periodStart: opts.periodStart,
+      periodEnd: opts.periodEnd,
+      periodType: "daily",
+      totalScore: "85.0000",
+      sectionScores: [],
+      signalsSummary: {},
+      dataQuality: { coverageRatio: 0.9, capturedRequests: 0 },
+      llmNarrative: null,
+      llmEvidence: null,
+      llmModel: null,
+      llmCalledAt: null,
+      llmCostUsd: null,
+      llmUpstreamAccountId: null,
+      triggeredBy: "manual",
+      triggeredByUser: null,
+    })
+    .returning({ id: evaluationReportsByKey.id });
   return row!.id;
 }
 
@@ -369,6 +412,100 @@ describe("reports router — mutation endpoints", () => {
     });
   });
 
+  // ── PR5: rerun scope=key emits the 4-part jobId (lockstep with queue.ts) ──────
+
+  it("rerun scope=key enqueues one job with the 4-part jobId + apiKeyId payload", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const member = await makeUser(t.db, { orgId: org.id });
+    const apiKeyId = await seedApiKey(t.db, { orgId: org.id, userId: member.id });
+
+    const mockAdd = vi.fn().mockResolvedValue({});
+    const fakeQueue: EvaluatorQueue = { add: mockAdd };
+
+    const adminCaller = await callerFor({
+      db: t.db,
+      userId: admin.id,
+      evaluatorQueue: fakeQueue,
+    });
+    const periodStart = "2025-02-01T00:00:00.000Z";
+    const result = await adminCaller.reports.rerun({
+      orgId: org.id,
+      scope: "key",
+      apiKeyId,
+      periodStart,
+      periodEnd: "2025-02-07T00:00:00.000Z",
+    });
+
+    expect(result.enqueued).toBe(1);
+    expect(result.targets).toBe(1);
+    expect(mockAdd).toHaveBeenCalledOnce();
+    // 4-part jobId: ${ownerUserId}:${apiKeyId}:${periodStart}:${periodType}
+    expect(mockAdd.mock.calls[0]![2]).toMatchObject({
+      jobId: `${member.id}:${apiKeyId}:${periodStart}:daily`,
+    });
+    // payload carries apiKeyId + keyNameSnapshot for per-key grain
+    expect(mockAdd.mock.calls[0]![1]).toMatchObject({
+      orgId: org.id,
+      userId: member.id,
+      apiKeyId,
+      triggeredBy: "admin_rerun",
+    });
+    expect(mockAdd.mock.calls[0]![1].keyNameSnapshot).toBeTruthy();
+  });
+
+  it("rerun scope=key respects the ≤30-day window guard (BAD_REQUEST)", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const member = await makeUser(t.db, { orgId: org.id });
+    const apiKeyId = await seedApiKey(t.db, { orgId: org.id, userId: member.id });
+
+    const adminCaller = await callerFor({ db: t.db, userId: admin.id });
+    await expect(
+      adminCaller.reports.rerun({
+        orgId: org.id,
+        scope: "key",
+        apiKeyId,
+        periodStart: "2025-01-01T00:00:00.000Z",
+        periodEnd: "2025-02-15T00:00:00.000Z", // > 30 days
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Window exceeds 30 days" });
+  });
+
+  it("rerun scope=key for a key in another org → NOT_FOUND (anti-enumeration)", async () => {
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const adminB = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgB.id,
+      orgId: orgB.id,
+    });
+    const ownerA = await makeUser(t.db, { orgId: orgA.id });
+    const apiKeyId = await seedApiKey(t.db, { orgId: orgA.id, userId: ownerA.id });
+
+    const callerB = await callerFor({ db: t.db, userId: adminB.id });
+    await expect(
+      callerB.reports.rerun({
+        orgId: orgB.id,
+        scope: "key",
+        apiKeyId,
+        periodStart: "2025-03-01T00:00:00.000Z",
+        periodEnd: "2025-03-07T00:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   // ── Test 6: exportOwn returns reports + body metadata (no decrypted content) ──
 
   it("exportOwn returns reports and body listing without decrypted content", async () => {
@@ -389,6 +526,16 @@ describe("reports router — mutation endpoints", () => {
       periodEnd: new Date("2025-04-07"),
     });
 
+    // GDPR access/portability: the caller's per-key reports must be included.
+    const byKeyId = await seedReportByKey(t.db, {
+      orgId: org.id,
+      userId: user.id,
+      apiKeyId,
+      rubricId,
+      periodStart: new Date("2025-04-01"),
+      periodEnd: new Date("2025-04-02"),
+    });
+
     const requestId = await seedUsageLogAndBody(t.db, {
       orgId: org.id,
       userId: user.id,
@@ -402,6 +549,8 @@ describe("reports router — mutation endpoints", () => {
     expect(result.userId).toBe(user.id);
     expect(result.exportedAt).toBeInstanceOf(Date);
     expect(result.reports).toHaveLength(1);
+    expect(result.reportsByKey).toHaveLength(1);
+    expect(result.reportsByKey[0]!.id).toBe(byKeyId);
     expect(result.bodies.length).toBeGreaterThanOrEqual(1);
 
     const body = result.bodies.find((b) => b.requestId === requestId);

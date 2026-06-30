@@ -1,14 +1,17 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, max } from "drizzle-orm";
 import {
+  apiKeys,
   evaluationReports,
+  evaluationReportsByKey,
   gdprDeleteRequests,
   organizationMembers,
   requestBodies,
   teamMembers,
   usageLogs,
 } from "@caliber/db";
+import type { Database } from "@caliber/db";
 import { can } from "@caliber/auth";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
@@ -39,6 +42,12 @@ interface EvaluatorJobPayload {
   periodType: string;
   triggeredBy: string;
   triggeredByUser: string;
+  // Per-key grain (PR5). MUST stay in lockstep with apps/gateway's
+  // EvaluatorJobPayload (queue.ts): when `apiKeyId` is set the enqueue jobId
+  // becomes the 4-part `${userId}:${apiKeyId}:${periodStart}:${periodType}`
+  // and `keyNameSnapshot` is required/non-empty — see `rerun` below.
+  apiKeyId?: string;
+  keyNameSnapshot?: string;
 }
 
 export { EVALUATOR_QUEUE_NAME, EVALUATOR_QUEUE_PREFIX };
@@ -53,12 +62,20 @@ const dateRange = z.object({
 
 // ─── LLM redaction ────────────────────────────────────────────────────────────
 
-type EvaluationReportRow = typeof evaluationReports.$inferSelect;
+// The subset of LLM-derived columns that non-subject, non-admin viewers must
+// not see. Shared by the per-person (`evaluation_reports`) and per-key
+// (`evaluation_reports_by_key`) tables — both carry these exact nullable
+// columns — so a single generic helper redacts either row shape identically.
+interface LlmRedactable {
+  llmNarrative: string | null;
+  llmEvidence: unknown;
+  llmModel: string | null;
+  llmCalledAt: Date | null;
+  llmCostUsd: string | null;
+  llmUpstreamAccountId: string | null;
+}
 
-function redactLlm(
-  row: EvaluationReportRow,
-  canSeeLlm: boolean,
-): EvaluationReportRow {
+function redactLlm<T extends LlmRedactable>(row: T, canSeeLlm: boolean): T {
   if (canSeeLlm) return row;
   return {
     ...row,
@@ -69,6 +86,53 @@ function redactLlm(
     llmCostUsd: null,
     llmUpstreamAccountId: null,
   };
+}
+
+// ─── Per-key ownership / tenancy guards (anti-enumeration) ──────────────────────
+
+/**
+ * Assert the api key exists and is owned by `userId`. Throws NOT_FOUND (never
+ * FORBIDDEN) on a missing key OR a key owned by someone else, so an own-scope
+ * reader cannot enumerate other users' keys. Used by `getOwnByKey*`.
+ */
+async function assertOwnApiKey(
+  db: Database,
+  apiKeyId: string,
+  userId: string,
+): Promise<void> {
+  const [key] = await db
+    .select({ ownerUserId: apiKeys.userId })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, apiKeyId))
+    .limit(1);
+  if (!key || key.ownerUserId !== userId) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+}
+
+/**
+ * Resolve a key's owner within `orgId`. Throws NOT_FOUND when the key is
+ * missing OR `key.orgId !== orgId` (cross-org anti-enumeration). Returns the
+ * resolved owner + name + org for the caller to run its RBAC + jobId logic.
+ */
+async function resolveKeyInOrg(
+  db: Database,
+  apiKeyId: string,
+  orgId: string,
+): Promise<{ userId: string; orgId: string; name: string }> {
+  const [key] = await db
+    .select({
+      userId: apiKeys.userId,
+      orgId: apiKeys.orgId,
+      name: apiKeys.name,
+    })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, apiKeyId))
+    .limit(1);
+  if (!key || key.orgId !== orgId) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+  return key;
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -286,11 +350,191 @@ export const reportsRouter = router({
       return rows;
     }),
 
+  // ─── Per-key (project) report reads ───────────────────────────────────────────
+
+  /**
+   * Latest per-key (project) report for one of the CALLER's OWN api keys.
+   * Mirrors `getOwnLatest` but scoped to a single api_key.
+   *
+   * Anti-enumeration: asserts `api_keys.userId === ctx.user.id` and returns
+   * NOT_FOUND when the key is missing or owned by someone else — never leaks
+   * the key's existence. The owner always sees their full LLM fields.
+   * Requires `report.read_own`.
+   */
+  getOwnByKeyLatest: evaluatorProcedure
+    .input(z.object({ apiKeyId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      if (!can(ctx.perm, { type: "report.read_own" })) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      await assertOwnApiKey(ctx.db, input.apiKeyId, ctx.user.id);
+
+      const row = await ctx.db
+        .select()
+        .from(evaluationReportsByKey)
+        .where(
+          and(
+            eq(evaluationReportsByKey.apiKeyId, input.apiKeyId),
+            eq(evaluationReportsByKey.userId, ctx.user.id),
+          ),
+        )
+        .orderBy(desc(evaluationReportsByKey.periodStart))
+        .limit(1)
+        .then((r) => r[0] ?? null);
+
+      return row;
+    }),
+
+  /**
+   * All per-key reports for one of the CALLER's OWN api keys whose periodStart
+   * is within [from, to], ordered periodStart desc. Mirrors `getOwnRange`.
+   * Same anti-enumeration ownership assert as `getOwnByKeyLatest`.
+   * Requires `report.read_own`.
+   */
+  getOwnByKeyRange: evaluatorProcedure
+    .input(z.object({ apiKeyId: z.string().uuid() }).merge(dateRange))
+    .query(async ({ ctx, input }) => {
+      if (!can(ctx.perm, { type: "report.read_own" })) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      await assertOwnApiKey(ctx.db, input.apiKeyId, ctx.user.id);
+
+      const rows = await ctx.db
+        .select()
+        .from(evaluationReportsByKey)
+        .where(
+          and(
+            eq(evaluationReportsByKey.apiKeyId, input.apiKeyId),
+            eq(evaluationReportsByKey.userId, ctx.user.id),
+            gte(evaluationReportsByKey.periodStart, new Date(input.from)),
+            lte(evaluationReportsByKey.periodStart, new Date(input.to)),
+          ),
+        )
+        .orderBy(desc(evaluationReportsByKey.periodStart));
+
+      return rows;
+    }),
+
+  /**
+   * Per-key reports for a specific api key, for admins / the subject. Mirrors
+   * `getUser` (per-user read): gate `report.read_user`, LLM visible only to the
+   * subject or an org_admin (redacted otherwise via the shared `redactLlm`).
+   *
+   * Anti-enumeration: resolves the key's owner + org; if the key is missing or
+   * `key.orgId !== input.orgId`, returns NOT_FOUND so cross-org probes can't
+   * confirm a key's existence.
+   */
+  getByKey: evaluatorProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        apiKeyId: z.string().uuid(),
+        range: dateRange,
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const key = await resolveKeyInOrg(ctx.db, input.apiKeyId, input.orgId);
+
+      if (
+        !can(ctx.perm, {
+          type: "report.read_user",
+          orgId: input.orgId,
+          targetUserId: key.userId,
+        })
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      const rows = await ctx.db
+        .select()
+        .from(evaluationReportsByKey)
+        .where(
+          and(
+            eq(evaluationReportsByKey.orgId, input.orgId),
+            eq(evaluationReportsByKey.apiKeyId, input.apiKeyId),
+            gte(evaluationReportsByKey.periodStart, new Date(input.range.from)),
+            lte(evaluationReportsByKey.periodStart, new Date(input.range.to)),
+          ),
+        )
+        .orderBy(desc(evaluationReportsByKey.periodStart));
+
+      // LLM visible only to the report subject or an org_admin — matches
+      // `getUser`. (As with `getUser`, the only non-subject caller that passes
+      // the `report.read_user` gate is an org_admin, who is also canSeeLlm; the
+      // redaction is kept for parity and defence-in-depth.)
+      const canSeeLlm =
+        key.userId === ctx.user.id ||
+        can(ctx.perm, { type: "report.read_org", orgId: input.orgId });
+
+      return rows.map((r) => redactLlm(r, canSeeLlm));
+    }),
+
+  /**
+   * Opted-in ("score as project") api keys, with each key's latest report
+   * periodStart, to drive UI selectors.
+   *
+   * - With `orgId`: org-wide listing — requires `report.read_org` (org_admin).
+   * - Without `orgId`: the caller's OWN opted-in keys (`report.read_own`).
+   * Revoked keys are excluded (cron no longer scores them; history is read via
+   * the by-key read procedures using `key_name_snapshot`).
+   */
+  listProjectKeys: evaluatorProcedure
+    .input(z.object({ orgId: z.string().uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      if (input.orgId) {
+        if (!can(ctx.perm, { type: "report.read_org", orgId: input.orgId })) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+      } else if (!can(ctx.perm, { type: "report.read_own" })) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      const latest = ctx.db
+        .select({
+          apiKeyId: evaluationReportsByKey.apiKeyId,
+          latestPeriodStart: max(evaluationReportsByKey.periodStart).as(
+            "latest_period_start",
+          ),
+        })
+        .from(evaluationReportsByKey)
+        .groupBy(evaluationReportsByKey.apiKeyId)
+        .as("latest");
+
+      const scopeFilter = input.orgId
+        ? eq(apiKeys.orgId, input.orgId)
+        : eq(apiKeys.userId, ctx.user.id);
+
+      const rows = await ctx.db
+        .select({
+          id: apiKeys.id,
+          name: apiKeys.name,
+          userId: apiKeys.userId,
+          teamId: apiKeys.teamId,
+          latestPeriodStart: latest.latestPeriodStart,
+        })
+        .from(apiKeys)
+        .leftJoin(latest, eq(latest.apiKeyId, apiKeys.id))
+        .where(
+          and(
+            eq(apiKeys.evaluateAsProject, true),
+            isNull(apiKeys.revokedAt),
+            scopeFilter,
+          ),
+        )
+        .orderBy(apiKeys.name);
+
+      return rows;
+    }),
+
   // ─── Mutation endpoints ───────────────────────────────────────────────────────
 
   /**
-   * Enqueue evaluator jobs for the given scope (user/team/org).
+   * Enqueue evaluator jobs for the given scope (user/team/org/key).
    * Window ≤ 30 days enforced. RBAC: `report.rerun` (org_admin).
+   *
+   * `scope: "key"` is the bounded on-demand per-key (project) backfill: it
+   * requires `apiKeyId`, resolves the key's owner within `orgId` (NOT_FOUND on
+   * a missing/cross-org key — anti-enumeration), and enqueues ONE per-key job.
    *
    * Production queue wiring is deferred to Task 6.4b. When ctx.evaluatorQueue
    * is undefined (test mode / not yet wired), returns { enqueued: 0, targets: N,
@@ -298,13 +542,22 @@ export const reportsRouter = router({
    */
   rerun: evaluatorProcedure
     .input(
-      z.object({
-        orgId: z.string().uuid(),
-        scope: z.enum(["user", "team", "org"]),
-        targetId: z.string().uuid(),
-        periodStart: z.string().datetime(),
-        periodEnd: z.string().datetime(),
-      }),
+      z
+        .object({
+          orgId: z.string().uuid(),
+          scope: z.enum(["user", "team", "org", "key"]),
+          // Required for user/team/org scopes (the target user/team/org id).
+          // Unused for `key` scope, where `apiKeyId` is the target instead.
+          targetId: z.string().uuid().optional(),
+          // Required for `key` scope (the api_key to backfill).
+          apiKeyId: z.string().uuid().optional(),
+          periodStart: z.string().datetime(),
+          periodEnd: z.string().datetime(),
+        })
+        .refine((d) => (d.scope === "key" ? !!d.apiKeyId : !!d.targetId), {
+          message:
+            "key scope requires apiKeyId; user/team/org scope requires targetId",
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       const startMs = new Date(input.periodStart).getTime();
@@ -324,19 +577,52 @@ export const reportsRouter = router({
         });
       }
 
-      // RBAC: user scope checks target user; team/org scope reuses org_admin gate
-      if (input.scope === "user") {
+      // A rerun target: a user, optionally narrowed to a single api_key (the
+      // per-key grain). `apiKeyId` present → 4-part jobId + per-key payload.
+      interface RerunTarget {
+        userId: string;
+        apiKeyId?: string;
+        keyNameSnapshot?: string;
+      }
+      const targets: RerunTarget[] = [];
+
+      if (input.scope === "key") {
+        // refine guarantees apiKeyId; narrow for TS.
+        const apiKeyId = input.apiKeyId!;
+        // Resolve owner + name within the org. NOT_FOUND (anti-enumeration)
+        // when the key is missing or belongs to another org — runs BEFORE the
+        // RBAC check so a cross-org probe can't tell FORBIDDEN from absent.
+        const key = await resolveKeyInOrg(ctx.db, apiKeyId, input.orgId);
         if (
           !can(ctx.perm, {
             type: "report.rerun",
             orgId: input.orgId,
-            targetUserId: input.targetId,
+            targetUserId: key.userId,
             periodStart: input.periodStart,
           })
         ) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
+        targets.push({
+          userId: key.userId,
+          apiKeyId,
+          keyNameSnapshot: key.name,
+        });
+      } else if (input.scope === "user") {
+        const targetId = input.targetId!;
+        if (
+          !can(ctx.perm, {
+            type: "report.rerun",
+            orgId: input.orgId,
+            targetUserId: targetId,
+            periodStart: input.periodStart,
+          })
+        ) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        targets.push({ userId: targetId });
       } else {
+        // team/org scope reuses the org_admin gate.
         if (
           !can(ctx.perm, {
             type: "report.rerun",
@@ -347,24 +633,19 @@ export const reportsRouter = router({
         ) {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
-      }
-
-      // Enumerate target users by scope
-      const userIds: string[] = [];
-      if (input.scope === "user") {
-        userIds.push(input.targetId);
-      } else if (input.scope === "team") {
-        const members = await ctx.db
-          .select({ userId: teamMembers.userId })
-          .from(teamMembers)
-          .where(eq(teamMembers.teamId, input.targetId));
-        userIds.push(...members.map((m) => m.userId));
-      } else {
-        const members = await ctx.db
-          .select({ userId: organizationMembers.userId })
-          .from(organizationMembers)
-          .where(eq(organizationMembers.orgId, input.orgId));
-        userIds.push(...members.map((m) => m.userId));
+        if (input.scope === "team") {
+          const members = await ctx.db
+            .select({ userId: teamMembers.userId })
+            .from(teamMembers)
+            .where(eq(teamMembers.teamId, input.targetId!));
+          targets.push(...members.map((m) => ({ userId: m.userId })));
+        } else {
+          const members = await ctx.db
+            .select({ userId: organizationMembers.userId })
+            .from(organizationMembers)
+            .where(eq(organizationMembers.orgId, input.orgId));
+          targets.push(...members.map((m) => ({ userId: m.userId })));
+        }
       }
 
       // ctx.evaluatorQueue is undefined when ENABLE_EVALUATOR=false or no
@@ -374,34 +655,45 @@ export const reportsRouter = router({
       if (!queue) {
         return {
           enqueued: 0,
-          targets: userIds.length,
+          targets: targets.length,
           testMode: true as const,
         };
       }
 
       let enqueued = 0;
-      for (const uid of userIds) {
+      for (const target of targets) {
         try {
-          await queue.add(
-            EVALUATOR_QUEUE_NAME,
-            {
-              orgId: input.orgId,
-              userId: uid,
-              periodStart: input.periodStart,
-              periodEnd: input.periodEnd,
-              periodType: "daily",
-              triggeredBy: "admin_rerun",
-              triggeredByUser: ctx.user.id,
-            },
-            { jobId: `${uid}:${input.periodStart}:daily` },
-          );
+          // jobId MUST stay in lockstep with apps/gateway `enqueueEvaluator`
+          // (queue.ts): per-person stays the 3-part
+          // `${userId}:${periodStart}:${periodType}`; per-key uses the 4-part
+          // `${userId}:${apiKeyId}:${periodStart}:${periodType}` so a rerun
+          // dedups against the cron's per-key job. periodType is "daily" here.
+          const jobId = target.apiKeyId
+            ? `${target.userId}:${target.apiKeyId}:${input.periodStart}:daily`
+            : `${target.userId}:${input.periodStart}:daily`;
+          const payload: EvaluatorJobPayload = {
+            orgId: input.orgId,
+            userId: target.userId,
+            periodStart: input.periodStart,
+            periodEnd: input.periodEnd,
+            periodType: "daily",
+            triggeredBy: "admin_rerun",
+            triggeredByUser: ctx.user.id,
+            ...(target.apiKeyId
+              ? {
+                  apiKeyId: target.apiKeyId,
+                  keyNameSnapshot: target.keyNameSnapshot,
+                }
+              : {}),
+          };
+          await queue.add(EVALUATOR_QUEUE_NAME, payload, { jobId });
           enqueued += 1;
         } catch {
           // Dedup collision — expected, not an error
         }
       }
 
-      return { enqueued, targets: userIds.length, testMode: false as const };
+      return { enqueued, targets: targets.length, testMode: false as const };
     }),
 
   /**
@@ -422,6 +714,14 @@ export const reportsRouter = router({
       .where(eq(evaluationReports.userId, ctx.user.id))
       .orderBy(desc(evaluationReports.periodStart));
 
+    // GDPR access/portability: per-key (project) reports are the caller's own
+    // data too — include them so the export is complete. Owner sees full LLM.
+    const reportsByKey = await ctx.db
+      .select()
+      .from(evaluationReportsByKey)
+      .where(eq(evaluationReportsByKey.userId, ctx.user.id))
+      .orderBy(desc(evaluationReportsByKey.periodStart));
+
     // List body request metadata only — NOT decrypted body content
     const bodies = await ctx.db
       .select({
@@ -439,6 +739,7 @@ export const reportsRouter = router({
       userId: ctx.user.id,
       exportedAt: new Date(),
       reports,
+      reportsByKey,
       bodies,
       note: "Body content is encrypted at rest. Contact your administrator to request decrypted exports.",
     };
