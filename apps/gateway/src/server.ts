@@ -301,6 +301,8 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
           db: app.db,
           queue: app.evaluatorQueue,
           logger: app.log,
+          enableProjectEvaluation: opts.env.ENABLE_PROJECT_EVALUATION,
+          maxProjectKeysPerUser: opts.env.EVALUATOR_MAX_PROJECT_KEYS_PER_USER,
         });
         app.addHook("onClose", async () => {
           evaluatorCronHandle?.stop();
