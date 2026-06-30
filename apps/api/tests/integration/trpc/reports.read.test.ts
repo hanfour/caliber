@@ -181,7 +181,13 @@ async function seedReportWithLlm(
 
 async function seedApiKey(
   db: Database,
-  opts: { orgId: string; userId: string; teamId?: string | null; evaluateAsProject?: boolean },
+  opts: {
+    orgId: string;
+    userId: string;
+    teamId?: string | null;
+    evaluateAsProject?: boolean;
+    revokedAt?: Date | null;
+  },
 ) {
   seedCounter += 1;
   const [row] = await db
@@ -194,6 +200,7 @@ async function seedApiKey(
       keyHash: `hash-${seedCounter}-${Date.now()}`,
       keyPrefix: `sk-${seedCounter}`,
       evaluateAsProject: opts.evaluateAsProject ?? false,
+      revokedAt: opts.revokedAt ?? null,
     })
     .returning({ id: apiKeys.id });
   return row!.id;
@@ -863,5 +870,51 @@ describe("reports router — per-key read endpoints", () => {
     await expect(
       memberCaller.reports.listProjectKeys({ orgId: org.id }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("listProjectKeys: revoked key WITH a by-key report is returned with revokedAt set", async () => {
+    const org = await makeOrg(t.db);
+    const rubricId = await seedRubric(t.db, null);
+    const user = await makeUser(t.db, { orgId: org.id });
+    const revokedAt = new Date("2025-11-01T00:00:00Z");
+    const revokedKey = await seedApiKey(t.db, {
+      orgId: org.id,
+      userId: user.id,
+      evaluateAsProject: true,
+      revokedAt,
+    });
+    // Seed a by-key report so the key has scoring history.
+    await seedReportByKey(t.db, {
+      orgId: org.id,
+      userId: user.id,
+      apiKeyId: revokedKey,
+      rubricId,
+      periodStart: new Date("2025-10-01"),
+      periodEnd: new Date("2025-10-02"),
+    });
+
+    const caller = await callerFor({ db: t.db, userId: user.id });
+    const keys = await caller.reports.listProjectKeys({});
+    const found = keys.find((k) => k.id === revokedKey);
+    // Revoked key with history MUST appear.
+    expect(found).toBeDefined();
+    // revokedAt must be returned so the client can mark it read-only.
+    expect(found!.revokedAt).not.toBeNull();
+  });
+
+  it("listProjectKeys: revoked key WITHOUT any report is NOT returned", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, { orgId: org.id });
+    const revokedNoHistory = await seedApiKey(t.db, {
+      orgId: org.id,
+      userId: user.id,
+      evaluateAsProject: true,
+      revokedAt: new Date("2025-11-01T00:00:00Z"),
+    });
+
+    const caller = await callerFor({ db: t.db, userId: user.id });
+    const keys = await caller.reports.listProjectKeys({});
+    // Revoked key with no scoring history must be excluded.
+    expect(keys.some((k) => k.id === revokedNoHistory)).toBe(false);
   });
 });
