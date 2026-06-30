@@ -4,6 +4,7 @@ import {
   text,
   timestamp,
   decimal,
+  boolean,
   inet,
   index,
   check,
@@ -63,6 +64,7 @@ export const apiKeys = pgTable(
       .notNull()
       .defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    evaluateAsProject: boolean("evaluate_as_project").notNull().default(false),
   },
   (t) => ({
     userIdx: index("api_keys_user_idx")
@@ -77,6 +79,11 @@ export const apiKeys = pgTable(
     groupIdx: index("api_keys_group_idx")
       .on(t.groupId)
       .where(sql`${t.revokedAt} IS NULL AND ${t.groupId} IS NOT NULL`),
+    evalProjectIdx: index("api_keys_eval_project_idx")
+      .on(t.orgId)
+      .where(
+        sql`${t.evaluateAsProject} = true AND ${t.revokedAt} IS NULL`,
+      ),
     routingPolicyValues: check(
       "api_keys_routing_policy_values",
       sql`${t.routingPolicy} IN ('pool','own','own_then_pool')`,

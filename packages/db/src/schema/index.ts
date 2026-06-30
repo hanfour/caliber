@@ -13,6 +13,7 @@ export * from "./usageLogs.js";
 export * from "./rubrics.js";
 export * from "./requestBodies.js";
 export * from "./evaluationReports.js";
+export * from "./evaluationReportsByKey.js";
 export * from "./gdprDeleteRequests.js";
 export * from "./llmUsageEvents.js";
 export * from "./requestBodyFacets.js";

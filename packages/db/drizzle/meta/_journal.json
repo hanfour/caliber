@@ -148,6 +148,20 @@
       "when": 1782445676286,
       "tag": "0020_add_opus_4_8_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1782786922210,
+      "tag": "0021_zippy_wolfpack",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1782786923000,
+      "tag": "0022_llm_usage_events_dedup",
+      "breakpoints": true
     }
   ]
 }
