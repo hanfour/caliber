@@ -12,7 +12,9 @@
  *   4. If LLM fails → proceed with rule-based only; LLM columns stay NULL.
  */
 
+import { eq } from "drizzle-orm";
 import type { Database } from "@caliber/db";
+import { apiKeys } from "@caliber/db";
 import type { Redis } from "ioredis";
 import type { Rubric } from "@caliber/evaluator";
 import type { BudgetAlertEvent } from "./budgetAlertWebhook.js";
@@ -21,6 +23,7 @@ import {
   upsertEvaluationReport,
   type UpsertEvaluationReportInput,
 } from "./runRuleBased.js";
+import { upsertEvaluationReportByKey } from "./upsertEvaluationReportByKey.js";
 import { runLlmDeepAnalysis, type LlmMetrics } from "./runLlm.js";
 import {
   runFacetExtraction,
@@ -32,15 +35,15 @@ import {
   writeDeepAnalysisLedger,
   isDeepAnalysisEnforceEnabled,
   REF_TYPE_PERSON,
+  REF_TYPE_KEY,
 } from "./ledgerDeepAnalysis.js";
 import type { GatewayMetrics } from "../../plugins/metrics.js";
 
-/**
- * Deep-analysis grain for this PR. Only the per-person grain exists today; the
- * per-key grain (`"key"` + `REF_TYPE_KEY`) is wired in PR3. The metric label and
- * the ledger `refType` are both pinned here so PR3 has one place to branch.
- */
+/** Metric/ledger grain label for the per-person evaluation path. */
 const DEEP_ANALYSIS_GRAIN_PERSON = "person";
+
+/** Metric/ledger grain label for the per-key evaluation path (PR3). */
+const DEEP_ANALYSIS_GRAIN_KEY = "key";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -86,6 +89,17 @@ export interface RunEvaluationInput {
   metrics?: EvaluationMetrics;
   /** Optional sink for budget warn/exceeded webhook alerts (Plan P4). */
   onBudgetEvent?: (e: BudgetAlertEvent) => void;
+  /**
+   * Per-key grain (PR3): when set, scopes the usage_logs fetch to this key and
+   * writes the report to `evaluation_reports_by_key` instead of
+   * `evaluation_reports`.  When absent, the per-person path runs byte-identical.
+   */
+  apiKeyId?: string;
+  /**
+   * Snapshot of `api_keys.name` at evaluation time.  Required when `apiKeyId`
+   * is set; ignored otherwise.
+   */
+  keyNameSnapshot?: string;
 }
 
 export interface RunEvaluationResult {
@@ -104,12 +118,22 @@ export interface RunEvaluationResult {
 export async function runEvaluation(
   input: RunEvaluationInput,
 ): Promise<RunEvaluationResult> {
-  // Phase 1: rule-based scoring (no DB write)
+  // Determine the evaluation grain once — drives metric labels, ledger refType,
+  // and the Phase-3 upsert target.  Per-person path is byte-identical when
+  // `apiKeyId` is absent.
+  const isKeyGrain = input.apiKeyId !== undefined && input.apiKeyId !== null;
+  const deepAnalysisGrain = isKeyGrain
+    ? DEEP_ANALYSIS_GRAIN_KEY
+    : DEEP_ANALYSIS_GRAIN_PERSON;
+
+  // Phase 1: rule-based scoring (no DB write).
+  // Pass `apiKeyId` when in per-key grain so usage_logs are scoped to that key.
   const rb = await runRuleBased({
     db: input.db,
     masterKeyHex: input.masterKeyHex,
     orgId: input.orgId,
     userId: input.userId,
+    apiKeyId: isKeyGrain ? input.apiKeyId : undefined,
     periodStart: input.periodStart,
     periodEnd: input.periodEnd,
     rubric: input.rubric,
@@ -180,7 +204,7 @@ export async function runEvaluation(
       // Over budget → fall back to rule-based (llmResult stays null).
       input.metrics?.gwEvalLlmCalledTotal?.inc({
         result: "skipped_budget",
-        grain: DEEP_ANALYSIS_GRAIN_PERSON,
+        grain: deepAnalysisGrain,
       });
     } else {
       llmResult = await runLlmDeepAnalysis({
@@ -199,16 +223,16 @@ export async function runEvaluation(
       if (llmResult !== null) {
         input.metrics?.gwEvalLlmCalledTotal?.inc({
           result: "success",
-          grain: DEEP_ANALYSIS_GRAIN_PERSON,
+          grain: deepAnalysisGrain,
         });
         input.metrics?.gwEvalLlmCostUsd?.inc(
-          { grain: DEEP_ANALYSIS_GRAIN_PERSON },
+          { grain: deepAnalysisGrain },
           llmResult.costUsd,
         );
       } else {
         input.metrics?.gwEvalLlmCalledTotal?.inc({
           result: "fetch_failed",
-          grain: DEEP_ANALYSIS_GRAIN_PERSON,
+          grain: deepAnalysisGrain,
         });
       }
     }
@@ -216,36 +240,70 @@ export async function runEvaluation(
     // Skipped due to low coverage (llmEvalEnabled is true, but coverage < 0.5)
     input.metrics?.gwEvalLlmCalledTotal?.inc({
       result: "skipped_low_coverage",
-      grain: DEEP_ANALYSIS_GRAIN_PERSON,
+      grain: deepAnalysisGrain,
     });
   }
 
-  // Phase 3: upsert — always runs (even when LLM failed; llm columns stay NULL)
-  const upsertInput: UpsertEvaluationReportInput = {
-    db: input.db,
-    orgId: input.orgId,
-    userId: input.userId,
-    periodStart: input.periodStart,
-    periodEnd: input.periodEnd,
-    periodType: input.periodType,
-    rubricId: input.rubricId,
-    rubricVersion: input.rubricVersion,
-    triggeredBy: input.triggeredBy,
-    triggeredByUser: input.triggeredByUser,
-    report: rb.report,
-    llm: llmResult
-      ? {
-          narrative: llmResult.narrative,
-          evidence: llmResult.evidence,
-          model: llmResult.model,
-          calledAt: new Date(),
-          costUsd: llmResult.costUsd,
-          upstreamAccountId: llmResult.upstreamAccountId,
-        }
-      : null,
-  };
+  // Phase 3: upsert — always runs (even when LLM failed; llm columns stay NULL).
+  // Branches on grain: per-key → `evaluation_reports_by_key`; per-person → `evaluation_reports`.
+  const sharedLlmArg = llmResult
+    ? {
+        narrative: llmResult.narrative,
+        evidence: llmResult.evidence,
+        model: llmResult.model,
+        calledAt: new Date(),
+        costUsd: llmResult.costUsd,
+        upstreamAccountId: llmResult.upstreamAccountId,
+      }
+    : null;
 
-  const reportId = await upsertEvaluationReport(upsertInput);
+  let reportId: string | null;
+
+  if (isKeyGrain) {
+    // Per-key path: look up api_keys.team_id so per-key team roll-ups work.
+    // Per-person writes teamId=NULL; per-key sources it from the api_keys row.
+    const keyRow = await input.db
+      .select({ teamId: apiKeys.teamId })
+      .from(apiKeys)
+      .where(eq(apiKeys.id, input.apiKeyId!))
+      .limit(1)
+      .then((r) => r[0]);
+
+    reportId = await upsertEvaluationReportByKey({
+      db: input.db,
+      orgId: input.orgId,
+      userId: input.userId,
+      teamId: keyRow?.teamId ?? null,
+      apiKeyId: input.apiKeyId!,
+      keyNameSnapshot: input.keyNameSnapshot ?? "",
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      periodType: input.periodType,
+      rubricId: input.rubricId,
+      rubricVersion: input.rubricVersion,
+      triggeredBy: input.triggeredBy,
+      triggeredByUser: input.triggeredByUser,
+      report: rb.report,
+      llm: sharedLlmArg,
+    });
+  } else {
+    // Per-person path — byte-identical to the pre-PR3 code.
+    const upsertInput: UpsertEvaluationReportInput = {
+      db: input.db,
+      orgId: input.orgId,
+      userId: input.userId,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      periodType: input.periodType,
+      rubricId: input.rubricId,
+      rubricVersion: input.rubricVersion,
+      triggeredBy: input.triggeredBy,
+      triggeredByUser: input.triggeredByUser,
+      report: rb.report,
+      llm: sharedLlmArg,
+    };
+    reportId = await upsertEvaluationReport(upsertInput);
+  }
 
   // Phase 3.5 (PR2): ledger the deep-analysis spend — AFTER the upsert so
   // `reportId` exists as the `ref_id`. Written UNCONDITIONALLY on LLM success
@@ -254,12 +312,13 @@ export async function runEvaluation(
   // re-runs the job cannot double-count this report's deep-analysis cost.
   // Not wrapped in try/catch: a transient DB error must surface (so spend is
   // never silently lost) — the dedup index keeps the retry single-counted.
+  // PR3: per-key grain uses REF_TYPE_KEY; per-person uses REF_TYPE_PERSON.
   if (llmResult !== null && reportId !== null) {
     await writeDeepAnalysisLedger({
       db: input.db,
       orgId: input.orgId,
       reportId,
-      refType: REF_TYPE_PERSON,
+      refType: isKeyGrain ? REF_TYPE_KEY : REF_TYPE_PERSON,
       usageLogRequestId: llmResult.requestId,
       metrics: input.metrics?.gwLlmCostUsdTotal
         ? { gwLlmCostUsdTotal: input.metrics.gwLlmCostUsdTotal }

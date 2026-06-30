@@ -34,6 +34,12 @@ export interface RunRuleBasedInput {
   masterKeyHex: string;
   orgId: string;
   userId: string;
+  /**
+   * When set, scopes the usage_logs fetch (and transitively the request_bodies /
+   * request_body_facets fetch) to this api_key only.  When absent, all of the
+   * user's requests in the period window are included (per-person path).
+   */
+  apiKeyId?: string;
   periodStart: Date;
   periodEnd: Date;
   rubric: Rubric;
@@ -90,7 +96,11 @@ export async function runRuleBased(
 ): Promise<RunRuleBasedResult> {
   const { db, masterKeyHex, userId, periodStart, periodEnd } = input;
 
-  // 1. Fetch usage_logs in window
+  // 1. Fetch usage_logs in window.
+  // When apiKeyId is provided (per-key grain), append an extra eq() predicate so
+  // only logs produced by that key are fetched.  Body/facet scoping follows
+  // transitively because both queries use inArray(requestId, requestIds) derived
+  // from this filtered usage set — no other changes needed.
   const usageRowsRaw = await db
     .select()
     .from(usageLogs)
@@ -99,6 +109,9 @@ export async function runRuleBased(
         eq(usageLogs.userId, userId),
         gte(usageLogs.createdAt, periodStart),
         lt(usageLogs.createdAt, periodEnd),
+        input.apiKeyId
+          ? eq(usageLogs.apiKeyId, input.apiKeyId)
+          : undefined,
       ),
     );
 
