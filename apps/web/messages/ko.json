@@ -492,6 +492,16 @@
     "sharedLabel": "공유",
     "rateLabel": "속도 ×{multiplier}"
   },
+  "apiKeys": {
+    "evaluateAsProject": {
+      "label": "프로젝트로 채점",
+      "enabledToast": "프로젝트 채점이 활성화되었습니다",
+      "disabledToast": "프로젝트 채점이 비활성화되었습니다",
+      "errorToast": "프로젝트 채점 업데이트 실패",
+      "helperText": "LLM 평가 비용은 조직의 월간 예산에 포함됩니다.",
+      "ariaLabel": "\"{name}\" 프로젝트 채점 전환"
+    }
+  },
   "memberApiKeys": {
     "ownTitle": "내 API 키",
     "ownDescription": "내가 직접 발급하여 사용하는 키. 원본은 생성 시 한 번만 표시됩니다.",
@@ -1035,6 +1045,17 @@
       "thirtyDayWindowSummaryOneMember": "30일 기간 · {reports}개의 보고서, 1명의 멤버",
       "thirtyDayWindowSummaryBothOne": "30일 기간 · 1개의 보고서, 1명의 멤버",
       "noReports": "최근 30일간의 평가 보고서가 없습니다."
+    },
+    "projects": {
+      "title": "프로젝트 점수",
+      "description": "프로젝트 평가에 참여한 API 키의 키별 점수.",
+      "selectPlaceholder": "프로젝트 키 선택…",
+      "noKeys": "프로젝트 채점에 참여한 키가 없습니다.",
+      "noKeysHint": "API 키에서 \"프로젝트로 채점\"을 활성화하여 프로젝트별 점수 추적을 시작하세요.",
+      "revokedBadge": "취소됨",
+      "viewScore": "프로젝트 점수 보기",
+      "noReport": "아직 보고서가 없습니다. 점수는 매일 밤 생성됩니다.",
+      "keyLabel": "프로젝트: {name}"
     }
   },
   "audit": {

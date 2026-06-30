@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, gte, isNull, lte, max } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lte, max, or } from "drizzle-orm";
 import {
   apiKeys,
   evaluationReports,
@@ -511,14 +511,21 @@ export const reportsRouter = router({
           userId: apiKeys.userId,
           teamId: apiKeys.teamId,
           latestPeriodStart: latest.latestPeriodStart,
+          // Null for active keys; set for revoked-but-scored keys so the client
+          // can render them read-only using key_name_snapshot history.
+          revokedAt: apiKeys.revokedAt,
         })
         .from(apiKeys)
         .leftJoin(latest, eq(latest.apiKeyId, apiKeys.id))
         .where(
           and(
             eq(apiKeys.evaluateAsProject, true),
-            isNull(apiKeys.revokedAt),
             scopeFilter,
+            // Include active keys (revokedAt IS NULL) OR revoked keys that have
+            // at least one by-key report (latestPeriodStart IS NOT NULL).
+            // Revoked keys with no report history are omitted — they were never
+            // scored and have no historical data to show read-only.
+            or(isNull(apiKeys.revokedAt), isNotNull(latest.latestPeriodStart)),
           ),
         )
         .orderBy(apiKeys.name);
