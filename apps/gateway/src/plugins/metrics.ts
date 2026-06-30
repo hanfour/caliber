@@ -46,8 +46,10 @@ export interface GatewayMetrics {
   bodyPurgeDeletedTotal: Counter<string>;
   bodyPurgeDurationSeconds: Histogram<string>;
   bodyPurgeLagHours: Gauge<string>;
-  gwEvalLlmCalledTotal: Counter<"result">;
-  gwEvalLlmCostUsd: Counter<string>;
+  // `grain` separates per-person from per-key (PR3) deep-analysis spend; the
+  // `result` label gained a `skipped_budget` value (PR2 budget gate).
+  gwEvalLlmCalledTotal: Counter<"result" | "grain">;
+  gwEvalLlmCostUsd: Counter<"grain">;
   gwEvalLlmFailedTotal: Counter<"reason">;
   gwEvalLlmParseFailedTotal: Counter<string>;
   gwEvalDlqCount: Gauge<string>;
@@ -279,14 +281,15 @@ async function metricsPluginBody(
 
   const gwEvalLlmCalledTotal = new Counter({
     name: "gw_eval_llm_called_total",
-    help: "LLM deep analysis calls attempted (before knowing success/fail)",
-    labelNames: ["result"] as const,
+    help: "LLM deep analysis calls attempted, by result and grain (person|key)",
+    labelNames: ["result", "grain"] as const,
     registers: [register],
   });
 
   const gwEvalLlmCostUsd = new Counter({
     name: "gw_eval_llm_cost_usd",
-    help: "Cumulative cost of LLM deep analysis calls in USD",
+    help: "Cumulative cost of LLM deep analysis calls in USD, by grain (person|key)",
+    labelNames: ["grain"] as const,
     registers: [register],
   });
 
@@ -499,8 +502,19 @@ async function metricsPluginBody(
   usagePersistLostTotal.inc(0);
   billingDriftTotal.inc(0);
   billingMonotonicityViolationTotal.inc(0);
-  gwEvalLlmCalledTotal.inc(0);
-  gwEvalLlmCostUsd.inc(0);
+  // Materialize the zero series across both grains (labelled counters cannot
+  // take a label-less .inc(0)).
+  for (const grain of ["person", "key"] as const) {
+    gwEvalLlmCostUsd.inc({ grain }, 0);
+    for (const result of [
+      "success",
+      "fetch_failed",
+      "skipped_low_coverage",
+      "skipped_budget",
+    ] as const) {
+      gwEvalLlmCalledTotal.inc({ result, grain }, 0);
+    }
+  }
   gwEvalLlmFailedTotal.inc(0);
   gwEvalLlmParseFailedTotal.inc(0);
   gwEvalDlqCount.set(0);

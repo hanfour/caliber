@@ -27,6 +27,20 @@ import {
   type FacetMetrics,
   type RunFacetExtractionResult,
 } from "./runFacetExtraction.js";
+import {
+  deepAnalysisBudgetGate,
+  writeDeepAnalysisLedger,
+  isDeepAnalysisEnforceEnabled,
+  REF_TYPE_PERSON,
+} from "./ledgerDeepAnalysis.js";
+import type { GatewayMetrics } from "../../plugins/metrics.js";
+
+/**
+ * Deep-analysis grain for this PR. Only the per-person grain exists today; the
+ * per-key grain (`"key"` + `REF_TYPE_KEY`) is wired in PR3. The metric label and
+ * the ledger `refType` are both pinned here so PR3 has one place to branch.
+ */
+const DEEP_ANALYSIS_GRAIN_PERSON = "person";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,8 +54,10 @@ export const LLM_MIN_COVERAGE_RATIO = 0.5;
 // ── Input / Output types ─────────────────────────────────────────────────────
 
 export interface EvaluationMetrics extends LlmMetrics, Partial<FacetMetrics> {
-  gwEvalLlmCalledTotal?: { inc: (labels: { result: string }) => void };
-  gwEvalLlmCostUsd?: { inc: (value: number) => void };
+  gwEvalLlmCalledTotal?: {
+    inc: (labels: { result: string; grain: string }) => void;
+  };
+  gwEvalLlmCostUsd?: { inc: (labels: { grain: string }, value: number) => void };
   gwEvalDlqCount?: { inc: () => void };
 }
 
@@ -147,29 +163,60 @@ export async function runEvaluation(
   let llmResult: Awaited<ReturnType<typeof runLlmDeepAnalysis>> = null;
 
   if (shouldRunLlm) {
-    llmResult = await runLlmDeepAnalysis({
+    // PR2 — pre-call budget halt gate. Deep-analysis cost is only known
+    // post-call, so this is a halt-state check (skip if ALREADY over budget),
+    // not a pre-charge. The kill-switch EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS
+    // (default on) disables only THIS enforcement — the post-upsert ledger
+    // write below is unconditional (honest accounting, spec §6).
+    const gate = await deepAnalysisBudgetGate({
       db: input.db,
-      redis: input.redis,
-      gatewayBaseUrl: input.gatewayBaseUrl,
       orgId: input.orgId,
-      rubric: input.rubric,
-      ruleBasedReport: rb.report,
-      bodies: rb.bodies,
-      fetchImpl: input.fetchImpl,
-      sleepMs: input.sleepMs,
-      metrics: input.metrics,
+      enforce: isDeepAnalysisEnforceEnabled(),
+      metrics: extractBudgetMetrics(input.metrics),
+      onBudgetEvent: input.onBudgetEvent,
     });
 
-    if (llmResult !== null) {
-      input.metrics?.gwEvalLlmCalledTotal?.inc({ result: "success" });
-      input.metrics?.gwEvalLlmCostUsd?.inc(llmResult.costUsd);
+    if (gate.skip) {
+      // Over budget → fall back to rule-based (llmResult stays null).
+      input.metrics?.gwEvalLlmCalledTotal?.inc({
+        result: "skipped_budget",
+        grain: DEEP_ANALYSIS_GRAIN_PERSON,
+      });
     } else {
-      input.metrics?.gwEvalLlmCalledTotal?.inc({ result: "fetch_failed" });
+      llmResult = await runLlmDeepAnalysis({
+        db: input.db,
+        redis: input.redis,
+        gatewayBaseUrl: input.gatewayBaseUrl,
+        orgId: input.orgId,
+        rubric: input.rubric,
+        ruleBasedReport: rb.report,
+        bodies: rb.bodies,
+        fetchImpl: input.fetchImpl,
+        sleepMs: input.sleepMs,
+        metrics: input.metrics,
+      });
+
+      if (llmResult !== null) {
+        input.metrics?.gwEvalLlmCalledTotal?.inc({
+          result: "success",
+          grain: DEEP_ANALYSIS_GRAIN_PERSON,
+        });
+        input.metrics?.gwEvalLlmCostUsd?.inc(
+          { grain: DEEP_ANALYSIS_GRAIN_PERSON },
+          llmResult.costUsd,
+        );
+      } else {
+        input.metrics?.gwEvalLlmCalledTotal?.inc({
+          result: "fetch_failed",
+          grain: DEEP_ANALYSIS_GRAIN_PERSON,
+        });
+      }
     }
   } else if (input.llmEvalEnabled) {
     // Skipped due to low coverage (llmEvalEnabled is true, but coverage < 0.5)
     input.metrics?.gwEvalLlmCalledTotal?.inc({
       result: "skipped_low_coverage",
+      grain: DEEP_ANALYSIS_GRAIN_PERSON,
     });
   }
 
@@ -200,6 +247,27 @@ export async function runEvaluation(
 
   const reportId = await upsertEvaluationReport(upsertInput);
 
+  // Phase 3.5 (PR2): ledger the deep-analysis spend — AFTER the upsert so
+  // `reportId` exists as the `ref_id`. Written UNCONDITIONALLY on LLM success
+  // (honest accounting, independent of the budget kill-switch). Idempotent via
+  // `onConflictDoNothing` on `llm_usage_dedup_idx` so a BullMQ retry that
+  // re-runs the job cannot double-count this report's deep-analysis cost.
+  // Not wrapped in try/catch: a transient DB error must surface (so spend is
+  // never silently lost) — the dedup index keeps the retry single-counted.
+  if (llmResult !== null && reportId !== null) {
+    await writeDeepAnalysisLedger({
+      db: input.db,
+      orgId: input.orgId,
+      reportId,
+      refType: REF_TYPE_PERSON,
+      usageLogRequestId: llmResult.requestId,
+      metrics: input.metrics?.gwLlmCostUsdTotal
+        ? { gwLlmCostUsdTotal: input.metrics.gwLlmCostUsdTotal }
+        : undefined,
+      sleepMs: input.sleepMs,
+    });
+  }
+
   return {
     reportId,
     totalScore: rb.report.totalScore,
@@ -208,6 +276,25 @@ export async function runEvaluation(
     llmSucceeded: llmResult !== null,
     llmCostUsd: llmResult?.costUsd ?? 0,
     facetResult,
+  };
+}
+
+/**
+ * Pull just the two budget counters the deep-analysis gate needs from the
+ * broader `EvaluationMetrics` bag. Returns undefined if either is absent so the
+ * gate falls back to its no-metrics (pure `enforceBudget`) path.
+ */
+function extractBudgetMetrics(
+  m: EvaluationMetrics | undefined,
+):
+  | Pick<GatewayMetrics, "gwLlmBudgetWarnTotal" | "gwLlmBudgetExceededTotal">
+  | undefined {
+  if (!m?.gwLlmBudgetWarnTotal || !m.gwLlmBudgetExceededTotal) {
+    return undefined;
+  }
+  return {
+    gwLlmBudgetWarnTotal: m.gwLlmBudgetWarnTotal,
+    gwLlmBudgetExceededTotal: m.gwLlmBudgetExceededTotal,
   };
 }
 

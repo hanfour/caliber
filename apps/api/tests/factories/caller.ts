@@ -95,6 +95,10 @@ export const defaultTestEnv: ServerEnv = {
   GATEWAY_MODEL_REGISTRY_REFRESH_SEC: 3600,
   ENABLE_EVALUATOR: true,
   ENABLE_FACET_EXTRACTION: false,
+  EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS: true,
+  ENABLE_PROJECT_EVALUATION: false,
+  EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 20,
+  MAX_PROJECT_KEYS_PER_ORG: 50,
 };
 
 // ioredis-mock honors keyPrefix the same way the real client does, so tests

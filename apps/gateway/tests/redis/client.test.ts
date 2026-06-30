@@ -60,6 +60,10 @@ function makeEnv(overrides: Partial<ServerEnv> = {}): ServerEnv {
     GATEWAY_MODEL_REGISTRY_REFRESH_SEC: 3600,
     ENABLE_EVALUATOR: false,
     ENABLE_FACET_EXTRACTION: false,
+    EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS: true,
+    ENABLE_PROJECT_EVALUATION: false,
+    EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 20,
+    MAX_PROJECT_KEYS_PER_ORG: 50,
     ...overrides,
   };
 }

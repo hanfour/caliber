@@ -29,6 +29,7 @@ import type { Redis } from "ioredis";
 import {
   apiKeys,
   evaluationReports,
+  llmUsageEvents,
   organizations,
   requestBodies,
   rubrics,
@@ -37,6 +38,10 @@ import {
   users,
   type Database,
 } from "@caliber/db";
+import {
+  DEEP_ANALYSIS_EVENT_TYPE,
+  REF_TYPE_PERSON,
+} from "../../../src/workers/evaluator/ledgerDeepAnalysis.js";
 import { encryptBody } from "../../../src/capture/encrypt.js";
 import { runEvaluation, LLM_MIN_COVERAGE_RATIO } from "../../../src/workers/evaluator/runEvaluation.js";
 import { LLM_KEY_REDIS_PREFIX } from "../../../src/workers/evaluator/runLlm.js";
@@ -157,6 +162,20 @@ beforeEach(async () => {
   );
   await db.execute(sql`TRUNCATE TABLE request_bodies RESTART IDENTITY CASCADE`);
   await db.execute(sql`TRUNCATE TABLE usage_logs RESTART IDENTITY CASCADE`);
+  await db.execute(
+    sql`TRUNCATE TABLE llm_usage_events RESTART IDENTITY CASCADE`,
+  );
+  // Reset budget to unlimited so the PR2 deep-analysis gate never skips unless
+  // a test opts into a budget. (createBudgetDeps reads these org columns.)
+  await db
+    .update(organizations)
+    .set({
+      llmMonthlyBudgetUsd: null,
+      llmBudgetOverageBehavior: "degrade",
+      llmHaltedUntilMonthEnd: false,
+      llmHaltedAt: null,
+    })
+    .where(eq(organizations.id, orgId));
   // Flush Redis to prevent key leakage
   await redis.flushall();
 });
@@ -536,5 +555,140 @@ describe("runEvaluation — integration", () => {
     expect(rows[0]!.triggeredBy).toBe("admin_rerun");
     // Both runs produce valid report data
     expect(Number(rows[0]!.totalScore)).toBeGreaterThanOrEqual(0);
+  });
+
+  // ── PR2: deep-analysis budget gate + ledger wiring ──────────────────────────
+
+  it("7. LLM success → writes ONE deep_analysis ledger row (ref_id=reportId, after upsert)", async () => {
+    const requestId = "req-eval-ledger-001";
+    await seedUsageLog(requestId);
+    await seedRequestBody(requestId);
+    await seedLlmCostLog(LLM_REQUEST_ID, "0.0050000000");
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${orgId}`, STUB_RAW_KEY);
+
+    const result = await runEvaluation(
+      makeBaseInput({
+        llmEvalEnabled: true,
+        fetchImpl: makeFetchOk(LLM_REQUEST_ID),
+      }),
+    );
+
+    expect(result.llmSucceeded).toBe(true);
+    expect(result.reportId).toBeTruthy();
+
+    const ledger = await db
+      .select()
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.refId, result.reportId!));
+    expect(ledger).toHaveLength(1);
+    const row = ledger[0]!;
+    expect(row.eventType).toBe(DEEP_ANALYSIS_EVENT_TYPE);
+    expect(row.refType).toBe(REF_TYPE_PERSON);
+    expect(row.orgId).toBe(orgId);
+    // Tokens recovered from the loopback usage_log (NOT-NULL, no placeholder)
+    expect(row.tokensInput).toBe(100);
+    expect(row.tokensOutput).toBe(200);
+    expect(Number(row.costUsd)).toBeCloseTo(0.005, 6);
+  });
+
+  it("8. over budget → LLM skipped, rule-based report still written, NO deep_analysis ledger row", async () => {
+    const requestId = "req-eval-overbudget-001";
+    await seedUsageLog(requestId);
+    await seedRequestBody(requestId);
+    await seedLlmCostLog(LLM_REQUEST_ID, "0.0050000000");
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${orgId}`, STUB_RAW_KEY);
+
+    // Set a tiny budget and seed month-to-date spend that already exceeds it.
+    await db
+      .update(organizations)
+      .set({ llmMonthlyBudgetUsd: "0.50", llmBudgetOverageBehavior: "degrade" })
+      .where(eq(organizations.id, orgId));
+    await db.insert(llmUsageEvents).values({
+      orgId,
+      eventType: "facet_extraction",
+      model: STUB_LLM_MODEL,
+      tokensInput: 1,
+      tokensOutput: 1,
+      costUsd: "0.75", // > 0.50 budget
+      refType: null,
+      refId: null,
+    });
+
+    const result = await runEvaluation(
+      makeBaseInput({
+        llmEvalEnabled: true,
+        fetchImpl: makeFetchOk(LLM_REQUEST_ID),
+      }),
+    );
+
+    // Rule-based report still written; LLM degraded away.
+    expect(result.skipped).toBe(false);
+    expect(result.reportId).toBeTruthy();
+    expect(result.llmAttempted).toBe(true);
+    expect(result.llmSucceeded).toBe(false);
+
+    const reportRows = await db
+      .select()
+      .from(evaluationReports)
+      .where(eq(evaluationReports.id, result.reportId!));
+    expect(reportRows[0]!.llmNarrative).toBeNull();
+    expect(reportRows[0]!.llmModel).toBeNull();
+
+    // No deep_analysis ledger row for this report (nothing was spent).
+    const deep = await db
+      .select()
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.refId, result.reportId!));
+    expect(deep).toHaveLength(0);
+  });
+
+  it("9. kill-switch off (enforce disabled) → over budget but LLM still runs AND ledgers", async () => {
+    const requestId = "req-eval-killswitch-001";
+    await seedUsageLog(requestId);
+    await seedRequestBody(requestId);
+    await seedLlmCostLog(LLM_REQUEST_ID, "0.0050000000");
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${orgId}`, STUB_RAW_KEY);
+
+    await db
+      .update(organizations)
+      .set({ llmMonthlyBudgetUsd: "0.50", llmBudgetOverageBehavior: "degrade" })
+      .where(eq(organizations.id, orgId));
+    await db.insert(llmUsageEvents).values({
+      orgId,
+      eventType: "facet_extraction",
+      model: STUB_LLM_MODEL,
+      tokensInput: 1,
+      tokensOutput: 1,
+      costUsd: "0.75",
+      refType: null,
+      refId: null,
+    });
+
+    const prev = process.env.EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS;
+    process.env.EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS = "false";
+    try {
+      const result = await runEvaluation(
+        makeBaseInput({
+          llmEvalEnabled: true,
+          fetchImpl: makeFetchOk(LLM_REQUEST_ID),
+        }),
+      );
+
+      // Enforcement disabled → LLM runs even over budget.
+      expect(result.llmSucceeded).toBe(true);
+      // Still ledgers (honest accounting, independent of the kill-switch).
+      const deep = await db
+        .select()
+        .from(llmUsageEvents)
+        .where(eq(llmUsageEvents.refId, result.reportId!));
+      expect(deep).toHaveLength(1);
+      expect(deep[0]!.eventType).toBe(DEEP_ANALYSIS_EVENT_TYPE);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS;
+      } else {
+        process.env.EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS = prev;
+      }
+    }
   });
 });
