@@ -68,6 +68,17 @@ x-app-env: &app-env
   # on the org via the Evaluator → Settings page after these are on.
   ENABLE_EVALUATOR: ${ENABLE_EVALUATOR:-false}
   ENABLE_FACET_EXTRACTION: ${ENABLE_FACET_EXTRACTION:-false}
+  # Per-project (per-api-key) performance scoring (v0.17.0). Off by default.
+  # ENABLE_PROJECT_EVALUATION turns on the per-key evaluator cron fan-out
+  # (gateway); per-key scoring only runs for keys a member opts in via the
+  # "Score as project" toggle AND that have traffic. The deep-analysis budget
+  # enforcement (api+gateway) defaults on — disable with
+  # EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS=false if a near-budget org sees
+  # surprise halts. The two caps bound how many keys can be scored.
+  ENABLE_PROJECT_EVALUATION: ${ENABLE_PROJECT_EVALUATION:-false}
+  EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS: ${EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS:-true}
+  EVALUATOR_MAX_PROJECT_KEYS_PER_USER: ${EVALUATOR_MAX_PROJECT_KEYS_PER_USER:-20}
+  MAX_PROJECT_KEYS_PER_ORG: ${MAX_PROJECT_KEYS_PER_ORG:-50}
 
 services:
   postgres:
