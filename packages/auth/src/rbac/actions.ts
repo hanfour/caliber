@@ -60,6 +60,12 @@ export type Action =
       orgId: string;
       ownerUserId: string;
     }
+  | {
+      type: "api_key.evaluate_as_project_set";
+      apiKeyId: string;
+      orgId: string;
+      ownerUserId: string;
+    }
   | { type: "usage.read_own" }
   | { type: "usage.read_user"; orgId: string; targetUserId: string }
   | { type: "usage.read_team"; orgId: string; teamId: string }

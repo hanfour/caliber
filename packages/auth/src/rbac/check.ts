@@ -185,7 +185,11 @@ export function can(perm: UserPermissions, action: Action): boolean {
     case "api_key.list_own":
       return true;
     case "api_key.revoke":
-      if (action.ownerUserId === perm.userId) return true; // self-revoke
+    // Per-key "score as project" opt-in mirrors the revoke gate exactly:
+    // the key owner may toggle their own key, and an org_admin may toggle
+    // any key in their org. Same {apiKeyId, orgId, ownerUserId} shape.
+    case "api_key.evaluate_as_project_set":
+      if (action.ownerUserId === perm.userId) return true; // self
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "api_key.issue_for_user":
     case "api_key.list_all":

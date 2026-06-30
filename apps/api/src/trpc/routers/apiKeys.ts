@@ -86,6 +86,9 @@ const ownColumns = {
   teamId: apiKeys.teamId,
   quotaUsd: apiKeys.quotaUsd,
   quotaUsedUsd: apiKeys.quotaUsedUsd,
+  // Per-key "score as project" opt-in state (PR5). Surfaced so the management
+  // UI can render/toggle it. Carries no key material — safe at the own scope.
+  evaluateAsProject: apiKeys.evaluateAsProject,
 } as const;
 
 // Org-admin view adds ownership context (who owns the key, who issued it)
@@ -481,6 +484,60 @@ export const apiKeysRouter = router({
         targetId: input.id,
         orgId: existing.orgId,
         metadata: { ownerUserId: existing.ownerUserId },
+      });
+
+      return { ok: true as const };
+    }),
+
+  // Per-key "score as project" opt-in toggle (PR5). RBAC mirrors `revoke`:
+  // the key owner may toggle their own key, or an org_admin any key in their
+  // org (enforced by the `api_key.evaluate_as_project_set` action). NOT_FOUND
+  // covers missing/already-revoked rows (no existence leak); FORBIDDEN when
+  // found but the caller lacks permission — identical to `revoke`. The per-ORG
+  // opt-in cap is deliberately NOT enforced here (PR7).
+  setEvaluateAsProject: protectedProcedure
+    .input(z.object({ id: uuid, enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      ensureGatewayEnabled(ctx.env);
+      const [existing] = await ctx.db
+        .select({
+          id: apiKeys.id,
+          orgId: apiKeys.orgId,
+          ownerUserId: apiKeys.userId,
+          revokedAt: apiKeys.revokedAt,
+        })
+        .from(apiKeys)
+        .where(eq(apiKeys.id, input.id))
+        .limit(1);
+      if (!existing || existing.revokedAt !== null) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (
+        !can(ctx.perm, {
+          type: "api_key.evaluate_as_project_set",
+          apiKeyId: existing.id,
+          orgId: existing.orgId,
+          ownerUserId: existing.ownerUserId,
+        })
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      await ctx.db
+        .update(apiKeys)
+        .set({ evaluateAsProject: input.enabled, updatedAt: sql`NOW()` })
+        .where(eq(apiKeys.id, input.id));
+
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: "api_key.evaluate_as_project_set",
+        targetType: "api_key",
+        targetId: input.id,
+        orgId: existing.orgId,
+        metadata: {
+          enabled: input.enabled,
+          ownerUserId: existing.ownerUserId,
+        },
       });
 
       return { ok: true as const };

@@ -10,7 +10,10 @@
  *   2. Delete client_sessions rows for (org_id, user_id) — cascades to
  *      client_events via FK ON DELETE CASCADE. Event count is captured before
  *      delete for audit visibility.
- *   3. If scope="bodies_and_reports", also delete evaluation_reports for the user.
+ *   3. If scope="bodies_and_reports", also delete evaluation_reports AND
+ *      evaluation_reports_by_key for the user. (The per-key table's
+ *      api_key_id ON DELETE CASCADE only fires on key HARD-delete, never on
+ *      this soft-delete erasure path, so we must delete the rows explicitly.)
  *   4. Mark the request as executed (executedAt = now()).
  *   5. Write an audit log entry proving the deletion happened.
  *
@@ -33,6 +36,7 @@ import type { Database } from "@caliber/db";
 import {
   gdprDeleteRequests,
   evaluationReports,
+  evaluationReportsByKey,
   clientSessions,
   auditLogs,
 } from "@caliber/db";
@@ -51,6 +55,7 @@ export interface ExecuteGdprDeletionsResult {
   requestsProcessed: number;
   bodiesDeleted: number;
   reportsDeleted: number;
+  reportsByKeyDeleted: number;
   clientSessionsDeleted: number;
   clientEventsDeleted: number;
   failures: number;
@@ -80,6 +85,7 @@ export async function executeGdprDeletions(
 
   let bodiesDeleted = 0;
   let reportsDeleted = 0;
+  let reportsByKeyDeleted = 0;
   let clientSessionsDeleted = 0;
   let clientEventsDeleted = 0;
   let failures = 0;
@@ -127,8 +133,9 @@ export async function executeGdprDeletions(
       clientSessionsDeleted += sessionsThisReq;
       clientEventsDeleted += eventsThisReq;
 
-      // Optionally delete evaluation reports.
+      // Optionally delete evaluation reports (per-person AND per-key).
       let reportsThisReq = 0;
+      let reportsByKeyThisReq = 0;
       if (request.scope === "bodies_and_reports") {
         const reportsResult = await db
           .delete(evaluationReports)
@@ -141,6 +148,22 @@ export async function executeGdprDeletions(
         reportsThisReq =
           (reportsResult as { rowCount: number | null }).rowCount ?? 0;
         reportsDeleted += reportsThisReq;
+
+        // Per-key reports: the api_key_id ON DELETE CASCADE only fires on key
+        // HARD-delete, not this soft-delete erasure path, so delete by
+        // (user_id, org_id) explicitly — otherwise the user_id ON DELETE
+        // RESTRICT FK would block a later user hard-delete.
+        const byKeyResult = await db
+          .delete(evaluationReportsByKey)
+          .where(
+            and(
+              eq(evaluationReportsByKey.userId, request.userId),
+              eq(evaluationReportsByKey.orgId, request.orgId),
+            ),
+          );
+        reportsByKeyThisReq =
+          (byKeyResult as { rowCount: number | null }).rowCount ?? 0;
+        reportsByKeyDeleted += reportsByKeyThisReq;
       }
 
       // Mark request executed.
@@ -163,6 +186,7 @@ export async function executeGdprDeletions(
           scope: request.scope,
           bodiesDeleted: bodiesDeletedHere,
           reportsDeleted: reportsThisReq,
+          reportsByKeyDeleted: reportsByKeyThisReq,
           clientSessionsDeleted: sessionsThisReq,
           clientEventsDeleted: eventsThisReq,
         },
@@ -176,6 +200,7 @@ export async function executeGdprDeletions(
     requestsProcessed: approved.length,
     bodiesDeleted,
     reportsDeleted,
+    reportsByKeyDeleted,
     clientSessionsDeleted,
     clientEventsDeleted,
     failures,
@@ -188,6 +213,7 @@ export interface GdprDeleteCronMetrics {
   executedTotal?: { inc: (n: number) => void };
   bodiesDeletedTotal?: { inc: (n: number) => void };
   reportsDeletedTotal?: { inc: (n: number) => void };
+  reportsByKeyDeletedTotal?: { inc: (n: number) => void };
   clientSessionsDeletedTotal?: { inc: (n: number) => void };
   clientEventsDeletedTotal?: { inc: (n: number) => void };
   failuresTotal?: { inc: (n: number) => void };
@@ -224,6 +250,7 @@ export function startGdprDeleteCron(
       opts.metrics?.executedTotal?.inc(result.requestsProcessed);
       opts.metrics?.bodiesDeletedTotal?.inc(result.bodiesDeleted);
       opts.metrics?.reportsDeletedTotal?.inc(result.reportsDeleted);
+      opts.metrics?.reportsByKeyDeletedTotal?.inc(result.reportsByKeyDeleted);
       opts.metrics?.clientSessionsDeletedTotal?.inc(result.clientSessionsDeleted);
       opts.metrics?.clientEventsDeletedTotal?.inc(result.clientEventsDeleted);
       opts.metrics?.failuresTotal?.inc(result.failures);

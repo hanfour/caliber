@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import RedisMock from "ioredis-mock";
 import type { Redis } from "ioredis";
 import type { Database } from "@caliber/db";
-import { apiKeys, accountGroups } from "@caliber/db";
+import { apiKeys, accountGroups, auditLogs } from "@caliber/db";
 import { verifyApiKey } from "@caliber/gateway-core";
 import { resolvePermissions } from "@caliber/auth";
 import type { ServerEnv } from "@caliber/config";
@@ -794,5 +794,164 @@ describe("apiKeys router", () => {
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
+  });
+
+  // ── PR5: setEvaluateAsProject (per-key "score as project" opt-in) ────────────
+
+  it("setEvaluateAsProject: owner toggles their own key on, then off; column persists; audit written", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: user.id, redis });
+    const issued = await caller.apiKeys.issueOwn({ name: "to-opt-in" });
+
+    // Default is false.
+    const [before] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, issued.id));
+    expect(before!.evaluateAsProject).toBe(false);
+
+    const onRes = await caller.apiKeys.setEvaluateAsProject({
+      id: issued.id,
+      enabled: true,
+    });
+    expect(onRes.ok).toBe(true);
+
+    const [afterOn] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, issued.id));
+    expect(afterOn!.evaluateAsProject).toBe(true);
+
+    // Audit row written.
+    const audits = await t.db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "api_key.evaluate_as_project_set"));
+    expect(audits.some((a) => a.targetId === issued.id)).toBe(true);
+
+    // Toggling off works too.
+    await caller.apiKeys.setEvaluateAsProject({ id: issued.id, enabled: false });
+    const [afterOff] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, issued.id));
+    expect(afterOff!.evaluateAsProject).toBe(false);
+  });
+
+  it("setEvaluateAsProject: org_admin can toggle another member's key", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const member = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const memberCaller = await callerFor({ db: t.db, userId: member.id, redis });
+    const issued = await memberCaller.apiKeys.issueOwn({ name: "member-key" });
+
+    const adminCaller = await callerFor({ db: t.db, userId: admin.id, redis });
+    const res = await adminCaller.apiKeys.setEvaluateAsProject({
+      id: issued.id,
+      enabled: true,
+    });
+    expect(res.ok).toBe(true);
+    const [row] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, issued.id));
+    expect(row!.evaluateAsProject).toBe(true);
+  });
+
+  it("setEvaluateAsProject: non-owner non-admin → FORBIDDEN (key untouched)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const other = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const ownerCaller = await callerFor({ db: t.db, userId: owner.id, redis });
+    const issued = await ownerCaller.apiKeys.issueOwn({ name: "owners-key" });
+
+    const otherCaller = await callerFor({ db: t.db, userId: other.id, redis });
+    await expect(
+      otherCaller.apiKeys.setEvaluateAsProject({
+        id: issued.id,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const [row] = await t.db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, issued.id));
+    expect(row!.evaluateAsProject).toBe(false);
+  });
+
+  it("setEvaluateAsProject: unknown key id → NOT_FOUND", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: user.id, redis });
+    await expect(
+      caller.apiKeys.setEvaluateAsProject({
+        id: "00000000-0000-0000-0000-000000000000",
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("listOwn / listOrg surface evaluateAsProject toggle state", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const member = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const memberCaller = await callerFor({ db: t.db, userId: member.id, redis });
+    const issued = await memberCaller.apiKeys.issueOwn({ name: "surfaced-key" });
+    await memberCaller.apiKeys.setEvaluateAsProject({
+      id: issued.id,
+      enabled: true,
+    });
+
+    const own = await memberCaller.apiKeys.listOwn();
+    const ownRow = own.find((r) => r.id === issued.id)!;
+    expect(ownRow).toHaveProperty("evaluateAsProject");
+    expect(ownRow.evaluateAsProject).toBe(true);
+
+    const adminCaller = await callerFor({ db: t.db, userId: admin.id, redis });
+    const org_ = await adminCaller.apiKeys.listOrg({ orgId: org.id });
+    const orgRow = org_.find((r) => r.id === issued.id)!;
+    expect(orgRow.evaluateAsProject).toBe(true);
   });
 });
