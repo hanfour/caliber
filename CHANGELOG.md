@@ -5,6 +5,72 @@ All notable changes to Caliber are documented here. Format loosely follows
 releases are tagged `vX.Y.Z`; each tag publishes multi-arch images to
 `ghcr.io/hanfour/caliber-{api,web,gateway}`.
 
+## Unreleased — Per-project scoring (v0.5.x candidate)
+
+Score each opted-in api_key as a "project" with a full LLM rubric per
+`(user × key × period)`, coexisting with the existing per-person evaluation
+path. All new code is behind dark-launch flags — no behaviour change on
+existing deployments with the flags unset.
+
+### New features
+
+- **Per-project (per-api-key) scoring.** Operators can opt individual api_keys
+  into project evaluation via the management UI or the
+  `apiKeys.setEvaluateAsProject` mutation. Opted-in keys receive a full
+  rule-based + LLM deep-analysis report per daily cron cycle (coexists with
+  per-person reports — neither replaces the other).
+
+- **Per-user and per-org opt-in count caps (enforced at opt-in time):**
+  - `EVALUATOR_MAX_PROJECT_KEYS_PER_USER` (default `20`) — maximum opted-in
+    keys per user. The (N+1)th opt-in is rejected with a `BAD_REQUEST`.
+  - `MAX_PROJECT_KEYS_PER_ORG` (default `50`) — maximum opted-in keys across
+    all users in the org. Disable always succeeds; re-enabling an already
+    opted-in key is idempotent (not counted again).
+
+- **Prometheus observability for deep-analysis spend.** The
+  `gwEvalLlmCalledTotal` and `gwEvalLlmCostUsd` metrics now carry a `grain`
+  label (`person` | `key`) so per-person vs per-key LLM spend is separable.
+  The `skipped_budget` result value on `gwEvalLlmCalledTotal` indicates budget
+  halts. These metrics are now correctly wired from the gateway metrics
+  registry into the evaluator worker.
+
+### New environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ENABLE_PROJECT_EVALUATION` | `false` | Dark-launch gate for the per-key evaluation cron fan-out. Flip to `true` to activate. |
+| `EVALUATOR_MAX_PROJECT_KEYS_PER_USER` | `20` | Per-user opt-in limit (enforced at toggle time). |
+| `MAX_PROJECT_KEYS_PER_ORG` | `50` | Per-org opt-in limit (enforced at toggle time). |
+| `EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS` | `true` | Whether the org monthly budget halts deep-analysis LLM calls. Set to `false` to disable enforcement (ledger writes remain). |
+
+### One-time behavior change for existing evaluator deployments
+
+> **Action required for operators already running `ENABLE_EVALUATOR=true`
+> with an org monthly budget configured.**
+
+Prior to this release, `runLlm.ts` (deep-analysis LLM calls) participated in
+**neither** budget enforcement **nor** the `llm_usage_events` ledger. The
+per-person deep-analysis spend was **invisible** to `getMonthSpend` and
+**unhaltable**. This release closes the gap:
+
+1. **Ledger write (unconditional):** every successful deep-analysis call now
+   writes one `llm_usage_events` row (`event_type=deep_analysis`), which
+   raises `getMonthSpend`. This means near-budget orgs may reach their budget
+   limit sooner than before.
+
+2. **Enforcement (default on):** before each deep-analysis call, a halt-state
+   check fires. If the org is already at or over budget, the LLM step is
+   skipped and evaluation falls back to rule-based scoring. The
+   `gwEvalLlmCalledTotal{result=skipped_budget}` metric tracks these skips.
+
+**Kill-switch:** set `EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS=false` on the
+gateway container to disable the pre-call halt check while keeping honest
+ledger accounting. Use this if you see unexpected evaluation halts after
+upgrading. Restore to `true` (or remove the variable) once the budget is
+reviewed.
+
+---
+
 ## Unreleased — pending v0.4.3
 
 ### Bug fixes (gateway)

@@ -625,6 +625,12 @@ async function wireEvaluatorPipeline(
       }
     : undefined;
 
+  // PR7: wire app.gwMetrics so the evaluator worker emits Prometheus counters
+  // (gwEvalLlmCalledTotal{grain,result}, gwEvalLlmCostUsd{grain}, etc.).
+  // Before this line the worker ran with metrics:undefined — counters never
+  // incremented in production. EvaluationMetrics is structurally compatible
+  // with GatewayMetrics (all fields are optional, GatewayMetrics provides them
+  // all), so no cast is required.
   const worker = createEvaluatorWorker({
     connection: bullmqRedis,
     db: app.db,
@@ -632,6 +638,7 @@ async function wireEvaluatorPipeline(
     masterKeyHex: credentialEncryptionKey,
     gatewayBaseUrl: env.GATEWAY_LOCAL_BASE_URL,
     onBudgetEvent,
+    metrics: app.gwMetrics,
   });
 
   app.decorate("evaluatorQueue", queue);
