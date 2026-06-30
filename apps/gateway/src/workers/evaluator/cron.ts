@@ -20,9 +20,15 @@
  *     if Redis/BullMQ is flapping.
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, exists, gte, isNull, lt, sql } from "drizzle-orm";
 import type { Database } from "@caliber/db";
-import { organizations, organizationMembers, users } from "@caliber/db";
+import {
+  apiKeys,
+  organizations,
+  organizationMembers,
+  usageLogs,
+  users,
+} from "@caliber/db";
 import {
   enqueueEvaluator,
   type QueueLike as EvaluatorQueueLike,
@@ -37,22 +43,54 @@ export interface EnqueueDailyResult {
   membersEnumerated: number;
   jobsEnqueued: number;
   enqueueFailures: number;
+  /**
+   * PR4 — per-key pass counters (all zero when enableProjectEvaluation=false).
+   *
+   * keyCandidates  – opted-in, non-revoked keys with traffic in the window
+   *                  (before the per-user cap is applied).
+   * keyJobsEnqueued – successfully enqueued per-key evaluator jobs.
+   * keyJobsCapped   – keys skipped because the per-user cap was reached.
+   */
+  keyCandidates: number;
+  keyJobsEnqueued: number;
+  keyJobsCapped: number;
 }
 
 export interface EnqueueDailyInput {
   db: Database;
   queue: EvaluatorQueueLike;
   now?: () => Date; // Override for tests
+  /**
+   * PR4 dark-launch flag.  When true, the second (per-key) cron pass runs
+   * after the existing per-person pass.  Default: false.
+   */
+  enableProjectEvaluation?: boolean;
+  /**
+   * PR4 per-user cap: maximum number of opted-in api_keys per user per org
+   * that may be enqueued in a single cron tick.  Over-cap keys are counted
+   * in `keyJobsCapped`.  Default: 20.
+   */
+  maxProjectKeysPerUser?: number;
 }
 
 /**
  * Idempotent — runs against today's data; job dedup via jobId means re-runs
  * within the same UTC day are no-ops.
+ *
+ * PR4: a second, additive per-key pass runs when `enableProjectEvaluation`
+ * is true, enqueuing per-(user×key) jobs for opted-in api_keys that had
+ * traffic in the window.  The per-person pass is 100% unchanged.
  */
 export async function enqueueDailyEvaluatorJobs(
   input: EnqueueDailyInput,
 ): Promise<EnqueueDailyResult> {
-  const { db, queue, now = () => new Date() } = input;
+  const {
+    db,
+    queue,
+    now = () => new Date(),
+    enableProjectEvaluation = false,
+    maxProjectKeysPerUser = 20,
+  } = input;
   const currentUtc = now();
   const today00Utc = new Date(
     Date.UTC(
@@ -81,6 +119,7 @@ export async function enqueueDailyEvaluatorJobs(
   let jobsEnqueued = 0;
   let enqueueFailures = 0;
 
+  // ── Per-person pass (unchanged from pre-PR4) ─────────────────────────────
   for (const org of orgs) {
     const members = await db
       .select({ userId: organizationMembers.userId })
@@ -107,11 +146,87 @@ export async function enqueueDailyEvaluatorJobs(
     }
   }
 
+  // ── Per-key pass (PR4 dark-launch — ENABLE_PROJECT_EVALUATION) ───────────
+  let keyCandidates = 0;
+  let keyJobsEnqueued = 0;
+  let keyJobsCapped = 0;
+
+  if (enableProjectEvaluation) {
+    for (const org of orgs) {
+      // Spec §4 query: opted-in, non-revoked keys that had traffic in the window.
+      // The EXISTS(...) subquery is the cost valve: idle/revoked/non-opted
+      // keys produce zero enqueue calls.
+      const keyRows = await db
+        .selectDistinct({
+          id: apiKeys.id,
+          userId: apiKeys.userId,
+          orgId: apiKeys.orgId,
+          teamId: apiKeys.teamId,
+          name: apiKeys.name,
+        })
+        .from(apiKeys)
+        .where(
+          and(
+            eq(apiKeys.orgId, org.id),
+            eq(apiKeys.evaluateAsProject, true),
+            isNull(apiKeys.revokedAt),
+            exists(
+              db
+                .select({ one: sql<number>`1` })
+                .from(usageLogs)
+                .where(
+                  and(
+                    eq(usageLogs.apiKeyId, apiKeys.id),
+                    gte(usageLogs.createdAt, yesterday00Utc),
+                    lt(usageLogs.createdAt, today00Utc),
+                  ),
+                ),
+            ),
+          ),
+        );
+
+      // Group by userId so the per-user cap applies within each org.
+      const keysByUser = new Map<string, typeof keyRows>();
+      for (const keyRow of keyRows) {
+        keyCandidates += 1;
+        const existing = keysByUser.get(keyRow.userId) ?? [];
+        keysByUser.set(keyRow.userId, [...existing, keyRow]);
+      }
+
+      for (const [, userKeys] of keysByUser) {
+        const cappedKeys = userKeys.slice(0, maxProjectKeysPerUser);
+        keyJobsCapped += userKeys.length - cappedKeys.length;
+
+        for (const keyRow of cappedKeys) {
+          try {
+            await enqueueEvaluator(queue, {
+              orgId: keyRow.orgId,
+              userId: keyRow.userId,
+              periodStart: yesterday00Utc.toISOString(),
+              periodEnd: today00Utc.toISOString(),
+              periodType: "daily",
+              triggeredBy: "cron",
+              triggeredByUser: null,
+              apiKeyId: keyRow.id,
+              keyNameSnapshot: keyRow.name,
+            });
+            keyJobsEnqueued += 1;
+          } catch {
+            enqueueFailures += 1;
+          }
+        }
+      }
+    }
+  }
+
   return {
     orgsConsidered: orgs.length,
     membersEnumerated,
     jobsEnqueued,
     enqueueFailures,
+    keyCandidates,
+    keyJobsEnqueued,
+    keyJobsCapped,
   };
 }
 
@@ -125,6 +240,10 @@ export interface StartEvaluatorCronOptions {
     error: (obj: unknown, msg?: string) => void;
   };
   intervalMs?: number;
+  /** PR4: pass-through to `enqueueDailyEvaluatorJobs`. Default: false. */
+  enableProjectEvaluation?: boolean;
+  /** PR4: pass-through to `enqueueDailyEvaluatorJobs`. Default: 20. */
+  maxProjectKeysPerUser?: number;
 }
 
 export interface EvaluatorCronHandle {
@@ -145,6 +264,8 @@ export function startEvaluatorCron(
       const result = await enqueueDailyEvaluatorJobs({
         db: opts.db,
         queue: opts.queue,
+        enableProjectEvaluation: opts.enableProjectEvaluation,
+        maxProjectKeysPerUser: opts.maxProjectKeysPerUser,
       });
       opts.logger.info(result, "evaluator daily cron tick completed");
     } catch (err) {

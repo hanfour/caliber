@@ -59,25 +59,40 @@ const ISO_DATETIME = z.string().datetime();
  *     grain).  When absent, the per-person grain is used (byte-identical).
  *   - `keyNameSnapshot`: snapshot of `api_keys.name` at enqueue time.  Stored
  *     in `evaluation_reports_by_key.key_name_snapshot` so the report label
- *     survives future renames/revocations.  Required when `apiKeyId` is set;
- *     ignored otherwise.
+ *     survives future renames/revocations.  Required (non-empty) when
+ *     `apiKeyId` is set; ignored otherwise.  Enforced via `.refine()` so
+ *     the cron always supplies it and the worker never silently receives "".
  *
- * NOTE: jobId derivation (cron enumeration, 4-part format) is handled in PR4.
- * This PR only adds the payload fields so the worker can thread them through.
+ * PR4 adds:
+ *   - 4-part jobId derivation when `apiKeyId` is present (in `enqueueEvaluator`).
+ *   - Zod `.refine()` co-presence: `apiKeyId` set → `keyNameSnapshot` required
+ *     and non-empty.
  */
-export const EvaluatorJobPayload = z.object({
-  orgId: UUID,
-  userId: UUID,
-  periodStart: ISO_DATETIME,
-  periodEnd: ISO_DATETIME,
-  periodType: z.enum(["daily", "weekly", "monthly"]),
-  triggeredBy: z.enum(["cron", "admin_rerun", "manual"]),
-  triggeredByUser: UUID.nullable().default(null),
-  /** Per-key grain (PR3): api_key UUID to evaluate. Absent → per-person. */
-  apiKeyId: UUID.optional(),
-  /** Per-key grain (PR3): snapshot of the key name at enqueue time. */
-  keyNameSnapshot: z.string().optional(),
-});
+export const EvaluatorJobPayload = z
+  .object({
+    orgId: UUID,
+    userId: UUID,
+    periodStart: ISO_DATETIME,
+    periodEnd: ISO_DATETIME,
+    periodType: z.enum(["daily", "weekly", "monthly"]),
+    triggeredBy: z.enum(["cron", "admin_rerun", "manual"]),
+    triggeredByUser: UUID.nullable().default(null),
+    /** Per-key grain (PR3): api_key UUID to evaluate. Absent → per-person. */
+    apiKeyId: UUID.optional(),
+    /** Per-key grain (PR3+PR4): snapshot of the key name at enqueue time.
+     *  Required and non-empty when `apiKeyId` is set (enforced by refine). */
+    keyNameSnapshot: z.string().optional(),
+  })
+  .refine(
+    (d) =>
+      d.apiKeyId === undefined ||
+      (typeof d.keyNameSnapshot === "string" && d.keyNameSnapshot.length > 0),
+    {
+      message:
+        "keyNameSnapshot must be a non-empty string when apiKeyId is set",
+      path: ["keyNameSnapshot"],
+    },
+  );
 
 export type EvaluatorJobPayload = z.infer<typeof EvaluatorJobPayload>;
 
@@ -170,16 +185,28 @@ export function createEvaluatorQueue(
 // ── Enqueue wrapper ──────────────────────────────────────────────────────────
 
 export interface EnqueueEvaluatorResult {
-  /** The BullMQ job ID — format `${userId}:${periodStart}:${periodType}`. */
+  /**
+   * The BullMQ job ID.
+   *
+   * - Per-person (apiKeyId absent): `${userId}:${periodStart}:${periodType}`
+   *   (3-part — byte-identical to the pre-PR4 format).
+   * - Per-key (apiKeyId present): `${userId}:${apiKeyId}:${periodStart}:${periodType}`
+   *   (4-part — can never collide with the 3-part format because a UUID never
+   *   starts with a year-digit sequence that a periodStart/ISO-datetime would,
+   *   and the total separator count differs by exactly one colon).
+   */
   jobId: string;
 }
 
 /**
  * Validate `payload` and enqueue it onto the BullMQ queue.
  *
- * - jobId is set to `${userId}:${periodStart}:${periodType}` so duplicate
- *   enqueues for the same user + period + type are no-ops (BullMQ rejects
- *   duplicate job IDs and returns the existing job).
+ * - jobId collision safety: when `apiKeyId` is absent the 3-part format
+ *   `${userId}:${periodStart}:${periodType}` is used (byte-identical to the
+ *   pre-PR4 format — no dedup regression on deploy). When `apiKeyId` is
+ *   present the 4-part format `${userId}:${apiKeyId}:${periodStart}:${periodType}`
+ *   is used. The two formats can never collide (a UUID never starts with a
+ *   year-digit ISO-datetime prefix, and the separator-colon count differs).
  * - On Zod validation failure this throws — treat as a programmer error
  *   (the caller assembled a bad payload), not a transient condition.
  * - On Redis-side failure (`queue.add` rejects), the error propagates.
@@ -191,7 +218,9 @@ export async function enqueueEvaluator(
   payload: unknown,
 ): Promise<EnqueueEvaluatorResult> {
   const validated = EvaluatorJobPayload.parse(payload);
-  const jobId = `${validated.userId}:${validated.periodStart}:${validated.periodType}`;
+  const jobId = validated.apiKeyId
+    ? `${validated.userId}:${validated.apiKeyId}:${validated.periodStart}:${validated.periodType}`
+    : `${validated.userId}:${validated.periodStart}:${validated.periodType}`;
 
   await queue.add(EVALUATOR_JOB_NAME, validated, { jobId });
 
