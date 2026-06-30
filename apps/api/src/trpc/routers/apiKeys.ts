@@ -6,6 +6,7 @@ import { apiKeys, organizationMembers } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import { generateApiKey, hashApiKey } from "@caliber/gateway-core";
 import { can } from "@caliber/auth";
+import { formatValidationKey } from "@caliber/i18n-validation";
 import {
   protectedProcedure,
   permissionProcedure,
@@ -547,7 +548,10 @@ export const apiKeysRouter = router({
         if ((userCountRow?.n ?? 0) >= maxPerUser) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Per-user project evaluation limit reached (EVALUATOR_MAX_PROJECT_KEYS_PER_USER=${maxPerUser}). Disable another key first.`,
+            message: formatValidationKey(
+              "validation.custom.apiKeys.perUserProjectEvalLimitReached",
+              { max: maxPerUser },
+            ),
           });
         }
 
@@ -566,7 +570,10 @@ export const apiKeysRouter = router({
         if ((orgCountRow?.n ?? 0) >= maxPerOrg) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Per-org project evaluation limit reached (MAX_PROJECT_KEYS_PER_ORG=${maxPerOrg}). Disable another key first.`,
+            message: formatValidationKey(
+              "validation.custom.apiKeys.perOrgProjectEvalLimitReached",
+              { max: maxPerOrg },
+            ),
           });
         }
       }

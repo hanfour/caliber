@@ -82,6 +82,10 @@
       "accountGroups": {
         "accountOrgMismatch": "アカウントはこのグループの組織に属していません",
         "accountPlatformMismatch": "アカウントのプラットフォーム「{accountPlatform}」はグループのプラットフォーム「{groupPlatform}」と一致しません"
+      },
+      "apiKeys": {
+        "perUserProjectEvalLimitReached": "ユーザーごとのプロジェクト評価上限に達しました（{max}）。先に別のキーを無効にしてください。",
+        "perOrgProjectEvalLimitReached": "組織ごとのプロジェクト評価上限に達しました（{max}）。先に別のキーを無効にしてください。"
       }
     }
   }
