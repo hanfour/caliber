@@ -68,6 +68,38 @@ export const serverEnvSchema = z
      * org levels.
      */
     ENABLE_FACET_EXTRACTION: booleanUnion.default(false),
+    /**
+     * Per-project scoring (PR2). Default-ON kill-switch for the deep-analysis
+     * budget *enforcement* (the pre-call halt gate). When `true` (default), an
+     * over-budget org skips the deep-analysis LLM call and falls back to
+     * rule-based scoring. When `false`, enforcement is disabled — the LLM is
+     * always attempted — but the ledger row is still written UNCONDITIONALLY
+     * for honest accounting. This exists so operators of near-budget orgs can
+     * disable surprise halts without losing cost visibility.
+     */
+    EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS: booleanUnion.default(true),
+    /**
+     * Per-project scoring (PR2, consumed in later PRs). Dark-launch switch for
+     * the per-(user×api_key) "score as project" evaluation fan-out. Off by
+     * default; flipping it on lets the cron enumerate opted-in keys.
+     */
+    ENABLE_PROJECT_EVALUATION: booleanUnion.default(false),
+    /**
+     * Per-project scoring (PR2, consumed in later PRs). Hard per-user cap on
+     * the number of api_keys that may be opted into project evaluation.
+     * Enforced at opt-in time.
+     */
+    EVALUATOR_MAX_PROJECT_KEYS_PER_USER: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(20),
+    ),
+    /**
+     * Per-project scoring (PR2, consumed in later PRs). Hard per-org cap on the
+     * number of api_keys that may be opted into project evaluation across all
+     * members. Enforced at opt-in time.
+     */
+    MAX_PROJECT_KEYS_PER_ORG: emptyAsUndefined(
+      z.coerce.number().int().min(0).default(50),
+    ),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     API_INTERNAL_URL: z.string().url().optional(),
     ENABLE_TEST_SEED: booleanUnion.default(false),

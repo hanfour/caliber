@@ -31,6 +31,46 @@ describe("parseServerEnv", () => {
     expect(on.ENABLE_FACET_EXTRACTION).toBe(true);
   });
 
+  // ── Per-project scoring flags (PR2) ─────────────────────────────────────────
+  it("per-project scoring flags carry the documented defaults", () => {
+    const env = parseServerEnv(valid);
+    expect(env.EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS).toBe(true);
+    expect(env.ENABLE_PROJECT_EVALUATION).toBe(false);
+    expect(env.EVALUATOR_MAX_PROJECT_KEYS_PER_USER).toBe(20);
+    expect(env.MAX_PROJECT_KEYS_PER_ORG).toBe(50);
+  });
+
+  it("EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS can be disabled via string 'false'", () => {
+    const env = parseServerEnv({
+      ...valid,
+      EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS: "false",
+    });
+    expect(env.EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS).toBe(false);
+  });
+
+  it("ENABLE_PROJECT_EVALUATION accepts string 'true'", () => {
+    const env = parseServerEnv({ ...valid, ENABLE_PROJECT_EVALUATION: "true" });
+    expect(env.ENABLE_PROJECT_EVALUATION).toBe(true);
+  });
+
+  it("project-key caps coerce from strings and fall back on empty string", () => {
+    const set = parseServerEnv({
+      ...valid,
+      EVALUATOR_MAX_PROJECT_KEYS_PER_USER: "5",
+      MAX_PROJECT_KEYS_PER_ORG: "11",
+    });
+    expect(set.EVALUATOR_MAX_PROJECT_KEYS_PER_USER).toBe(5);
+    expect(set.MAX_PROJECT_KEYS_PER_ORG).toBe(11);
+
+    const empty = parseServerEnv({
+      ...valid,
+      EVALUATOR_MAX_PROJECT_KEYS_PER_USER: "",
+      MAX_PROJECT_KEYS_PER_ORG: "",
+    });
+    expect(empty.EVALUATOR_MAX_PROJECT_KEYS_PER_USER).toBe(20);
+    expect(empty.MAX_PROJECT_KEYS_PER_ORG).toBe(50);
+  });
+
   it("rejects AUTH_SECRET shorter than 32 chars", () => {
     expect(() => parseServerEnv({ ...valid, AUTH_SECRET: "short" })).toThrow();
   });
