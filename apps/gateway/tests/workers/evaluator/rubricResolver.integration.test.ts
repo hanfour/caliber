@@ -5,13 +5,19 @@
  * org custom → platform-default, locale-aware fallback, caching, and soft-delete
  * handling.
  *
- * Test cases:
+ * Test cases (existing — per-person byte-identical):
  *   1. Org with custom rubric → returns custom
  *   2. Org without custom, locale "en" → returns platform-default en
  *   3. Org without custom, locale "zh-Hant" → returns platform-default zh-Hant
  *   4. Org with missing (soft-deleted) custom → falls back to platform-default
  *   5. Cache hit within TTL → no 2nd DB call
  *   6. Cache expiry after TTL → DB re-queried
+ *
+ * New test cases (per-key precedence):
+ *   b. Key rubric present → source:"key" returned
+ *   c. Soft-deleted key rubric → falls through to org rubric
+ *   d. Key rubric with mismatched orgId → ignored (defense-in-depth)
+ *   e. Per-key and per-person cache keys don't collide
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -25,7 +31,7 @@ import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { eq } from "drizzle-orm";
-import { organizations, rubrics, type Database } from "@caliber/db";
+import { organizations, rubrics, users, apiKeys, type Database } from "@caliber/db";
 import { rubricSchema, type Rubric } from "@caliber/evaluator";
 import {
   createRubricResolver,
@@ -137,6 +143,22 @@ const CUSTOM_RUBRIC: Rubric = {
   ],
 };
 
+const KEY_RUBRIC: Rubric = {
+  name: "Key Custom Rubric",
+  version: "3.0.0",
+  locale: "en",
+  sections: [
+    {
+      id: "quality",
+      name: "Key Quality",
+      weight: "100%",
+      standard: { score: 100, label: "Standard", criteria: ["key criteria"] },
+      superior: { score: 120, label: "Superior", criteria: ["superior key"] },
+      signals: [{ type: "cache_read_ratio", id: "cr", gte: 0.5 }],
+    },
+  ],
+};
+
 // ── Container + shared fixtures ──────────────────────────────────────────────
 
 let pgContainer: StartedPostgreSqlContainer;
@@ -152,6 +174,13 @@ let deletedRubricId: string;
 let platformDefaultEnId: string;
 let platformDefaultZhHantId: string;
 let platformDefaultJaId: string;
+
+// Additional fixtures for per-key precedence tests
+let testUserId: string;
+let apiKeyForTestsId: string;       // belongs to orgWithoutCustomRubricId; has a live key rubric
+let apiKeyForFallthroughId: string; // belongs to orgWithCustomRubricId; has a soft-deleted key rubric
+let keyRubricId: string;            // live key rubric for apiKeyForTestsId
+let keyRubricDeletedId: string;     // soft-deleted key rubric for apiKeyForFallthroughId
 
 beforeAll(async () => {
   pgContainer = await new PostgreSqlContainer("postgres:16-alpine").start();
@@ -259,6 +288,70 @@ beforeAll(async () => {
     })
     .returning();
   orgWithDeletedCustomRubricId = org3!.id;
+
+  // ── Per-key precedence fixtures ────────────────────────────────────────────
+
+  // Seed a user (required FK for api_keys)
+  const [user] = await db
+    .insert(users)
+    .values({ email: "test-resolver@example.com" })
+    .returning();
+  testUserId = user!.id;
+
+  // api_key belonging to orgWithoutCustomRubricId → will have a live key rubric
+  const [key1] = await db
+    .insert(apiKeys)
+    .values({
+      userId: testUserId,
+      orgId: orgWithoutCustomRubricId,
+      keyHash: "test-resolver-key-hash-1",
+      keyPrefix: "trk1-",
+      name: "Test Resolver Key 1",
+    })
+    .returning();
+  apiKeyForTestsId = key1!.id;
+
+  // api_key belonging to orgWithCustomRubricId → will have a soft-deleted key rubric
+  const [key2] = await db
+    .insert(apiKeys)
+    .values({
+      userId: testUserId,
+      orgId: orgWithCustomRubricId,
+      keyHash: "test-resolver-key-hash-2",
+      keyPrefix: "trk2-",
+      name: "Test Resolver Key 2",
+    })
+    .returning();
+  apiKeyForFallthroughId = key2!.id;
+
+  // Live key rubric for key1 (orgId = orgWithoutCustomRubricId)
+  const [keyRubric] = await db
+    .insert(rubrics)
+    .values({
+      orgId: orgWithoutCustomRubricId,
+      apiKeyId: apiKeyForTestsId,
+      name: KEY_RUBRIC.name,
+      version: KEY_RUBRIC.version,
+      definition: KEY_RUBRIC,
+      isDefault: false,
+    })
+    .returning();
+  keyRubricId = keyRubric!.id;
+
+  // Soft-deleted key rubric for key2 (orgId = orgWithCustomRubricId)
+  const [keyRubricDeleted] = await db
+    .insert(rubrics)
+    .values({
+      orgId: orgWithCustomRubricId,
+      apiKeyId: apiKeyForFallthroughId,
+      name: "Key Deleted Rubric",
+      version: "1.0.0",
+      definition: KEY_RUBRIC,
+      isDefault: false,
+      deletedAt: new Date(),
+    })
+    .returning();
+  keyRubricDeletedId = keyRubricDeleted!.id;
 });
 
 afterAll(async () => {
@@ -510,5 +603,104 @@ describe("rubricResolver", () => {
         isDefault: true,
       });
     }
+  });
+});
+
+// ── Per-key precedence tests ─────────────────────────────────────────────────
+
+describe("rubricResolver — per-key precedence", () => {
+  it("(b) returns key rubric with source:'key' when apiKeyId is set and a live key rubric exists", async () => {
+    const resolver = createRubricResolver();
+    const resolved = await resolver.resolve({
+      db,
+      orgId: orgWithoutCustomRubricId,
+      apiKeyId: apiKeyForTestsId,
+    });
+
+    expect(resolved.source).toBe("key");
+    expect(resolved.fromOrgCustom).toBe(false);
+    expect(resolved.rubricId).toBe(keyRubricId);
+    expect(resolved.rubricVersion).toBe(KEY_RUBRIC.version);
+    expect(resolved.rubric.name).toBe(KEY_RUBRIC.name);
+  });
+
+  it("(c) soft-deleted key rubric falls through to org custom rubric (source:'org')", async () => {
+    const resolver = createRubricResolver();
+    const resolved = await resolver.resolve({
+      db,
+      orgId: orgWithCustomRubricId,
+      apiKeyId: apiKeyForFallthroughId,
+    });
+
+    // soft-deleted key rubric → miss → org branch (orgWithCustomRubricId has customRubricId)
+    expect(resolved.source).toBe("org");
+    expect(resolved.fromOrgCustom).toBe(true);
+    expect(resolved.rubricId).toBe(customRubricId);
+  });
+
+  it("(d) key rubric with mismatched orgId is ignored (defense-in-depth falls through)", async () => {
+    const resolver = createRubricResolver();
+    // apiKeyForTestsId belongs to orgWithoutCustomRubricId.
+    // Its key rubric has orgId = orgWithoutCustomRubricId.
+    // Resolving with orgWithCustomRubricId → WHERE api_key_id AND org_id=orgWithCustom won't match.
+    // Falls through to org branch of orgWithCustomRubricId → finds customRubricId.
+    const resolved = await resolver.resolve({
+      db,
+      orgId: orgWithCustomRubricId,
+      apiKeyId: apiKeyForTestsId,
+    });
+
+    expect(resolved.source).toBe("org");
+    expect(resolved.fromOrgCustom).toBe(true);
+    expect(resolved.rubricId).toBe(customRubricId);
+  });
+
+  it("(e) per-key and per-person (no apiKeyId) cache entries don't collide", async () => {
+    let callCount = 0;
+    const originalSelect = db.select;
+    const dbSpy = {
+      ...db,
+      select: (...args: Parameters<typeof originalSelect>) => {
+        callCount++;
+        return originalSelect.apply(db, args);
+      },
+    } as typeof db;
+
+    const resolver = createRubricResolver();
+
+    // 1. Resolve with apiKeyId → cache key orgId::apiKeyId::locale
+    await resolver.resolve({
+      db: dbSpy,
+      orgId: orgWithoutCustomRubricId,
+      apiKeyId: apiKeyForTestsId,
+      locale: "en",
+    });
+    const callsAfterKey = callCount;
+
+    // 2. Resolve per-person (no apiKeyId) same org+locale → different cache key → hits DB again
+    await resolver.resolve({
+      db: dbSpy,
+      orgId: orgWithoutCustomRubricId,
+      locale: "en",
+    });
+    const callsAfterPerson = callCount;
+    expect(callsAfterPerson).toBeGreaterThan(callsAfterKey);
+
+    // 3. Resolve per-person again → cache hit → no additional DB calls
+    await resolver.resolve({
+      db: dbSpy,
+      orgId: orgWithoutCustomRubricId,
+      locale: "en",
+    });
+    expect(callCount).toBe(callsAfterPerson);
+
+    // 4. Resolve with apiKeyId again → also a cache hit → no additional DB calls
+    await resolver.resolve({
+      db: dbSpy,
+      orgId: orgWithoutCustomRubricId,
+      apiKeyId: apiKeyForTestsId,
+      locale: "en",
+    });
+    expect(callCount).toBe(callsAfterPerson);
   });
 });
