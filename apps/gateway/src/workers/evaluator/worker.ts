@@ -61,10 +61,11 @@ export function createEvaluatorWorker(
     async (job) => {
       const payload = EvaluatorJobPayload.parse(job.data);
 
-      // Resolve rubric: org custom → platform-default by locale
+      // Resolve rubric: key-scoped → org custom → platform-default by locale
       const resolved = await resolver.resolve({
         db: opts.db,
         orgId: payload.orgId,
+        apiKeyId: payload.apiKeyId, // undefined for per-person jobs → skips key branch → byte-identical
       });
 
       // Fetch org's llm_eval_enabled flag
