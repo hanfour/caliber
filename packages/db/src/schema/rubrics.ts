@@ -6,10 +6,13 @@ import {
   jsonb,
   timestamp,
   index,
+  uniqueIndex,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./org.js";
 import { users } from "./auth.js";
+import { apiKeys } from "./apiKeys.js";
 
 export const rubrics = pgTable(
   "rubrics",
@@ -33,6 +36,9 @@ export const rubrics = pgTable(
       .notNull()
       .defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    apiKeyId: uuid("api_key_id").references(() => apiKeys.id, {
+      onDelete: "cascade",
+    }),
   },
   (t) => ({
     orgIdx: index("rubrics_org_idx")
@@ -41,5 +47,12 @@ export const rubrics = pgTable(
     defaultIdx: index("rubrics_default_idx")
       .on(t.isDefault)
       .where(sql`${t.isDefault} = true`),
+    apiKeyUniq: uniqueIndex("rubrics_api_key_uniq")
+      .on(t.apiKeyId)
+      .where(sql`api_key_id IS NOT NULL AND deleted_at IS NULL`),
+    keyScopeChk: check(
+      "rubrics_key_scope_chk",
+      sql`api_key_id IS NULL OR (org_id IS NOT NULL AND is_default = false)`,
+    ),
   }),
 );
