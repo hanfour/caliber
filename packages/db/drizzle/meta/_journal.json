@@ -162,6 +162,13 @@
       "when": 1782786923000,
       "tag": "0022_llm_usage_events_dedup",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782890988850,
+      "tag": "0023_keen_energizer",
+      "breakpoints": true
     }
   ]
 }
