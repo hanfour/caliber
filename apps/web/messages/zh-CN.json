@@ -865,6 +865,7 @@
         "removeButton": "删除项目评分标准",
         "confirmRemove": "删除「{name}」的自定义评分标准？该密钥将回退使用组织或平台评分标准。",
         "savedToast": "项目评分标准已保存",
+        "saveFail": "项目评分标准保存失败",
         "removedToast": "项目评分标准已删除",
         "requiresOptInHint": "请先启用「计为项目评分」以创建自定义评分标准。",
         "customBadge": "自定义项目评分标准",

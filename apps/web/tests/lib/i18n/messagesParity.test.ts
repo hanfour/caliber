@@ -13,6 +13,7 @@ const PR6_KEYS = [
   "evaluator.rubrics.keyScope.removeButton",
   "evaluator.rubrics.keyScope.confirmRemove",
   "evaluator.rubrics.keyScope.savedToast",
+  "evaluator.rubrics.keyScope.saveFail",
   "evaluator.rubrics.keyScope.removedToast",
   "evaluator.rubrics.keyScope.requiresOptInHint",
   "evaluator.rubrics.keyScope.customBadge",

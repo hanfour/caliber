@@ -15,10 +15,11 @@ vi.mock("@/lib/trpc/client", () => ({
   },
 }));
 
-// Stub usePermissions — tests here don't exercise rubric authoring.
+// Stub usePermissions — can() is controllable per-test.
+const canFn = vi.fn();
 vi.mock("@/lib/usePermissions", () => ({
   usePermissions: () => ({
-    can: () => false,
+    can: canFn,
     perm: { userId: "user-1" },
     session: { coveredOrgs: ["org-1"] },
     isLoading: false,
@@ -53,6 +54,8 @@ const REVOKED_KEY = {
 describe("ProjectScoreSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: can() returns false so the rubric button is hidden unless overridden.
+    canFn.mockReturnValue(false);
     // Sensible defaults for the by-key queries (only used once a key is picked).
     latestQuery.mockReturnValue({ data: undefined, isLoading: false });
     rangeQuery.mockReturnValue({ data: [], isLoading: false });
@@ -152,6 +155,26 @@ describe("ProjectScoreSection", () => {
     expect(screen.getByRole("option", { name: "billing-service" })).toBeInTheDocument();
     // Revoked key shows its name with "(revoked)" appended.
     expect(screen.getByRole("option", { name: "old-key (revoked)" })).toBeInTheDocument();
+  });
+
+  it("does not show Edit project rubric button when can() returns false", () => {
+    // canFn defaults to false (set in beforeEach)
+    listProjectKeysQuery.mockReturnValue({ data: [KEY], isLoading: false, error: null });
+    render(<ProjectScoreSection />);
+    fireEvent.change(screen.getByLabelText("Select a project key…"), {
+      target: { value: KEY.id },
+    });
+    expect(screen.queryByRole("button", { name: /edit project rubric/i })).toBeNull();
+  });
+
+  it("shows Edit project rubric button when can() returns true", () => {
+    canFn.mockReturnValue(true);
+    listProjectKeysQuery.mockReturnValue({ data: [KEY], isLoading: false, error: null });
+    render(<ProjectScoreSection />);
+    fireEvent.change(screen.getByLabelText("Select a project key…"), {
+      target: { value: KEY.id },
+    });
+    expect(screen.getByRole("button", { name: /edit project rubric/i })).toBeInTheDocument();
   });
 
   it("shows the revoked notice and no rerun affordance when a revoked key is selected", () => {

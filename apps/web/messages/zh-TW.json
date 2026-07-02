@@ -865,6 +865,7 @@
         "removeButton": "移除專案評分標準",
         "confirmRemove": "移除「{name}」的自訂評分標準？此金鑰將退回使用組織或平台評分標準。",
         "savedToast": "專案評分標準已儲存",
+        "saveFail": "專案評分標準儲存失敗",
         "removedToast": "專案評分標準已移除",
         "requiresOptInHint": "請先啟用「計為專案評分」以建立自訂評分標準。",
         "customBadge": "自訂專案評分標準",

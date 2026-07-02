@@ -208,8 +208,9 @@ export function ProjectScoreSection() {
   const tCommon = useTranslations("common");
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
   const [showRubricEditor, setShowRubricEditor] = useState(false);
-  const { session } = usePermissions();
+  const { can, perm, session } = usePermissions();
   const primaryOrgId = session?.coveredOrgs[0] ?? "";
+  const currentUserId = perm?.userId ?? "";
 
   // Own scope (no orgId) — the caller's opted-in keys (active + revoked-with-history).
   const {
@@ -281,11 +282,12 @@ export function ProjectScoreSection() {
               </option>
             ))}
           </select>
-          {/* Customize rubric — only for active (non-revoked) keys.
+          {/* Customize rubric — only for active (non-revoked) keys the caller
+              is permitted to author a rubric for. Permission mirrors ApiKeyList.
               NOTE: source badge intentionally omitted — the `source` field
               (key | org | platform) is not stored in the DB and is not
               returned by getOwnByKeyLatest. */}
-          {selectedKey && !isRevoked && (
+          {selectedKey && !isRevoked && can({ type: "rubric.author_key", apiKeyId: selectedKey.id, orgId: primaryOrgId, ownerUserId: currentUserId }) && (
             <div className="flex justify-end">
               <Button
                 variant="outline"

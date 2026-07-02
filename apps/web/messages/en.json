@@ -865,6 +865,7 @@
         "removeButton": "Remove project rubric",
         "confirmRemove": "Remove the custom rubric for \"{name}\"? The key will fall back to the org or platform rubric.",
         "savedToast": "Project rubric saved",
+        "saveFail": "Failed to save project rubric",
         "removedToast": "Project rubric removed",
         "requiresOptInHint": "Enable \"Score as project\" first to author a custom rubric.",
         "customBadge": "Custom project rubric",

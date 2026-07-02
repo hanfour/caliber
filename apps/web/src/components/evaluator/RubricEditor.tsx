@@ -200,7 +200,7 @@ export function RubricEditor({
       if (code === "FORBIDDEN") {
         toast.error(tCommon("insufficientPermission"));
       } else {
-        toast.error(e.message || tKeyScope("savedToast"));
+        toast.error(e.message || tKeyScope("saveFail"));
       }
     },
   });
