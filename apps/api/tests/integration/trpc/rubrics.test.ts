@@ -1089,4 +1089,162 @@ describe("key rubric procedures", () => {
     expect(clearedLog?.actorUserId).toBe(owner.id);
     expect(clearedLog?.targetType).toBe("api_key");
   });
+
+  // ── spec §6: deleteForKey allowed on a revoked key (cleanup path) ────────────
+
+  it("deleteForKey on a revoked key by owner → succeeds (spec §6)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+
+    // Seed an active key rubric, then revoke the key directly in DB.
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: owner.id,
+    });
+    await t.db
+      .update(apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(eq(apiKeys.id, keyId));
+
+    // deleteForKey must succeed even though the key is revoked
+    const result = await caller.rubrics.deleteForKey({ apiKeyId: keyId });
+    expect(result.success).toBe(true);
+
+    // Verify soft-delete via direct DB read (getForKey returns NOT_FOUND on revoked key)
+    const [row] = await t.db
+      .select({ deletedAt: rubrics.deletedAt })
+      .from(rubrics)
+      .where(eq(rubrics.id, keyRubric.id));
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("deleteForKey on a revoked key by org_admin → succeeds (spec §6)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const adminCaller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: owner.id,
+    });
+    await t.db
+      .update(apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(eq(apiKeys.id, keyId));
+
+    const result = await adminCaller.rubrics.deleteForKey({ apiKeyId: keyId });
+    expect(result.success).toBe(true);
+
+    const [row] = await t.db
+      .select({ deletedAt: rubrics.deletedAt })
+      .from(rubrics)
+      .where(eq(rubrics.id, keyRubric.id));
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("deleteForKey on a revoked key by non-owner peer → NOT_FOUND (anti-enum unchanged)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const peer = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const peerCaller = await callerFor({ db: t.db, userId: peer.id });
+
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+    await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: owner.id,
+    });
+    await t.db
+      .update(apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(eq(apiKeys.id, keyId));
+
+    // Unauthorized caller must still get NOT_FOUND even on a revoked key
+    await expect(
+      peerCaller.rubrics.deleteForKey({ apiKeyId: keyId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // ── Regression: read/author on a revoked key still → NOT_FOUND ──────────────
+
+  it("upsertForKey on a revoked key → NOT_FOUND (regression)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const revokedKeyId = await seedApiKey(t.db, {
+      userId: owner.id,
+      orgId: org.id,
+      revoked: true,
+    });
+
+    await expect(
+      caller.rubrics.upsertForKey({
+        apiKeyId: revokedKeyId,
+        name: "Revoked Key Rubric",
+        version: "1.0.0",
+        definition: minimalDefinition(),
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("getForKey on a revoked key → NOT_FOUND (regression)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const revokedKeyId = await seedApiKey(t.db, {
+      userId: owner.id,
+      orgId: org.id,
+      revoked: true,
+    });
+    await seedKeyRubric(t.db, {
+      apiKeyId: revokedKeyId,
+      orgId: org.id,
+      createdBy: owner.id,
+    });
+
+    await expect(
+      caller.rubrics.getForKey({ apiKeyId: revokedKeyId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 });
