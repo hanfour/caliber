@@ -499,7 +499,8 @@
       "disabledToast": "Project scoring disabled",
       "errorToast": "Failed to update project scoring",
       "helperText": "LLM evaluation cost counts against the org's monthly budget.",
-      "ariaLabel": "Toggle project scoring for \"{name}\""
+      "ariaLabel": "Toggle project scoring for \"{name}\"",
+      "editRubric": "Edit project rubric"
     }
   },
   "memberApiKeys": {
@@ -857,6 +858,18 @@
       "actionsAriaLabel": "Actions for {name}",
       "dryRun7": "Dry run (last 7 days)",
       "setAsActive": "Set as active",
+      "keyScope": {
+        "title": "Project rubric",
+        "description": "Define a custom rubric for this project key. When set, this rubric takes precedence over the org and platform rubric for per-key evaluations.",
+        "editButton": "Edit project rubric",
+        "removeButton": "Remove project rubric",
+        "confirmRemove": "Remove the custom rubric for \"{name}\"? The key will fall back to the org or platform rubric.",
+        "savedToast": "Project rubric saved",
+        "removedToast": "Project rubric removed",
+        "requiresOptInHint": "Enable \"Score as project\" first to author a custom rubric.",
+        "customBadge": "Custom project rubric",
+        "usesFallbackHint": "Using org or platform rubric"
+      },
       "editor": {
         "newTitle": "New rubric",
         "editTitle": "Edit rubric",

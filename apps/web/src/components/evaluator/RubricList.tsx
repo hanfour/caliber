@@ -253,7 +253,7 @@ export function RubricList({ orgId }: RubricListProps) {
 
         {(creating || editingRow) && (
           <RubricEditor
-            orgId={orgId}
+            target={{ scope: "org", orgId }}
             editingRow={editingRow}
             onSuccess={handleEditorSuccess}
             onCancel={handleEditorClose}
@@ -336,7 +336,7 @@ export function RubricList({ orgId }: RubricListProps) {
 
       {(creating || editingRow) && (
         <RubricEditor
-          orgId={orgId}
+          target={{ scope: "org", orgId }}
           editingRow={editingRow}
           onSuccess={handleEditorSuccess}
           onCancel={handleEditorClose}

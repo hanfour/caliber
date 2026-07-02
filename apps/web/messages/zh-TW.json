@@ -499,7 +499,8 @@
       "disabledToast": "已停用專案計分",
       "errorToast": "更新專案計分設定失敗",
       "helperText": "LLM 評估費用計入組織每月預算。",
-      "ariaLabel": "切換「{name}」的專案計分"
+      "ariaLabel": "切換「{name}」的專案計分",
+      "editRubric": "編輯專案評分標準"
     }
   },
   "memberApiKeys": {
@@ -857,6 +858,18 @@
       "actionsAriaLabel": "{name} 的操作",
       "dryRun7": "試跑(最近 7 天)",
       "setAsActive": "設為啟用",
+      "keyScope": {
+        "title": "專案評分標準",
+        "description": "為此專案金鑰定義自訂評分標準。設定後，此評分標準在逐金鑰評估時優先於組織和平台評分標準。",
+        "editButton": "編輯專案評分標準",
+        "removeButton": "移除專案評分標準",
+        "confirmRemove": "移除「{name}」的自訂評分標準？此金鑰將退回使用組織或平台評分標準。",
+        "savedToast": "專案評分標準已儲存",
+        "removedToast": "專案評分標準已移除",
+        "requiresOptInHint": "請先啟用「計為專案評分」以建立自訂評分標準。",
+        "customBadge": "自訂專案評分標準",
+        "usesFallbackHint": "使用組織或平台評分標準"
+      },
       "editor": {
         "newTitle": "新增評核標準",
         "editTitle": "編輯評核標準",

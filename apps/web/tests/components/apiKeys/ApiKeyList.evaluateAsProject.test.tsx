@@ -23,6 +23,21 @@ vi.mock("@/components/apiKeys/ApiKeyCreateDialog", () => ({
   ApiKeyCreateDialog: () => null,
 }));
 
+// Stub RubricEditor so we don't pull in its dependencies.
+vi.mock("@/components/evaluator/RubricEditor", () => ({
+  RubricEditor: () => null,
+}));
+
+// Stub usePermissions — tests here don't exercise rubric authoring.
+vi.mock("@/lib/usePermissions", () => ({
+  usePermissions: () => ({
+    can: () => false,
+    perm: { userId: "user-1" },
+    session: { coveredOrgs: ["org-1"] },
+    isLoading: false,
+  }),
+}));
+
 const listOwnQuery = vi.fn();
 const listOwnInvalidate = vi.fn();
 const setEvalMutate = vi.fn();
@@ -45,6 +60,9 @@ vi.mock("@/lib/trpc/client", () => ({
         },
       },
       revoke: { useMutation: () => ({ mutate: vi.fn() }) },
+    },
+    rubrics: {
+      deleteForKey: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
     },
   },
 }));

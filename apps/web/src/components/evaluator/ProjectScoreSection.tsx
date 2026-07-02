@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
+import { usePermissions } from "@/lib/usePermissions";
 import {
   Card,
   CardContent,
@@ -10,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { TrendChart } from "./TrendChart";
 import {
   scoreBadgeClass,
@@ -17,6 +19,7 @@ import {
 } from "./reportDetailShared";
 import type { SectionResult } from "./reportDetailShared";
 import type { ScorePoint } from "./TrendChart";
+import { RubricEditor } from "./RubricEditor";
 
 // ─── Per-key report renderer ──────────────────────────────────────────────────
 // Fetches the by-key endpoints and renders the SAME visual structure as the
@@ -201,8 +204,12 @@ function ProjectKeyReport({ apiKeyId, isRevoked }: ProjectKeyReportProps) {
 
 export function ProjectScoreSection() {
   const t = useTranslations("evaluator.projects");
+  const tKeyScope = useTranslations("evaluator.rubrics.keyScope");
   const tCommon = useTranslations("common");
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
+  const [showRubricEditor, setShowRubricEditor] = useState(false);
+  const { session } = usePermissions();
+  const primaryOrgId = session?.coveredOrgs[0] ?? "";
 
   // Own scope (no orgId) — the caller's opted-in keys (active + revoked-with-history).
   const {
@@ -252,7 +259,7 @@ export function ProjectScoreSection() {
           <CardTitle className="text-base">{t("title")}</CardTitle>
           <CardDescription>{t("description")}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <label className="sr-only" htmlFor="project-score-select">
             {t("selectPlaceholder")}
           </label>
@@ -260,7 +267,10 @@ export function ProjectScoreSection() {
             id="project-score-select"
             className="w-full max-w-sm rounded-md border border-border bg-background px-3 py-2 text-sm"
             value={selectedKeyId ?? ""}
-            onChange={(e) => setSelectedKeyId(e.target.value || null)}
+            onChange={(e) => {
+              setSelectedKeyId(e.target.value || null);
+              setShowRubricEditor(false);
+            }}
           >
             <option value="">{t("selectPlaceholder")}</option>
             {projectKeys.map((k) => (
@@ -271,11 +281,34 @@ export function ProjectScoreSection() {
               </option>
             ))}
           </select>
+          {/* Customize rubric — only for active (non-revoked) keys.
+              NOTE: source badge intentionally omitted — the `source` field
+              (key | org | platform) is not stored in the DB and is not
+              returned by getOwnByKeyLatest. */}
+          {selectedKey && !isRevoked && (
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowRubricEditor(true)}
+              >
+                {tKeyScope("editButton")}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {selectedKey && (
         <ProjectKeyReport apiKeyId={selectedKey.id} isRevoked={isRevoked} />
+      )}
+
+      {showRubricEditor && selectedKey && (
+        <RubricEditor
+          target={{ scope: "key", apiKeyId: selectedKey.id, orgId: primaryOrgId }}
+          onSuccess={() => setShowRubricEditor(false)}
+          onCancel={() => setShowRubricEditor(false)}
+        />
       )}
     </div>
   );

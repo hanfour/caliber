@@ -15,6 +15,21 @@ vi.mock("@/lib/trpc/client", () => ({
   },
 }));
 
+// Stub usePermissions — tests here don't exercise rubric authoring.
+vi.mock("@/lib/usePermissions", () => ({
+  usePermissions: () => ({
+    can: () => false,
+    perm: { userId: "user-1" },
+    session: { coveredOrgs: ["org-1"] },
+    isLoading: false,
+  }),
+}));
+
+// Stub RubricEditor so we don't pull in its trpc dependencies.
+vi.mock("@/components/evaluator/RubricEditor", () => ({
+  RubricEditor: () => null,
+}));
+
 import { ProjectScoreSection } from "@/components/evaluator/ProjectScoreSection";
 
 const KEY = {
