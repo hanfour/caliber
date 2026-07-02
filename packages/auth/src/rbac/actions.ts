@@ -66,6 +66,24 @@ export type Action =
       orgId: string;
       ownerUserId: string;
     }
+  | {
+      type: "rubric.read_key";
+      apiKeyId: string;
+      orgId: string;
+      ownerUserId: string;
+    }
+  | {
+      type: "rubric.author_key";
+      apiKeyId: string;
+      orgId: string;
+      ownerUserId: string;
+    }
+  | {
+      type: "rubric.delete_key";
+      apiKeyId: string;
+      orgId: string;
+      ownerUserId: string;
+    }
   | { type: "usage.read_own" }
   | { type: "usage.read_user"; orgId: string; targetUserId: string }
   | { type: "usage.read_team"; orgId: string; teamId: string }

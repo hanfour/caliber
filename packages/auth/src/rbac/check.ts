@@ -241,6 +241,11 @@ export function can(perm: UserPermissions, action: Action): boolean {
     case "rubric.update":
     case "rubric.delete":
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
+    case "rubric.read_key":
+    case "rubric.author_key":
+    case "rubric.delete_key":
+      if (action.ownerUserId === perm.userId) return true; // key owner (a member)
+      return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "evaluator.read_status":
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "evaluator.view_cost":
