@@ -142,6 +142,7 @@ beforeAll(async () => {
   ]);
 
   pool = new pg.Pool({ connectionString: pgContainer.getConnectionUri() });
+  pool.on("error", () => {});  // swallow 57P01 admin-shutdown on container teardown
   db = drizzle(pool) as unknown as Database;
   await migrate(db, { migrationsFolder });
 

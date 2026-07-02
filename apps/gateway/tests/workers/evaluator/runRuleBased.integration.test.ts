@@ -75,6 +75,7 @@ const PERIOD_END = new Date("2024-01-02T00:00:00.000Z");
 beforeAll(async () => {
   pgContainer = await new PostgreSqlContainer("postgres:16-alpine").start();
   pool = new pg.Pool({ connectionString: pgContainer.getConnectionUri() });
+  pool.on("error", () => {});  // swallow 57P01 admin-shutdown on container teardown
   db = drizzle(pool) as unknown as Database;
   await migrate(db, { migrationsFolder });
 

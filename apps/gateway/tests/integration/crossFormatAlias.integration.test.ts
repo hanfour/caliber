@@ -56,6 +56,7 @@ let db: Database;
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
   pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+  pool.on("error", () => {});  // swallow 57P01 admin-shutdown on container teardown
   db = drizzle(pool) as unknown as Database;
   await migrate(db as never, { migrationsFolder });
 }, 90_000);

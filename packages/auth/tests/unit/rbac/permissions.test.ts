@@ -32,6 +32,7 @@ let db: ReturnType<typeof drizzle>;
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
   pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+  pool.on("error", () => {});  // swallow 57P01 admin-shutdown on container teardown
   db = drizzle(pool, { schema }) as unknown as ReturnType<typeof drizzle>;
   await migrate(db, { migrationsFolder });
 });
