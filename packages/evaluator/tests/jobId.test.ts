@@ -15,7 +15,7 @@ import { buildEvaluatorJobId } from "../src/jobId.js";
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const API_KEY_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const PERIOD_START = "2026-06-30T00:00:00.000Z"; // has multiple colons
-const PERIOD_TYPE = "daily";
+const PERIOD_TYPE: "daily" | "weekly" | "monthly" = "daily";
 
 describe("buildEvaluatorJobId", () => {
   it("output contains no colon characters", () => {

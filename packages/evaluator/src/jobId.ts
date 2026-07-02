@@ -9,7 +9,7 @@ export function buildEvaluatorJobId(input: {
   userId: string;
   apiKeyId?: string | null;
   periodStart: string;
-  periodType: string;
+  periodType: "daily" | "weekly" | "monthly";
 }): string {
   const parts = input.apiKeyId
     ? [input.userId, input.apiKeyId, input.periodStart, input.periodType]
