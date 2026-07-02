@@ -8,6 +8,7 @@ import {
   gdprDeleteRequests,
   organizationMembers,
   requestBodies,
+  rubrics,
   teamMembers,
   usageLogs,
 } from "@caliber/db";
@@ -746,12 +747,40 @@ export const reportsRouter = router({
       .innerJoin(usageLogs, eq(usageLogs.requestId, requestBodies.requestId))
       .where(eq(usageLogs.userId, ctx.user.id));
 
+    // GDPR Art. 15/20 portability: include key rubrics authored by this user.
+    // Selection: created_by = caller AND api_key_id IS NOT NULL (key-scoped)
+    // AND deleted_at IS NULL (live rubrics only).
+    //
+    // Erasure semantics (bodies_and_reports soft-erasure): key rubrics are
+    // PROJECT SCORING CONFIG, not personal content. They are KEPT on
+    // soft-erasure (consistent with org rubrics). The author link (createdBy)
+    // anonymizes via ON DELETE SET NULL only on eventual full user hard-delete.
+    // Do NOT add key rubrics to the soft-erasure deletion set.
+    const keyRubrics = await ctx.db
+      .select({
+        id: rubrics.id,
+        apiKeyId: rubrics.apiKeyId,
+        name: rubrics.name,
+        version: rubrics.version,
+        definition: rubrics.definition,
+        createdAt: rubrics.createdAt,
+      })
+      .from(rubrics)
+      .where(
+        and(
+          eq(rubrics.createdBy, ctx.user.id),
+          isNotNull(rubrics.apiKeyId),
+          isNull(rubrics.deletedAt),
+        ),
+      );
+
     return {
       userId: ctx.user.id,
       exportedAt: new Date(),
       reports,
       reportsByKey,
       bodies,
+      keyRubrics,
       note: "Body content is encrypted at rest. Contact your administrator to request decrypted exports.",
     };
   }),
