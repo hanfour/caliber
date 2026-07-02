@@ -27,6 +27,10 @@ import {
 
 type RubricRow = inferRouterOutputs<AppRouter>["rubrics"]["list"][number];
 
+type RubricEditorTarget =
+  | { scope: "org"; orgId: string }
+  | { scope: "key"; apiKeyId: string; orgId: string };
+
 // ─── Shared class strings ─────────────────────────────────────────────────────
 
 const TEXTAREA_CLASS =
@@ -70,8 +74,8 @@ type FormValues = z.infer<typeof formSchema>;
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface RubricEditorProps {
-  orgId: string;
-  editingRow: RubricRow | null;
+  target: RubricEditorTarget;
+  editingRow?: RubricRow | null; // org scope only
   onSuccess: () => void;
   onCancel: () => void;
 }
@@ -89,15 +93,19 @@ function tryFormatJson(raw: string): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function RubricEditor({
-  orgId,
+  target,
   editingRow,
   onSuccess,
   onCancel,
 }: RubricEditorProps) {
-  const isEditing = editingRow !== null;
+  const isKeyScope = target.scope === "key";
+  const apiKeyId = isKeyScope ? target.apiKeyId : undefined;
+  const orgId = target.orgId;
+
   const [uploadError, setUploadError] = useState<string | null>(null);
   const t = useTranslations("evaluator.rubrics");
   const tEditor = useTranslations("evaluator.rubrics.editor");
+  const tKeyScope = useTranslations("evaluator.rubrics.keyScope");
   const tCommon = useTranslations("common");
 
   const {
@@ -116,23 +124,41 @@ export function RubricEditor({
     },
   });
 
-  // Populate form when editing an existing rubric
-  const { data: existingRubric } = trpc.rubrics.get.useQuery(
+  // Org scope: populate form when editing an existing rubric
+  const { data: existingOrgRubric } = trpc.rubrics.get.useQuery(
     { rubricId: editingRow?.id ?? "" },
-    { enabled: isEditing && editingRow !== null },
+    { enabled: !isKeyScope && editingRow != null },
   );
 
+  // Key scope: fetch the existing per-key rubric (null means none set yet)
+  const { data: existingKeyRubric } = trpc.rubrics.getForKey.useQuery(
+    { apiKeyId: apiKeyId ?? "" },
+    { enabled: isKeyScope },
+  );
+
+  const isEditing = isKeyScope ? existingKeyRubric != null : editingRow != null;
+
   useEffect(() => {
-    if (!existingRubric) return;
-    reset({
-      name: existingRubric.name,
-      description: existingRubric.description ?? "",
-      version: existingRubric.version,
-      definitionJson: existingRubric.definition
-        ? JSON.stringify(existingRubric.definition, null, 2)
-        : "",
-    });
-  }, [existingRubric, reset]);
+    if (isKeyScope && existingKeyRubric) {
+      reset({
+        name: existingKeyRubric.name,
+        description: existingKeyRubric.description ?? "",
+        version: existingKeyRubric.version,
+        definitionJson: existingKeyRubric.definition
+          ? JSON.stringify(existingKeyRubric.definition, null, 2)
+          : "",
+      });
+    } else if (!isKeyScope && existingOrgRubric) {
+      reset({
+        name: existingOrgRubric.name,
+        description: existingOrgRubric.description ?? "",
+        version: existingOrgRubric.version,
+        definitionJson: existingOrgRubric.definition
+          ? JSON.stringify(existingOrgRubric.definition, null, 2)
+          : "",
+      });
+    }
+  }, [existingKeyRubric, existingOrgRubric, isKeyScope, reset]);
 
   const create = trpc.rubrics.create.useMutation({
     onSuccess: () => {
@@ -164,8 +190,34 @@ export function RubricEditor({
     },
   });
 
+  const upsertForKey = trpc.rubrics.upsertForKey.useMutation({
+    onSuccess: () => {
+      toast.success(tKeyScope("savedToast"));
+      onSuccess();
+    },
+    onError: (e) => {
+      const code = (e.data as { code?: string } | undefined)?.code;
+      if (code === "FORBIDDEN") {
+        toast.error(tCommon("insufficientPermission"));
+      } else {
+        toast.error(e.message || tKeyScope("saveFail"));
+      }
+    },
+  });
+
   const onSubmit = handleSubmit((values) => {
     const definition = JSON.parse(values.definitionJson) as unknown;
+
+    if (isKeyScope && apiKeyId) {
+      return upsertForKey.mutateAsync({
+        apiKeyId,
+        name: values.name,
+        description: values.description || undefined,
+        version: values.version,
+        definition,
+      });
+    }
+
     if (isEditing && editingRow) {
       return update.mutateAsync({
         rubricId: editingRow.id,
@@ -178,6 +230,7 @@ export function RubricEditor({
         },
       });
     }
+
     return create.mutateAsync({
       orgId,
       name: values.name,
@@ -206,7 +259,19 @@ export function RubricEditor({
     e.target.value = "";
   };
 
-  const isMutating = create.isPending || update.isPending;
+  const isMutating = create.isPending || update.isPending || upsertForKey.isPending;
+
+  const dialogTitle = isKeyScope
+    ? tKeyScope("title")
+    : isEditing
+      ? tEditor("editTitle")
+      : tEditor("newTitle");
+
+  const dialogDescription = isKeyScope
+    ? tKeyScope("description")
+    : isEditing
+      ? tEditor("editDescription")
+      : tEditor("newDescription");
 
   return (
     <Dialog
@@ -217,10 +282,8 @@ export function RubricEditor({
     >
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEditing ? tEditor("editTitle") : tEditor("newTitle")}</DialogTitle>
-          <DialogDescription>
-            {isEditing ? tEditor("editDescription") : tEditor("newDescription")}
-          </DialogDescription>
+          <DialogTitle>{dialogTitle}</DialogTitle>
+          <DialogDescription>{dialogDescription}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="space-y-4">
@@ -409,9 +472,7 @@ export function RubricEditor({
             </Button>
             <Button type="submit" disabled={isSubmitting || isMutating}>
               {isMutating
-                ? isEditing
-                  ? tEditor("savingBtn")
-                  : tEditor("creating")
+                ? tEditor("savingBtn")
                 : isEditing
                   ? tEditor("saveBtn")
                   : tEditor("createBtn")}

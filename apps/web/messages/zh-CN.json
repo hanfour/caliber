@@ -499,7 +499,8 @@
       "disabledToast": "已停用项目计分",
       "errorToast": "更新项目计分设置失败",
       "helperText": "LLM 评估费用计入组织每月预算。",
-      "ariaLabel": "切换「{name}」的项目计分"
+      "ariaLabel": "切换「{name}」的项目计分",
+      "editRubric": "编辑项目评分标准"
     }
   },
   "memberApiKeys": {
@@ -857,6 +858,19 @@
       "actionsAriaLabel": "{name} 的操作",
       "dryRun7": "试运行(最近 7 天)",
       "setAsActive": "设为启用",
+      "keyScope": {
+        "title": "项目评分标准",
+        "description": "为此项目密钥定义自定义评分标准。设置后，此评分标准在按密钥评估时优先于组织和平台评分标准。",
+        "editButton": "编辑项目评分标准",
+        "removeButton": "删除项目评分标准",
+        "confirmRemove": "删除「{name}」的自定义评分标准？该密钥将回退使用组织或平台评分标准。",
+        "savedToast": "项目评分标准已保存",
+        "saveFail": "项目评分标准保存失败",
+        "removedToast": "项目评分标准已删除",
+        "requiresOptInHint": "请先启用「计为项目评分」以创建自定义评分标准。",
+        "customBadge": "自定义项目评分标准",
+        "usesFallbackHint": "使用组织或平台评分标准"
+      },
       "editor": {
         "newTitle": "新建评分标准",
         "editTitle": "编辑评分标准",

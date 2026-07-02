@@ -8,11 +8,13 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
 import { trpc } from "@/lib/trpc/client";
+import { usePermissions } from "@/lib/usePermissions";
 import { toDate, formatRelative } from "@/lib/time";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyCreateDialog } from "./ApiKeyCreateDialog";
+import { RubricEditor } from "@/components/evaluator/RubricEditor";
 
 type ApiKeyRow = inferRouterOutputs<AppRouter>["apiKeys"]["listOwn"][number];
 
@@ -45,11 +47,17 @@ export function ApiKeyList() {
   const utils = trpc.useUtils();
   const t = useTranslations("memberApiKeys");
   const tApiKeys = useTranslations("apiKeys");
+  const tKeyScope = useTranslations("evaluator.rubrics.keyScope");
   const tCommon = useTranslations("common");
   const confirm = useConfirm();
+  const { can, perm, session } = usePermissions();
   const [open, setOpen] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [rubricKeyId, setRubricKeyId] = useState<string | null>(null);
   const { data: keys, isLoading, error } = trpc.apiKeys.listOwn.useQuery();
+
+  const primaryOrgId = session?.coveredOrgs[0] ?? "";
+  const currentUserId = perm?.userId ?? "";
 
   const setEvaluateAsProject = trpc.apiKeys.setEvaluateAsProject.useMutation({
     onSuccess: (_data, variables) => {
@@ -84,6 +92,19 @@ export function ApiKeyList() {
     },
   });
 
+  const deleteForKey = trpc.rubrics.deleteForKey.useMutation({
+    onSuccess: () => {
+      toast.success(tKeyScope("removedToast"));
+      utils.apiKeys.listOwn.invalidate();
+    },
+    onError: (e) => {
+      const code = (e.data as { code?: string } | undefined)?.code;
+      toast.error(
+        code === "FORBIDDEN" ? tCommon("insufficientPermission") : e.message,
+      );
+    },
+  });
+
   const handleRevoke = async (row: ApiKeyRow) => {
     const ok = await confirm({
       description: t("confirmRevoke", { name: row.name }),
@@ -92,6 +113,15 @@ export function ApiKeyList() {
     if (!ok) return;
     setRevokingId(row.id);
     revoke.mutate({ id: row.id });
+  };
+
+  const handleRemoveRubric = async (row: ApiKeyRow) => {
+    const ok = await confirm({
+      description: tKeyScope("confirmRemove", { name: row.name }),
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteForKey.mutate({ apiKeyId: row.id });
   };
 
   return (
@@ -154,6 +184,14 @@ export function ApiKeyList() {
                     ? new Date(row.lastUsedAt).toLocaleString()
                     : undefined;
                   const isRevoking = revokingId === row.id;
+                  const canAuthorRubric =
+                    row.evaluateAsProject &&
+                    can({
+                      type: "rubric.author_key",
+                      apiKeyId: row.id,
+                      orgId: primaryOrgId,
+                      ownerUserId: currentUserId,
+                    });
                   return (
                     <tr
                       key={row.id}
@@ -194,16 +232,39 @@ export function ApiKeyList() {
                         />
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                          onClick={() => handleRevoke(row)}
-                          disabled={isRevoking}
-                          aria-label={t("revokeAriaLabel", { name: row.name })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          {canAuthorRubric && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={() => setRubricKeyId(row.id)}
+                              >
+                                {tKeyScope("editButton")}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs text-muted-foreground hover:text-destructive"
+                                onClick={() => handleRemoveRubric(row)}
+                                disabled={deleteForKey.isPending}
+                              >
+                                {tKeyScope("removeButton")}
+                              </Button>
+                            </>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                            onClick={() => handleRevoke(row)}
+                            disabled={isRevoking}
+                            aria-label={t("revokeAriaLabel", { name: row.name })}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -214,6 +275,16 @@ export function ApiKeyList() {
         )}
       </CardContent>
       <ApiKeyCreateDialog open={open} onOpenChange={setOpen} />
+      {rubricKeyId && (
+        <RubricEditor
+          target={{ scope: "key", apiKeyId: rubricKeyId, orgId: primaryOrgId }}
+          onSuccess={() => {
+            setRubricKeyId(null);
+            utils.apiKeys.listOwn.invalidate();
+          }}
+          onCancel={() => setRubricKeyId(null)}
+        />
+      )}
     </Card>
   );
 }

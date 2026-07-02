@@ -499,7 +499,8 @@
       "disabledToast": "프로젝트 채점이 비활성화되었습니다",
       "errorToast": "프로젝트 채점 업데이트 실패",
       "helperText": "LLM 평가 비용은 조직의 월간 예산에 포함됩니다.",
-      "ariaLabel": "\"{name}\" 프로젝트 채점 전환"
+      "ariaLabel": "\"{name}\" 프로젝트 채점 전환",
+      "editRubric": "프로젝트 루브릭 편집"
     }
   },
   "memberApiKeys": {
@@ -857,6 +858,19 @@
       "actionsAriaLabel": "{name}에 대한 작업",
       "dryRun7": "드라이런 (최근 7일)",
       "setAsActive": "활성으로 설정",
+      "keyScope": {
+        "title": "프로젝트 루브릭",
+        "description": "이 프로젝트 키에 대한 사용자 정의 루브릭을 정의합니다. 설정된 경우 키별 평가에서 조직 및 플랫폼 루브릭보다 우선합니다.",
+        "editButton": "프로젝트 루브릭 편집",
+        "removeButton": "프로젝트 루브릭 제거",
+        "confirmRemove": "「{name}」의 사용자 정의 루브릭을 제거할까요? 이 키는 조직 또는 플랫폼 루브릭으로 대체됩니다.",
+        "savedToast": "프로젝트 루브릭이 저장되었습니다",
+        "saveFail": "프로젝트 루브릭 저장에 실패했습니다",
+        "removedToast": "프로젝트 루브릭이 제거되었습니다",
+        "requiresOptInHint": "사용자 정의 루브릭을 작성하려면 먼저 \"프로젝트로 평가\"를 활성화하세요.",
+        "customBadge": "사용자 정의 프로젝트 루브릭",
+        "usesFallbackHint": "조직 또는 플랫폼 루브릭 사용 중"
+      },
       "editor": {
         "newTitle": "새 루브릭",
         "editTitle": "루브릭 편집",
