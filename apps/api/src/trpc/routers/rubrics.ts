@@ -64,9 +64,14 @@ async function resolveKeyForRubric(
     throw new TRPCError({ code: "NOT_FOUND" });
   }
 
-  // Authorized callers see NOT_FOUND on revoked keys: prevents authoring /
-  // reading rubrics for keys that can no longer issue requests.
-  if (key.revokedAt !== null) {
+  // Authorized callers see NOT_FOUND on revoked keys for read/author actions:
+  // prevents reading or authoring rubrics on keys that can no longer issue
+  // requests. deleteForKey is exempt — owners and org_admins must be able to
+  // clean up a rubric attached to a revoked key (spec §6).
+  // Anti-enumeration ordering is preserved: the can() check above fires BEFORE
+  // this check, so an unauthorized caller on a revoked key still sees NOT_FOUND
+  // regardless of action, and cannot learn whether the key is active or revoked.
+  if (key.revokedAt !== null && action !== "rubric.delete_key") {
     throw new TRPCError({ code: "NOT_FOUND" });
   }
 

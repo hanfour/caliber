@@ -6,8 +6,10 @@
  *   2. For each org, enumerate active users (organization_members with user record).
  *   3. For each user, enqueue an evaluator job with periodStart = yesterday UTC 00:00,
  *      periodEnd = today UTC 00:00, periodType = "daily", triggeredBy = "cron".
- *   4. Job dedup is handled by BullMQ: jobId = userId:periodStart:periodType, so
- *      re-running within the same UTC day is idempotent.
+ *   4. Job dedup is handled by BullMQ: jobId is produced by `buildEvaluatorJobId`
+ *      from `@caliber/evaluator` — segments joined with `_`, colons replaced by
+ *      `-` (e.g. `<userId>_2026-07-02T00-00-00.000Z_daily`). Re-running within
+ *      the same UTC day is therefore idempotent.
  *
  * Design notes:
  *   - Uses interval-based scheduling (setInterval) to match the repo's existing
