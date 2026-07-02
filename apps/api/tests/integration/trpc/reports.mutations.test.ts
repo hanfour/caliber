@@ -27,6 +27,7 @@ import {
   type EvaluatorQueue,
 } from "../../../src/trpc/routers/reports.js";
 import type { TrpcContext } from "../../../src/trpc/context.js";
+import { buildEvaluatorJobId } from "@caliber/evaluator";
 
 // Local sub-router: isolated from Task 6.5 appRouter wiring.
 const localRouter = router({ reports: reportsRouter });
@@ -445,9 +446,9 @@ describe("reports router — mutation endpoints", () => {
     expect(result.enqueued).toBe(1);
     expect(result.targets).toBe(1);
     expect(mockAdd).toHaveBeenCalledOnce();
-    // 4-part jobId: ${ownerUserId}:${apiKeyId}:${periodStart}:${periodType}
+    // 4-part jobId via buildEvaluatorJobId (colon-free, BullMQ-safe)
     expect(mockAdd.mock.calls[0]![2]).toMatchObject({
-      jobId: `${member.id}:${apiKeyId}:${periodStart}:daily`,
+      jobId: buildEvaluatorJobId({ userId: member.id, apiKeyId, periodStart, periodType: "daily" }),
     });
     // payload carries apiKeyId + keyNameSnapshot for per-key grain
     expect(mockAdd.mock.calls[0]![1]).toMatchObject({

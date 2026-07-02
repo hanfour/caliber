@@ -46,6 +46,7 @@ import {
 import {
   enqueueDailyEvaluatorJobs,
 } from "../../../src/workers/evaluator/cron.js";
+import { buildEvaluatorJobId } from "@caliber/evaluator";
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
@@ -103,7 +104,7 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
     return { queue, calls };
   }
 
-  it("per-person payload (no apiKeyId) → 3-part jobId: userId:periodStart:periodType", async () => {
+  it("per-person payload (no apiKeyId) → deterministic jobId via buildEvaluatorJobId", async () => {
     const { queue, calls } = makeQueue();
     await enqueueEvaluator(queue, {
       orgId: ORG_ID,
@@ -115,11 +116,11 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
       triggeredByUser: null,
       // apiKeyId intentionally absent
     });
-    const expected = `${USER_A}:${PERIOD_START}:${PERIOD_TYPE}`;
+    const expected = buildEvaluatorJobId({ userId: USER_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE });
     expect(calls[0]!.jobId).toBe(expected);
   });
 
-  it("per-key payload (apiKeyId set) → 4-part jobId: userId:apiKeyId:periodStart:periodType", async () => {
+  it("per-key payload (apiKeyId set) → deterministic jobId via buildEvaluatorJobId", async () => {
     const { queue, calls } = makeQueue();
     await enqueueEvaluator(queue, {
       orgId: ORG_ID,
@@ -132,7 +133,7 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
       apiKeyId: KEY_A,
       keyNameSnapshot: "my-project-key",
     });
-    const expected = `${USER_A}:${KEY_A}:${PERIOD_START}:${PERIOD_TYPE}`;
+    const expected = buildEvaluatorJobId({ userId: USER_A, apiKeyId: KEY_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE });
     expect(calls[0]!.jobId).toBe(expected);
   });
 
@@ -166,13 +167,12 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
     const keyJobId = c2[0]!.jobId;
 
     expect(personJobId).not.toBe(keyJobId);
-    // 3-part has 2 separator colons less than 4-part (which adds apiKeyId between userId and periodStart)
-    // Verify structural difference: 4-part starts with userId:apiKeyId:, 3-part starts with userId:periodStart
-    expect(keyJobId.startsWith(`${USER_A}:${KEY_A}:`)).toBe(true);
-    expect(personJobId.startsWith(`${USER_A}:${KEY_A}:`)).toBe(false);
+    // Verify each equals its canonical buildEvaluatorJobId form (colon-free)
+    expect(personJobId).toBe(buildEvaluatorJobId({ userId: USER_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE }));
+    expect(keyJobId).toBe(buildEvaluatorJobId({ userId: USER_A, apiKeyId: KEY_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE }));
   });
 
-  it("3-part format is byte-identical to pre-PR4 format (no apiKeyId → unchanged)", async () => {
+  it("per-person jobId is deterministic and colon-free (buildEvaluatorJobId canonical form)", async () => {
     const { queue, calls } = makeQueue();
     await enqueueEvaluator(queue, {
       orgId: ORG_ID,
@@ -183,9 +183,9 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
       triggeredBy: "cron",
       triggeredByUser: null,
     });
-    // Must match the exact pre-PR4 format
+    // Must match the colon-free buildEvaluatorJobId canonical form
     expect(calls[0]!.jobId).toBe(
-      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:2026-06-30T00:00:00.000Z:daily",
+      buildEvaluatorJobId({ userId: USER_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE }),
     );
   });
 });
@@ -418,8 +418,8 @@ describe("(b) enqueueDailyEvaluatorJobs — per-key enumeration", () => {
     expect(keyJobs[0]!.payload.periodEnd).toBe(TODAY_00.toISOString());
     expect(keyJobs[0]!.payload.periodType).toBe("daily");
 
-    // jobId is 4-part
-    const expectedKeyJobId = `${userId1}:${optedInWithTraffic}:${YESTERDAY_00.toISOString()}:daily`;
+    // jobId is deterministic colon-free form via buildEvaluatorJobId
+    const expectedKeyJobId = buildEvaluatorJobId({ userId: userId1, apiKeyId: optedInWithTraffic, periodStart: YESTERDAY_00.toISOString(), periodType: "daily" });
     expect(keyJobs[0]!.jobId).toBe(expectedKeyJobId);
   });
 

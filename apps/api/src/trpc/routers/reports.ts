@@ -13,6 +13,7 @@ import {
 } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import { can } from "@caliber/auth";
+import { buildEvaluatorJobId } from "@caliber/evaluator";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 import { notifyGdprRequested } from "../../services/gdprNotifications.js";
@@ -20,6 +21,8 @@ import { getFacetSummary } from "../../services/facetSummary.js";
 
 // ─── Evaluator queue constants (duplicated from apps/gateway to avoid cross-package import) ──
 // TODO: extract to a shared @caliber/queue package to eliminate this duplication.
+// jobId derivation uses `buildEvaluatorJobId` (from @caliber/evaluator) — shared with
+// apps/gateway enqueueEvaluator — so cron and admin-rerun always dedup correctly.
 const EVALUATOR_QUEUE_NAME = "evaluator";
 const EVALUATOR_QUEUE_PREFIX = "caliber:gw";
 
@@ -670,14 +673,15 @@ export const reportsRouter = router({
       let enqueued = 0;
       for (const target of targets) {
         try {
-          // jobId MUST stay in lockstep with apps/gateway `enqueueEvaluator`
-          // (queue.ts): per-person stays the 3-part
-          // `${userId}:${periodStart}:${periodType}`; per-key uses the 4-part
-          // `${userId}:${apiKeyId}:${periodStart}:${periodType}` so a rerun
-          // dedups against the cron's per-key job. periodType is "daily" here.
-          const jobId = target.apiKeyId
-            ? `${target.userId}:${target.apiKeyId}:${input.periodStart}:daily`
-            : `${target.userId}:${input.periodStart}:daily`;
+          // jobId uses the shared buildEvaluatorJobId (from @caliber/evaluator),
+          // which also powers apps/gateway enqueueEvaluator. Same inputs →
+          // same id on both sides → cron and admin-rerun dedup correctly.
+          const jobId = buildEvaluatorJobId({
+            userId: target.userId,
+            apiKeyId: target.apiKeyId,
+            periodStart: input.periodStart,
+            periodType: "daily",
+          });
           const payload: EvaluatorJobPayload = {
             orgId: input.orgId,
             userId: target.userId,
