@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Database } from "@caliber/db";
 import {
   rubrics,
@@ -171,7 +171,7 @@ async function seedUsageLog(
 
 async function seedApiKey(
   db: Database,
-  opts: { userId: string; orgId: string },
+  opts: { userId: string; orgId: string; revoked?: boolean },
 ) {
   seedCounter += 1;
   const [row] = await db
@@ -183,9 +183,30 @@ async function seedApiKey(
       keyHash: `hash-rubric-${Date.now()}-${seedCounter}`,
       keyPrefix: "ak_rb",
       name: `rubric-test-key-${seedCounter}`,
+      revokedAt: opts.revoked ? new Date() : null,
     })
     .returning({ id: apiKeys.id });
   return row!.id;
+}
+
+async function seedKeyRubric(
+  db: Database,
+  opts: { apiKeyId: string; orgId: string; createdBy: string },
+) {
+  seedCounter += 1;
+  const [row] = await db
+    .insert(rubrics)
+    .values({
+      orgId: opts.orgId,
+      apiKeyId: opts.apiKeyId,
+      name: `Key Rubric ${seedCounter}`,
+      version: "1.0.0",
+      definition: minimalDefinition() as unknown as Record<string, unknown>,
+      isDefault: false,
+      createdBy: opts.createdBy,
+    })
+    .returning({ id: rubrics.id });
+  return row!;
 }
 
 async function seedAccount(db: Database, orgId: string) {
@@ -427,6 +448,164 @@ describe("rubrics router", () => {
     expect(row?.rubricId).toBe(platform.id);
   });
 
+  // ── Test: org procedures exclude key rubrics (org-surface leak scoping) ──────
+
+  it("list: excludes key-scoped rubrics from the org picker", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: admin.id,
+    });
+    const orgRubric = await seedOrgRubric(t.db, org.id, admin.id);
+
+    const rows = await caller.rubrics.list({ orgId: org.id });
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(orgRubric.id);
+    expect(ids).not.toContain(keyRubric.id);
+  });
+
+  it("get: returns NOT_FOUND for a key-scoped rubric", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: admin.id,
+    });
+
+    await expect(
+      caller.rubrics.get({ rubricId: keyRubric.id }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("update: cannot mutate a key-scoped rubric via the org path", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: admin.id,
+    });
+
+    // update silently matches 0 rows (no CONFLICT, just a no-op)
+    const result = await caller.rubrics.update({
+      rubricId: keyRubric.id,
+      orgId: org.id,
+      patch: { name: "Should Not Update" },
+    });
+    expect(result.success).toBe(true);
+
+    // Verify name was NOT changed in DB
+    const [row] = await t.db
+      .select({ name: rubrics.name })
+      .from(rubrics)
+      .where(eq(rubrics.id, keyRubric.id));
+    expect(row?.name).not.toBe("Should Not Update");
+  });
+
+  it("delete: cannot soft-delete a key-scoped rubric via the org path", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: admin.id,
+    });
+
+    // delete is a no-op (matches 0 rows) — should succeed but not actually delete
+    await caller.rubrics.delete({ rubricId: keyRubric.id, orgId: org.id });
+
+    // Verify NOT soft-deleted
+    const [row] = await t.db
+      .select({ deletedAt: rubrics.deletedAt })
+      .from(rubrics)
+      .where(eq(rubrics.id, keyRubric.id));
+    expect(row?.deletedAt).toBeNull();
+  });
+
+  it("dryRun: returns NOT_FOUND for a key-scoped rubric", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: admin.id,
+    });
+
+    await expect(
+      caller.rubrics.dryRun({
+        orgId: org.id,
+        rubricId: keyRubric.id,
+        userId: admin.id,
+        days: 7,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("setActive: rejects pinning a key-scoped rubric as org-active", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const keyRubric = await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: admin.id,
+    });
+
+    await expect(
+      caller.rubrics.setActive({ orgId: org.id, rubricId: keyRubric.id }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   // ── Test 7: dryRun — returns preview Report with correct shape ───────────────
 
   it("dryRun: returns a preview Report with the expected shape", async () => {
@@ -488,5 +667,426 @@ describe("rubrics router", () => {
 
     // Since bodyRows = [], coverage is 0
     expect(preview.dataQuality.capturedRequests).toBe(0);
+  });
+});
+
+// ─── Key rubric procedures: getForKey / upsertForKey / deleteForKey ───────────
+
+describe("key rubric procedures", () => {
+  // ── Happy path: owner upsert → read → delete ─────────────────────────────────
+
+  it("owner: upsert → getForKey → deleteForKey round-trip", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    // Initially no rubric
+    const empty = await caller.rubrics.getForKey({ apiKeyId: keyId });
+    expect(empty).toBeNull();
+
+    // Upsert
+    const upserted = await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "My Key Rubric",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+    expect(upserted.id).toBeDefined();
+
+    // Read back
+    const got = await caller.rubrics.getForKey({ apiKeyId: keyId });
+    expect(got).not.toBeNull();
+    expect(got!.id).toBe(upserted.id);
+    expect(got!.name).toBe("My Key Rubric");
+    expect(got!.apiKeyId).toBe(keyId);
+    expect(got!.orgId).toBe(org.id);
+    expect(got!.isDefault).toBe(false);
+    expect(got!.createdBy).toBe(owner.id);
+
+    // Delete
+    const deleted = await caller.rubrics.deleteForKey({ apiKeyId: keyId });
+    expect(deleted.success).toBe(true);
+
+    // After delete: should return null (soft-deleted)
+    const afterDelete = await caller.rubrics.getForKey({ apiKeyId: keyId });
+    expect(afterDelete).toBeNull();
+  });
+
+  // ── Org_admin can also read/write a key rubric ─────────────────────────────────
+
+  it("org_admin: can upsert and read a member's key rubric", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const adminCaller = await callerFor({ db: t.db, userId: admin.id });
+
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    const { id } = await adminCaller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "Admin-set Key Rubric",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+    const row = await adminCaller.rubrics.getForKey({ apiKeyId: keyId });
+    expect(row?.id).toBe(id);
+  });
+
+  // ── Peer member (not owner) → NOT_FOUND (anti-enumeration) ──────────────────
+
+  it("peer member probing getForKey → NOT_FOUND (anti-enumeration)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const peer = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const peerCaller = await callerFor({ db: t.db, userId: peer.id });
+
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+    await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: org.id,
+      createdBy: owner.id,
+    });
+
+    await expect(
+      peerCaller.rubrics.getForKey({ apiKeyId: keyId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    await expect(
+      peerCaller.rubrics.upsertForKey({
+        apiKeyId: keyId,
+        name: "Peer Attempt",
+        version: "1.0.0",
+        definition: minimalDefinition(),
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    await expect(
+      peerCaller.rubrics.deleteForKey({ apiKeyId: keyId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // ── Cross-org admin → NOT_FOUND (anti-enumeration) ──────────────────────────
+
+  it("cross-org admin probing getForKey → NOT_FOUND (anti-enumeration)", async () => {
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const ownerA = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: orgA.id,
+      orgId: orgA.id,
+    });
+    const adminB = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgB.id,
+      orgId: orgB.id,
+    });
+    const callerB = await callerFor({ db: t.db, userId: adminB.id });
+
+    const keyId = await seedApiKey(t.db, { userId: ownerA.id, orgId: orgA.id });
+    await seedKeyRubric(t.db, {
+      apiKeyId: keyId,
+      orgId: orgA.id,
+      createdBy: ownerA.id,
+    });
+
+    await expect(
+      callerB.rubrics.getForKey({ apiKeyId: keyId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // ── upsertForKey server-forces isDefault=false and orgId=key.orgId ────────────
+
+  it("upsertForKey: server-forces isDefault=false and orgId from the key", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    const { id } = await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "Forced Fields Test",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+
+    const [row] = await t.db
+      .select({
+        isDefault: rubrics.isDefault,
+        orgId: rubrics.orgId,
+        apiKeyId: rubrics.apiKeyId,
+      })
+      .from(rubrics)
+      .where(eq(rubrics.id, id));
+
+    expect(row?.isDefault).toBe(false);
+    expect(row?.orgId).toBe(org.id);
+    expect(row?.apiKeyId).toBe(keyId);
+  });
+
+  // ── upsertForKey: invalid definition → BAD_REQUEST ───────────────────────────
+
+  it("upsertForKey: rejects malformed definition with BAD_REQUEST", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    await expect(
+      caller.rubrics.upsertForKey({
+        apiKeyId: keyId,
+        name: "Bad Def",
+        version: "1.0.0",
+        definition: { not: "a rubric" },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  // ── upsertForKey on a revoked key → NOT_FOUND ────────────────────────────────
+
+  it("upsertForKey on a revoked key → NOT_FOUND", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const revokedKeyId = await seedApiKey(t.db, {
+      userId: owner.id,
+      orgId: org.id,
+      revoked: true,
+    });
+
+    await expect(
+      caller.rubrics.upsertForKey({
+        apiKeyId: revokedKeyId,
+        name: "Revoked Key Rubric",
+        version: "1.0.0",
+        definition: minimalDefinition(),
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // ── getForKey on a revoked key → NOT_FOUND ───────────────────────────────────
+
+  it("getForKey on a revoked key → NOT_FOUND", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const revokedKeyId = await seedApiKey(t.db, {
+      userId: owner.id,
+      orgId: org.id,
+      revoked: true,
+    });
+    await seedKeyRubric(t.db, {
+      apiKeyId: revokedKeyId,
+      orgId: org.id,
+      createdBy: owner.id,
+    });
+
+    await expect(
+      caller.rubrics.getForKey({ apiKeyId: revokedKeyId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // ── Second upsert updates the live slot (concurrent-double-create path) ───────
+
+  it("second upsertForKey updates the existing live row (ON CONFLICT DO UPDATE)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    const first = await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "First Version",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+
+    const second = await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "Second Version",
+      version: "2.0.0",
+      definition: minimalDefinition(),
+    });
+
+    // Both upserts should refer to the same row (update, not new insert)
+    expect(second.id).toBe(first.id);
+
+    // Verify only one live row for this key
+    const liveRows = await t.db
+      .select({ id: rubrics.id })
+      .from(rubrics)
+      .where(
+        and(eq(rubrics.apiKeyId, keyId), isNull(rubrics.deletedAt)),
+      );
+    expect(liveRows).toHaveLength(1);
+    expect(liveRows[0]?.id).toBe(first.id);
+
+    const got = await caller.rubrics.getForKey({ apiKeyId: keyId });
+    expect(got?.name).toBe("Second Version");
+  });
+
+  // ── Re-author after soft-delete targets the live slot ────────────────────────
+
+  it("upsertForKey after deleteForKey creates a fresh row (soft-deleted slot freed)", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    // First upsert
+    const first = await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "Original",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+
+    // Soft-delete it
+    await caller.rubrics.deleteForKey({ apiKeyId: keyId });
+
+    // Re-upsert after delete: should create a new row
+    const second = await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "After Re-author",
+      version: "2.0.0",
+      definition: minimalDefinition(),
+    });
+
+    // New row has a different id
+    expect(second.id).not.toBe(first.id);
+
+    // Only one live row
+    const liveRows = await t.db
+      .select({ id: rubrics.id })
+      .from(rubrics)
+      .where(
+        and(eq(rubrics.apiKeyId, keyId), isNull(rubrics.deletedAt)),
+      );
+    expect(liveRows).toHaveLength(1);
+    expect(liveRows[0]?.id).toBe(second.id);
+
+    const got = await caller.rubrics.getForKey({ apiKeyId: keyId });
+    expect(got?.name).toBe("After Re-author");
+  });
+
+  // ── Audit rows written by upsertForKey and deleteForKey ──────────────────────
+
+  it("upsertForKey writes a rubric.key_set audit row", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "Audit Test",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+
+    // Import auditLogs for verification
+    const { auditLogs } = await import("@caliber/db");
+    const logs = await t.db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.targetId, keyId));
+    const keySetLog = logs.find((l) => l.action === "rubric.key_set");
+    expect(keySetLog).toBeDefined();
+    expect(keySetLog?.actorUserId).toBe(owner.id);
+    expect(keySetLog?.targetType).toBe("api_key");
+  });
+
+  it("deleteForKey writes a rubric.key_cleared audit row", async () => {
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const keyId = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    await caller.rubrics.upsertForKey({
+      apiKeyId: keyId,
+      name: "To Delete",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+    await caller.rubrics.deleteForKey({ apiKeyId: keyId });
+
+    const { auditLogs } = await import("@caliber/db");
+    const logs = await t.db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.targetId, keyId));
+    const clearedLog = logs.find((l) => l.action === "rubric.key_cleared");
+    expect(clearedLog).toBeDefined();
+    expect(clearedLog?.actorUserId).toBe(owner.id);
+    expect(clearedLog?.targetType).toBe("api_key");
   });
 });

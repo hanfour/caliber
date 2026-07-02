@@ -7,6 +7,7 @@ import {
   usageLogs,
   apiKeys,
   upstreamAccounts,
+  rubrics,
 } from "@caliber/db";
 import { resolvePermissions } from "@caliber/auth";
 import type { ServerEnv } from "@caliber/config";
@@ -477,6 +478,69 @@ describe("contentCapture router", () => {
     const wipeLog = logs.find((l) => l.action === "content_capture.wiped");
     expect(wipeLog).toBeDefined();
     expect(wipeLog?.actorUserId).toBe(admin.id);
+  });
+
+  it("setSettings: rejects a key-scoped rubricId with FORBIDDEN", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    // Seed a key and a key-scoped rubric directly in the DB
+    const [keyRow] = await t.db
+      .insert(apiKeys)
+      .values({
+        userId: admin.id,
+        orgId: org.id,
+        teamId: null,
+        keyHash: `hash-cc-keyrubric-${Date.now()}`,
+        keyPrefix: "ak_ck",
+        name: "cc-key-rubric-test-key",
+      })
+      .returning({ id: apiKeys.id });
+    const keyId = keyRow!.id;
+
+    const [rubricRow] = await t.db
+      .insert(rubrics)
+      .values({
+        orgId: org.id,
+        apiKeyId: keyId,
+        name: "Key Rubric for CC test",
+        version: "1.0.0",
+        definition: {
+          name: "T",
+          description: "d",
+          version: "1.0.0",
+          locale: "en",
+          sections: [
+            {
+              id: "s1",
+              name: "S1",
+              weight: "100%",
+              standard: { score: 80, label: "Std", criteria: ["c"] },
+              superior: { score: 100, label: "Sup", criteria: ["c"] },
+              signals: [
+                { type: "threshold", id: "x", metric: "total_cost", lte: 10 },
+              ],
+            },
+          ],
+        } as unknown as Record<string, unknown>,
+        isDefault: false,
+        createdBy: admin.id,
+      })
+      .returning({ id: rubrics.id });
+    const keyRubricId = rubricRow!.id;
+
+    await expect(
+      caller.contentCapture.setSettings({
+        orgId: org.id,
+        patch: { rubricId: keyRubricId },
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("wipeExistingCaptures rejects non-org-admin with FORBIDDEN", async () => {
