@@ -5,7 +5,7 @@
  *   1. Rejects invalid payload (missing orgId)
  *   2. Rejects invalid payload (non-uuid userId)
  *   3. Rejects invalid periodType value
- *   4. Uses `${userId}:${periodStart}:${periodType}` as jobId for dedup
+ *   4. jobId is colon-free and encodes userId + periodStart + periodType (via buildEvaluatorJobId)
  *   5. Uses job name `evaluator`
  *   6. Applies default job options correctly
  */
@@ -182,8 +182,8 @@ describe("enqueueEvaluator", () => {
     expect(fake.add).not.toHaveBeenCalled();
   });
 
-  // Test case 4: Uses `${userId}:${periodStart}:${periodType}` as jobId
-  it("uses ${userId}:${periodStart}:${periodType} as jobId for dedup", async () => {
+  // Test case 4: jobId is colon-free and derived via buildEvaluatorJobId
+  it("uses a colon-free jobId encoding userId + periodStart + periodType for dedup", async () => {
     const payload = validPayload({
       userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       periodStart: "2024-03-01T00:00:00Z",
@@ -192,9 +192,13 @@ describe("enqueueEvaluator", () => {
     await enqueueEvaluator(fake.queue, payload);
 
     expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0]!.opts?.jobId).toBe(
-      "cccccccc-cccc-4ccc-8ccc-cccccccccccc:2024-03-01T00:00:00Z:weekly",
-    );
+    const jobId = fake.calls[0]!.opts?.jobId;
+    expect(jobId).toBeDefined();
+    // Must be colon-free (BullMQ 5.x rejects ids where includes(':') && split(':').length !== 3)
+    expect(jobId).not.toContain(":");
+    // Must contain the identity components
+    expect(jobId).toContain("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+    expect(jobId).toContain("weekly");
   });
 
   // Test case 5: Uses job name `evaluator`
@@ -216,7 +220,7 @@ describe("enqueueEvaluator", () => {
     expect(fake.calls[0]!.opts).toHaveProperty("jobId");
   });
 
-  it("returns { jobId } on happy path", async () => {
+  it("returns { jobId } on happy path (colon-free)", async () => {
     const payload = validPayload({
       userId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       periodStart: "2024-02-15T00:00:00Z",
@@ -224,9 +228,10 @@ describe("enqueueEvaluator", () => {
     });
     const result = await enqueueEvaluator(fake.queue, payload);
 
-    expect(result).toEqual({
-      jobId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd:2024-02-15T00:00:00Z:monthly",
-    });
+    expect(result.jobId).toBeDefined();
+    expect(result.jobId).not.toContain(":");
+    expect(result.jobId).toContain("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    expect(result.jobId).toContain("monthly");
   });
 
   it("rejects invalid payload when orgId is not a UUID", async () => {

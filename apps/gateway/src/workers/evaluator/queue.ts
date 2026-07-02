@@ -9,9 +9,13 @@
  *     BullMQ JSON-serializes payloads. Dates become strings after JSON
  *     round-trip, so being explicit avoids silent coercion bugs in the worker.
  *
- *   - jobId = ${userId}:${periodStart}:${periodType} for dedup. This ensures
- *     duplicate requests for the same user + period + type are no-ops
- *     (BullMQ returns the existing job).
+ *   - jobId is derived by `buildEvaluatorJobId` (from `@caliber/evaluator`),
+ *     producing a colon-free, underscore-joined string. BullMQ 5.x throws
+ *     `Custom Id cannot contain :` for ids that contain `:` and don't split
+ *     into exactly 3 parts; ISO periodStart has multiple colons and would
+ *     trigger that error with a naive template literal. The shared builder is
+ *     also used by `apps/api reports.ts` rerun so cron and admin-rerun dedup
+ *     correctly against each other.
  *
  *   - This module exports a `QueueLike` interface so unit tests can inject a
  *     fake without standing up a real Redis-backed queue.
@@ -20,6 +24,7 @@
 import { Queue, type JobsOptions, type RedisOptions } from "bullmq";
 import type { Redis } from "ioredis";
 import { z } from "zod";
+import { buildEvaluatorJobId } from "@caliber/evaluator";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -186,14 +191,15 @@ export function createEvaluatorQueue(
 
 export interface EnqueueEvaluatorResult {
   /**
-   * The BullMQ job ID.
+   * The BullMQ job ID — produced by `buildEvaluatorJobId` (colon-free).
    *
-   * - Per-person (apiKeyId absent): `${userId}:${periodStart}:${periodType}`
-   *   (3-part — byte-identical to the pre-PR4 format).
-   * - Per-key (apiKeyId present): `${userId}:${apiKeyId}:${periodStart}:${periodType}`
-   *   (4-part — can never collide with the 3-part format because a UUID never
-   *   starts with a year-digit sequence that a periodStart/ISO-datetime would,
-   *   and the total separator count differs by exactly one colon).
+   * - Per-person (apiKeyId absent): `${userId}_${periodStart}_${periodType}`
+   *   with all `:` replaced by `-`.
+   * - Per-key (apiKeyId present): `${userId}_${apiKeyId}_${periodStart}_${periodType}`
+   *   with all `:` replaced by `-`.
+   *
+   * The two formats can never collide: a UUID apiKeyId contains no year-digit
+   * ISO-datetime prefix, and the segment count differs by one.
    */
   jobId: string;
 }
@@ -201,12 +207,14 @@ export interface EnqueueEvaluatorResult {
 /**
  * Validate `payload` and enqueue it onto the BullMQ queue.
  *
- * - jobId collision safety: when `apiKeyId` is absent the 3-part format
- *   `${userId}:${periodStart}:${periodType}` is used (byte-identical to the
- *   pre-PR4 format — no dedup regression on deploy). When `apiKeyId` is
- *   present the 4-part format `${userId}:${apiKeyId}:${periodStart}:${periodType}`
- *   is used. The two formats can never collide (a UUID never starts with a
- *   year-digit ISO-datetime prefix, and the separator-colon count differs).
+ * - jobId is derived by `buildEvaluatorJobId` (from `@caliber/evaluator`), which
+ *   produces a colon-free, underscore-joined id. BullMQ 5.x rejects custom ids
+ *   that contain `:` unless they split into exactly 3 parts; ISO periodStart
+ *   embeds multiple colons and would trigger that error with a naive template
+ *   literal. The shared builder is also used by `apps/api reports.ts` rerun so
+ *   cron and admin-rerun always produce the same id for the same inputs (dedup).
+ * - Collision safety: per-person (3 segments) can never equal per-key (4 segments)
+ *   because a UUID apiKeyId never looks like an ISO periodStart.
  * - On Zod validation failure this throws — treat as a programmer error
  *   (the caller assembled a bad payload), not a transient condition.
  * - On Redis-side failure (`queue.add` rejects), the error propagates.
@@ -218,9 +226,7 @@ export async function enqueueEvaluator(
   payload: unknown,
 ): Promise<EnqueueEvaluatorResult> {
   const validated = EvaluatorJobPayload.parse(payload);
-  const jobId = validated.apiKeyId
-    ? `${validated.userId}:${validated.apiKeyId}:${validated.periodStart}:${validated.periodType}`
-    : `${validated.userId}:${validated.periodStart}:${validated.periodType}`;
+  const jobId = buildEvaluatorJobId(validated);
 
   await queue.add(EVALUATOR_JOB_NAME, validated, { jobId });
 
