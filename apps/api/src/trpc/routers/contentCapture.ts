@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
-import { organizations, auditLogs, requestBodies } from "@caliber/db";
+import { organizations, auditLogs, requestBodies, rubrics } from "@caliber/db";
 import { can } from "@caliber/auth";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
@@ -114,6 +114,24 @@ export const contentCaptureRouter = router({
           code: "BAD_REQUEST",
           message: "Choose a facet model when enabling facet extraction",
         });
+      }
+
+      // Backstop: reject key-scoped rubrics from being pinned as org-active.
+      // The resolver's org-branch isNull(apiKeyId) is the final guard; this
+      // blocks the second writer of organizations.rubricId at the API layer.
+      if (input.patch.rubricId != null) {
+        const rubricRow = await ctx.db
+          .select({ apiKeyId: rubrics.apiKeyId })
+          .from(rubrics)
+          .where(eq(rubrics.id, input.patch.rubricId))
+          .limit(1)
+          .then((r) => r[0]);
+        if (rubricRow?.apiKeyId != null) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "rubric is key-scoped",
+          });
+        }
       }
 
       const turningOn =
