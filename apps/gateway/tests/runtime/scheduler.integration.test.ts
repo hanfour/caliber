@@ -39,6 +39,7 @@ let orgId: string;
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
   pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+  pool.on("error", () => {});  // swallow 57P01 admin-shutdown on container teardown
   db = drizzle(pool);
   await migrate(db, { migrationsFolder });
   const [org] = await db

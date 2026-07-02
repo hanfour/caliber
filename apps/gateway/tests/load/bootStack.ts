@@ -50,6 +50,7 @@ export async function bootStack(opts: BootOptions = {}): Promise<LoadStack> {
 
   const pgC: StartedPostgreSqlContainer = await new PostgreSqlContainer("postgres:16-alpine").start();
   const pool = new pg.Pool({ connectionString: pgC.getConnectionUri() });
+  pool.on("error", () => {});  // swallow 57P01 admin-shutdown on container teardown
   const db = drizzle(pool, { schema });
   await migrate(db as never, { migrationsFolder });
 

@@ -16,6 +16,7 @@ let db: ReturnType<typeof drizzle>
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16-alpine').start()
   pool = new pg.Pool({ connectionString: container.getConnectionUri() })
+  pool.on("error", () => {});  // swallow 57P01 admin-shutdown on container teardown
   db = drizzle(pool)
   const here = path.dirname(fileURLToPath(import.meta.url))
   await migrate(db, { migrationsFolder: path.resolve(here, '..', 'drizzle') })
