@@ -13,7 +13,7 @@
 4. **Single entry point = the TS `caliber` CLI** (npm `@hanfour.huang/caliber`). `caliber login` downloads the platform-matched Go agent binary (GitHub Releases + sha256 verification) and manages it. Members never invoke `caliber-agent` directly.
 5. **Platform scope v1 = macOS (launchd LaunchAgent).** Linux: documented `caliber agent run` foreground fallback; systemd user unit is a follow-up. Windows: out of scope.
 6. **Server-pushed agent config, v1 = polling interval only** (org-level, 30 s–30 min, set in the dashboard, fetched hourly by the agent). Scheduled upload windows are explicitly deferred (see §9).
-7. **First-login backfill = full history** (the current watcher behavior: new files start at offset 0). No date filter. Throttled by the existing 16 MiB/file/tick budget.
+7. **First-login backfill = the past 90 days** (operator-revised from "full history", 2026-07-03). The watcher gains an mtime-based discovery filter anchored at enroll time (§5.5). Throttled by the existing 16 MiB/file/tick budget.
 8. **Watch-all by default.** `caliber login` enrolls with the full `~/.claude/projects/` + `~/.codex/sessions/` roots watched (this deliberately flips the agent's original empty-by-default privacy contract; consent moves to the login approval page, §6).
 
 ---
@@ -69,7 +69,7 @@ New commands (commander, matching existing CLI style):
   2. Download the platform-matched `caliber-agent` binary from GitHub Releases (version pinned by the CLI, see §5.3) to `~/.caliber/bin/caliber-agent`; verify sha256 against the release checksums file; refuse on mismatch.
   3. `caliber-agent enroll --token <t> --server <URL> --watch-all --mode full-body` (non-interactive, §5.1).
   4. `caliber-agent install-service` (launchd, §5.2) — on non-macOS, print the documented foreground fallback instead.
-  5. Print a success summary: device name, watched roots, redaction mode, dashboard URL, and the full-history-backfill notice.
+  5. Print a success summary: device name, watched roots, redaction mode, dashboard URL, and the 90-day-backfill notice.
 - **`caliber logout`** — `uninstall-service` → `caliber-agent uninstall` (self-revoke + keychain + state cleanup, existing) → remove `~/.caliber/bin` + login state.
 - **`caliber agent status|pause|resume`** — thin passthroughs to the Go binary (members can pause any time).
 - **Config:** `~/.caliber/cli.json` `{serverUrl, agentVersion, binaryPath}` — **no secrets** (the `cda_*` key stays in the agent's keychain, unchanged).
@@ -81,25 +81,26 @@ New commands (commander, matching existing CLI style):
 2. **`install-service` / `uninstall-service`:** write/remove `~/Library/LaunchAgents/net.miilink.caliber-agent.plist` (`KeepAlive`, `RunAtLoad`, program = the installed binary with `run`), `launchctl bootstrap/bootout gui/$UID`. Logs to `~/.caliber-agent/agent.log` (already the agent's home).
 3. **Release pipeline:** new CI workflow builds `darwin-arm64`, `darwin-amd64`, `linux-amd64`, `linux-arm64` + `checksums.txt`, attached to a `agent-vX.Y.Z` GitHub Release. The TS CLI pins the compatible agent version (a constant bumped per CLI release).
 4. **Hourly config refresh** (§3) inside the `run` loop.
+5. **90-day backfill filter:** `enroll` computes and persists `backfill_cutoff = enrolledAt − 90d` in the agent config (a fixed anchor, NOT rolling — so the watched window never silently shrinks). At discovery time, files with `mtime < backfill_cutoff` are skipped; once a file is watched (or its mtime moves past the cutoff, i.e. an old session gets new activity), it is tailed from offset 0 as today — meaning a revived old session uploads its full content, which is acceptable ("still-active sessions are in scope"). Flag `--backfill-days` (default 90) on `enroll` for future flexibility; `0` = from-now-only.
 
-Backfill note: full-history is the **current** watcher behavior (new file → offset 0; no date filter) — zero code change, but the login summary and the spec call it out. The 16 MiB/file/tick budget spreads a multi-GB history over hours-to-days of background ticks; server-side dedup makes interruptions safe.
+Backfill note: the 16 MiB/file/tick budget spreads the 90-day history over hours of background ticks; server-side dedup makes interruptions safe. The login summary states the 90-day window.
 
 ## 6. Data contract, consent, transparency
 
 - Default mode **`full-body`**: full message content uploaded; the client-side secret-scrub is mandatory and non-disableable (existing `agent/redact/`); org custom patterns apply (existing).
-- **Consent = the approval page.** `/device` displays, before the approve button: what is collected (full Claude Code / Codex conversation content on that machine, secret-scrubbed), where it goes (the org on `caliber.miilink.net`), that it includes history, and the member's controls (`caliber agent pause`, device revocation in the dashboard, GDPR delete — all existing). Approving is the informed opt-in; nothing is collected before it.
+- **Consent = the approval page.** `/device` displays, before the approve button: what is collected (full Claude Code / Codex conversation content on that machine, secret-scrubbed), where it goes (the org on `caliber.miilink.net`), that it includes the past 90 days of history, and the member's controls (`caliber agent pause`, device revocation in the dashboard, GDPR delete — all existing). Approving is the informed opt-in; nothing is collected before it.
 - Member visibility: `/dashboard/devices` (own devices, revoke) exists; own ingested activity is visible through existing own-scope dashboards.
 
 ## 7. Ops notes (deploy-time, not code)
 
-- **VPS disk sizing:** 11 members × full-history transcripts land in `client_events` (monthly partitions). Before team rollout, estimate from 2–3 pilot members' `~/.claude` + `~/.codex` sizes and check Vultr disk headroom; ingest volume is observable via the devices page (`lastSeenAt`) and DB partition sizes.
+- **VPS disk sizing:** 11 members × 90-day transcripts land in `client_events` (monthly partitions). Before team rollout, estimate from 2–3 pilot members' last-90-day `~/.claude` + `~/.codex` sizes and check Vultr disk headroom; ingest volume is observable via the devices page (`lastSeenAt`) and DB partition sizes.
 - Rate-limit buckets for `/v1/device-auth/*` need prod env review (shared-IP concern does not apply — these come from members' machines directly).
 
 ## 8. Testing
 
 - **api integration (testcontainers):** device-auth happy path (start → approve → poll → enroll), TTL expiry, single-use poll, deny, cross-org isolation (approver's org binds the device), user-code brute-force rate limit, `agent-config` clamp + auth.
 - **TS CLI unit:** login state machine against a mock server (pending → slow_down → approved), checksum verification (tampered binary refused), idempotent re-login.
-- **Go:** non-interactive enroll flag matrix, plist generation golden-file, config-refresh fallback chain (server → cache → flag → default).
+- **Go:** non-interactive enroll flag matrix, plist generation golden-file, config-refresh fallback chain (server → cache → flag → default), backfill filter (file older than cutoff skipped; file crossing the cutoff via fresh mtime picked up; `--backfill-days 0` starts empty; anchor is fixed at enroll, not rolling).
 - **E2E (compose):** api up → scripted login (poll loop, no real browser: approve via direct API call with a session) → feed a fixture transcript into a temp `~/.claude` → assert `client_sessions`/`client_events` rows.
 
 ## 9. Future extensions (explicitly deferred)
@@ -107,7 +108,7 @@ Backfill note: full-history is the **current** watcher behavior (new file → of
 - Scheduled upload windows (batch mode) — deferred until a real need (e.g. constrained networks); design placeholder: extra fields on `/v1/agent-config`.
 - systemd user unit for Linux; Windows support.
 - Per-device (not just org) interval override.
-- Backfill date filter (`--backfill <days>`) if full-history proves too heavy in practice.
+- Backfill window other than 90 days exposed to members (the `--backfill-days` flag exists but `caliber login` does not surface it in v1).
 
 ## 10. Out of scope
 
