@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -61,6 +62,50 @@ func resolveKeychainPath(flagVal string, cfg *config.Config) string {
 		return flagVal
 	}
 	return cfg.KeychainPath
+}
+
+// Defense-in-depth bounds on the server-driven poll interval. The server
+// already clamps agent-config responses to this range, but the daemon
+// clamps again client-side so a buggy or compromised response can never
+// force an unreasonable tick rate.
+const (
+	minAgentConfigInterval = 30 * time.Second
+	maxAgentConfigInterval = 1800 * time.Second
+)
+
+// clampAgentConfigInterval enforces [minAgentConfigInterval, maxAgentConfigInterval].
+func clampAgentConfigInterval(d time.Duration) time.Duration {
+	if d < minAgentConfigInterval {
+		return minAgentConfigInterval
+	}
+	if d > maxAgentConfigInterval {
+		return maxAgentConfigInterval
+	}
+	return d
+}
+
+// refreshAgentConfig fetches GET /v1/agent-config, clamps the returned poll
+// interval, applies it to prov, and persists the result to disk so the next
+// startup can seed from cache before the first fetch completes. On fetch
+// error it logs and leaves prov untouched — the caller keeps running on
+// whatever interval was already active (cache / --interval flag / default).
+func refreshAgentConfig(ctx context.Context, client *api.Client, token string, prov *watcher.IntervalProvider, logger Logger) {
+	fresh, err := client.FetchAgentConfig(ctx, token)
+	if err != nil {
+		logger.Printf("[warn] agent-config refresh failed (err=%v)", err)
+		return
+	}
+	interval := clampAgentConfigInterval(time.Duration(fresh.PollIntervalSeconds) * time.Second)
+	prov.Set(interval)
+	ac := &config.AgentConfig{
+		PollIntervalSeconds: int64(interval / time.Second),
+		TTLSeconds:          fresh.TTLSeconds,
+		FetchedAt:           time.Now().UTC(),
+	}
+	if serr := config.SaveAgentConfig(ac); serr != nil {
+		logger.Printf("[warn] agent-config save failed (err=%v)", serr)
+	}
+	logger.Printf("[refresh] agent-config poll_interval=%s ttl=%ds", interval, fresh.TTLSeconds)
 }
 
 // fatalExitFor maps auth-fatal sentinels to the correct ExitError. Returns nil
@@ -215,6 +260,35 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration, keychainPath 
 		}
 	}()
 
+	// Seed the poll interval: cached agent-config (from a previous run's
+	// fetch) wins over the --interval flag; a live fetch below (and the
+	// hourly refresher) then wins over the cache once it lands.
+	effectiveInterval := interval
+	if cached, cerr := config.LoadAgentConfig(); cerr == nil && cached.PollIntervalSeconds > 0 {
+		effectiveInterval = clampAgentConfigInterval(time.Duration(cached.PollIntervalSeconds) * time.Second)
+	}
+	intervalProvider := watcher.NewIntervalProvider(effectiveInterval)
+
+	// Fetch the live agent-config synchronously (mirrors BootstrapRedactionSet's
+	// synchronous initial fetch) so the first fetch's result doesn't race the
+	// main loop's logger writes from a background goroutine. Fetch failure is
+	// non-fatal: intervalProvider keeps the cache/flag-seeded value above.
+	refreshAgentConfig(cmd.Context(), apiClient, key, intervalProvider, logger)
+
+	// Background hourly refresher goroutine.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-cmd.Context().Done():
+				return
+			case <-ticker.C:
+				refreshAgentConfig(cmd.Context(), apiClient, key, intervalProvider, logger)
+			}
+		}
+	}()
+
 	// Build HTTPSink (replaces LogSink).
 	httpSink := sink.NewHTTPSink(sink.HTTPSinkOpts{
 		BaseURL:  cfg.APIBaseURL,
@@ -242,15 +316,16 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration, keychainPath 
 			watcher.NewClaudeSource(claudeProjectsRoot()),
 			watcher.NewCodexSource(codexSessionsRoot(), nil),
 		},
-		Tailer:   &watcher.Tailer{},
-		Chunker:  chunker,
-		Sink:     httpSink,
-		Config:   cfg,
-		State:    state,
-		Resolver: watcher.NewCWDResolver(nil),
-		Log:      logger,
-		Now:      time.Now,
-		Interval: interval,
+		Tailer:           &watcher.Tailer{},
+		Chunker:          chunker,
+		Sink:             httpSink,
+		Config:           cfg,
+		State:            state,
+		Resolver:         watcher.NewCWDResolver(nil),
+		Log:              logger,
+		Now:              time.Now,
+		Interval:         interval,
+		IntervalProvider: intervalProvider,
 	})
 
 	if once {
