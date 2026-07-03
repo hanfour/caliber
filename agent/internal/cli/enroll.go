@@ -28,22 +28,28 @@ func newEnrollCmd() *cobra.Command {
 	var insecure bool
 	var force bool
 	var keychainPath string
+	var yes bool
+	var watchAll bool
+	var mode string
 	cmd := &cobra.Command{
 		Use:   "enroll <token>",
 		Short: "Enrol this device with caliber using a one-shot enrollment token",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnroll(cmd, args[0], force, apiBaseURL, insecure, keychainPath)
+			return runEnroll(cmd, args[0], force, apiBaseURL, insecure, keychainPath, yes, watchAll, mode)
 		},
 	}
 	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "caliber API URL (or set CALIBER_API_BASE_URL)")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "allow http:// in api-base-url (dev/local only)")
 	cmd.Flags().BoolVar(&force, "force", false, "re-enroll over an existing device")
 	cmd.Flags().StringVar(&keychainPath, "keychain", "", "custom keychain file (unlock once via `security unlock-keychain`) for SSH/headless use; persisted to config so run/uninstall reuse it. Empty = login keychain")
+	cmd.Flags().BoolVar(&yes, "yes", false, "non-interactive: accept all prompts (for caliber login)")
+	cmd.Flags().BoolVar(&watchAll, "watch-all", false, "watch the entire Claude/Codex roots instead of prompting for paths")
+	cmd.Flags().StringVar(&mode, "mode", "", "redaction mode: metadata-only|redacted-body|full-body (default full-body with --yes)")
 	return cmd
 }
 
-func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool, keychainPath string) error {
+func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool, keychainPath string, yes bool, watchAll bool, mode string) error {
 	// Early preflight — R17-F1 / R18-F1 (spec §3.8).
 	// Both checks run BEFORE config.Load / API call / keychain write so that
 	// a partially-uninstalled state can never be "healed" by re-enrolling.
@@ -83,9 +89,14 @@ func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, 
 		return &ExitError{Code: 1, Err: fmt.Errorf("invalid api_base_url: %w", err)}
 	}
 
+	if yes && mode == "" {
+		mode = "full-body"
+	}
 	prompter := wizard.Prompter(wizard.NewStdinPrompter())
 	if testPrompterHook != nil {
 		prompter = testPrompterHook
+	} else if yes {
+		prompter = wizard.AutoPrompter{}
 	}
 
 	hostname, hostnameErr := os.Hostname()
@@ -111,6 +122,8 @@ func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, 
 		InsecureTransport:  insecure,
 		KeychainPath:       keychainPath,
 		ClaudeProjectsRoot: claudeProjectsRoot(),
+		WatchAll:           watchAll,
+		Mode:               mode,
 	}
 	if err := wizard.RunEnrollWizard(cmd.Context(), deps, token); err != nil {
 		return ExitFromErr(translateEnrollErr(err))

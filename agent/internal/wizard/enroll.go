@@ -29,6 +29,13 @@ type Deps struct {
 	InsecureTransport  bool
 	KeychainPath       string // custom keychain file; "" = login keychain (#168)
 	ClaudeProjectsRoot string // typically ~/.claude/projects
+
+	// WatchAll and Mode drive the non-interactive `caliber login` path
+	// (spec Task 5): when WatchAll is set, RunEnrollWizard skips the
+	// interactive path-selection prompt entirely and seeds IncludePaths
+	// with both the Claude projects root and the Codex sessions root.
+	WatchAll bool
+	Mode     string // "" = wizard default (metadata-only); non-empty overrides
 }
 
 // LostKeyError is returned by RunEnrollWizard when the server returned a
@@ -79,18 +86,38 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 	// SaveConfigInitial is the first-write-aware variant: it may MkdirAll the
 	// root, but re-runs sentinel + partial-uninstall checks to catch the
 	// runEnroll preflight → here TOCTOU window (R15-F2 / R16-F2).
+	//
+	// Mode defaults to "metadata-only" (privacy-first); d.Mode overrides it
+	// whenever the caller set one (e.g. `--yes` defaults to "full-body" —
+	// see cli.runEnroll — regardless of whether --watch-all is also set).
+	mode := "metadata-only"
+	if d.Mode != "" {
+		mode = d.Mode
+	}
 	cfg := &config.Config{
 		DeviceID:          resp.DeviceID,
 		Hostname:          d.Hostname,
 		OS:                d.OS,
 		APIBaseURL:        d.APIBaseURL,
-		Mode:              "metadata-only",
+		Mode:              mode,
 		IncludePaths:      []string{},
 		InsecureTransport: d.InsecureTransport,
 		KeychainPath:      d.KeychainPath,
 	}
 	if err := config.SaveConfigInitial(cfg); err != nil {
 		return fmt.Errorf("config save: %w", err)
+	}
+
+	// Step 4b: non-interactive `caliber login` shortcut. When WatchAll is
+	// set, skip the interactive path-selection prompt entirely and seed
+	// IncludePaths with both the Claude projects root and the Codex
+	// sessions root, canonicalized the same way the interactive path does.
+	if d.WatchAll {
+		cfg.IncludePaths = watchAllRoots(d.ClaudeProjectsRoot)
+		if err := config.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("config save (watch-all paths): %w", err)
+		}
+		return nil
 	}
 
 	// Step 5: Scan + present candidate paths. Default is "none".
@@ -123,12 +150,11 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 	// (plan §8.2; re-prompting would be friendlier but is out of scope for PR4).
 	include := make([]string, 0, len(selected))
 	for _, p := range selected {
-		resolved, rerr := filepath.EvalSymlinks(p)
-		if rerr != nil {
-			fmt.Fprintf(os.Stderr, "warning: skipping %q (cannot resolve: %v)\n", p, rerr)
+		resolved, ok := canonicalizePath(p)
+		if !ok {
 			continue
 		}
-		include = append(include, filepath.Clean(resolved))
+		include = append(include, resolved)
 	}
 
 	// Step 6: Final confirm + write. SaveConfig is the runtime-flavored
@@ -145,4 +171,52 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 		return fmt.Errorf("config save (paths): %w", err)
 	}
 	return nil
+}
+
+// canonicalizePath resolves p through EvalSymlinks + Clean so the watcher's
+// allow-list only ever contains canonical absolute paths. ok is false (and a
+// warning is printed to stderr) when EvalSymlinks fails — e.g. a broken
+// symlink or a race-removed directory.
+func canonicalizePath(p string) (resolved string, ok bool) {
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping %q (cannot resolve: %v)\n", p, err)
+		return "", false
+	}
+	return filepath.Clean(r), true
+}
+
+// watchAllRoots returns the canonicalized Claude projects root and Codex
+// sessions root for the `--watch-all` non-interactive enroll path (spec
+// Task 5). Roots that fail to canonicalize (e.g. they don't exist yet) are
+// included Clean-only as a best-effort fallback so `caliber login` still
+// seeds a usable config.toml even before the directories are created.
+func watchAllRoots(claudeProjectsRoot string) []string {
+	roots := make([]string, 0, 2)
+	for _, root := range []string{claudeProjectsRoot, codexSessionsRoot()} {
+		if root == "" {
+			continue
+		}
+		if resolved, ok := canonicalizePath(root); ok {
+			roots = append(roots, resolved)
+		} else {
+			roots = append(roots, filepath.Clean(root))
+		}
+	}
+	return roots
+}
+
+// codexSessionsRoot returns the default ~/.codex/sessions path.
+// CALIBER_CODEX_SESSIONS env overrides for advanced/dev use (see
+// agent/README.md), mirroring cli.codexSessionsRoot (duplicated here since
+// wizard cannot import the cli package without a cycle).
+func codexSessionsRoot() string {
+	if override := os.Getenv("CALIBER_CODEX_SESSIONS"); override != "" {
+		return override
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".codex", "sessions")
 }
