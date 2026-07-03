@@ -32,10 +32,15 @@ describe("resolvePlatform", () => {
     expect(resolvePlatform()).toEqual({ platform: "linux", arch: "arm64" });
   });
 
-  it("maps any non-darwin platform to linux", () => {
+  // Ops-review guard: any platform other than darwin/linux (e.g. Windows)
+  // previously silently fell through to "linux", so a Windows member would
+  // get a linux tarball plus an `xdg-open` call that doesn't exist on their
+  // machine. There is no macOS/Linux binary to fall back to, so fail loudly
+  // instead of guessing.
+  it("throws a clear error for an unsupported platform (e.g. win32)", () => {
     Object.defineProperty(process, "platform", { value: "win32" });
     Object.defineProperty(process, "arch", { value: "x64" });
-    expect(resolvePlatform()).toEqual({ platform: "linux", arch: "amd64" });
+    expect(() => resolvePlatform()).toThrow(/unsupported platform/i);
   });
 });
 

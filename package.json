@@ -1,6 +1,6 @@
 {
   "name": "@hanfour.huang/caliber",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Caliber — AI Development Performance Evaluator. Analyze Claude Code & Codex usage for technical performance review.",
   "type": "module",
   "private": false,

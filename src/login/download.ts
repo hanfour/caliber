@@ -7,6 +7,13 @@ import { Readable } from "node:stream";
 import { spawnSync } from "node:child_process";
 
 export function resolvePlatform(): { platform: "darwin" | "linux"; arch: "arm64" | "amd64" } {
+  // Anything other than darwin/linux (e.g. Windows) previously fell through
+  // to "linux" silently, so a Windows member would get a linux tarball and
+  // an `xdg-open` call that doesn't exist on their machine. Fail loudly
+  // instead — there's no macOS/Linux binary release to fall back to.
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    throw new Error(`Unsupported platform "${process.platform}": caliber login supports macOS and Linux only.`);
+  }
   const platform = process.platform === "darwin" ? "darwin" : "linux";
   const arch = process.arch === "arm64" ? "arm64" : "amd64";
   return { platform, arch };
