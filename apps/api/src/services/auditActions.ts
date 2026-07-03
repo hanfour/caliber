@@ -9,6 +9,7 @@ export const AUDIT_ACTIONS = {
   DEVICE_SELF_REVOKED: "device.self_revoked",
   DEVICE_AUTH_APPROVED: "device_auth.approved",
   DEVICE_AUTH_DENIED: "device_auth.denied",
+  DEVICE_AUTH_CONFIG_SET: "device_auth.config_set",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

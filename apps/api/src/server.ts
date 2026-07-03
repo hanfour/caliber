@@ -12,6 +12,7 @@ import { devicesEnrollRoutes } from "./rest/devicesEnroll.js";
 import { devicesRevokeSelfRoutes } from "./rest/devicesRevokeSelf.js";
 import { ingestRoutes } from "./rest/ingest.js";
 import { redactionSetRoutes } from "./rest/redactionSet.js";
+import { agentConfigRoutes } from "./rest/agentConfig.js";
 import { startPartitionRollForwardCron } from "./services/clientEventsPartitions.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";
@@ -74,6 +75,7 @@ export async function buildServer() {
   await app.register(devicesRevokeSelfRoutes(env));
   await app.register(ingestRoutes(env));
   await app.register(redactionSetRoutes(env));
+  await app.register(agentConfigRoutes(env));
 
   // Daily roll-forward for client_events monthly partitions. Runs immediately
   // on boot so a fresh deploy is safe even if the daily timer hasn't ticked.

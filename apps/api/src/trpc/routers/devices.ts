@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { devices, deviceEnrollmentTokens } from "@caliber/db";
+import { devices, deviceEnrollmentTokens, organizations } from "@caliber/db";
 import { can } from "@caliber/auth";
 import {
   protectedProcedure,
@@ -20,6 +20,7 @@ import {
   deviceAuthFlowSchema,
   type DeviceAuthFlow,
 } from "../../rest/deviceAuth.js";
+import { clampInterval, AGENT_POLL_DEFAULT_SEC } from "../../rest/agentConfig.js";
 
 const uuid = z.string().uuid();
 
@@ -376,5 +377,40 @@ export const devicesRouter = router({
         });
         return { ok: true as const };
       }),
+  }),
+
+  // Org-admin resident-agent poll interval config. `get`/`set` both reuse the
+  // device.list_all RBAC action (already org_admin-gated) rather than
+  // introducing a new one purely for this setting.
+  agentConfig: router({
+    get: permissionProcedure(
+      z.object({ orgId: uuid }),
+      (_, input) => ({ type: "device.list_all", orgId: input.orgId }),
+    ).query(async ({ ctx, input }) => {
+      const [row] = await ctx.db
+        .select({ interval: organizations.agentPollIntervalSeconds })
+        .from(organizations)
+        .where(eq(organizations.id, input.orgId))
+        .limit(1);
+      return { pollIntervalSeconds: row?.interval ?? AGENT_POLL_DEFAULT_SEC };
+    }),
+
+    set: permissionProcedure(
+      z.object({ orgId: uuid, pollIntervalSeconds: z.number().int() }),
+      (_, input) => ({ type: "device.list_all", orgId: input.orgId }),
+    ).mutation(async ({ ctx, input }) => {
+      const clamped = clampInterval(input.pollIntervalSeconds);
+      await ctx.db
+        .update(organizations)
+        .set({ agentPollIntervalSeconds: clamped })
+        .where(eq(organizations.id, input.orgId));
+      await writeAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: AUDIT_ACTIONS.DEVICE_AUTH_CONFIG_SET,
+        orgId: input.orgId,
+        metadata: { pollIntervalSeconds: clamped },
+      });
+      return { ok: true as const, pollIntervalSeconds: clamped };
+    }),
   }),
 });

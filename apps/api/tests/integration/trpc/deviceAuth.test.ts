@@ -89,3 +89,31 @@ describe("devices.deviceAuth", () => {
     expect(flow.status).toBe("denied");
   });
 });
+
+describe("devices.agentConfig", () => {
+  it("get returns default 60 when unset; set clamps out-of-range", async () => {
+    const org = await makeOrg(testDb.db);
+    const admin = await makeUser(testDb.db, {
+      orgId: org.id,
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+    });
+    const orgId = org.id;
+    const c = await callerFor(testDb.db, admin.id, "admin@x.co", defaultTestEnv, redis);
+
+    expect((await c.devices.agentConfig.get({ orgId })).pollIntervalSeconds).toBe(60);
+    const set = await c.devices.agentConfig.set({ orgId, pollIntervalSeconds: 5 });
+    expect(set.pollIntervalSeconds).toBe(30); // clamped to min
+    expect((await c.devices.agentConfig.get({ orgId })).pollIntervalSeconds).toBe(30);
+  });
+
+  it("non-admin is FORBIDDEN", async () => {
+    const org = await makeOrg(testDb.db);
+    const member = await makeUser(testDb.db, { orgId: org.id });
+    const c = await callerFor(testDb.db, member.id, "member@x.co", defaultTestEnv, redis);
+    await expect(
+      c.devices.agentConfig.get({ orgId: org.id }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
