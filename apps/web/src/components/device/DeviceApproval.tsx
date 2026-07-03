@@ -7,7 +7,7 @@
 // sessionLoading -> sign-in-gate -> action shell.
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Laptop, ShieldAlert, XCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
@@ -23,11 +23,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type Decision = "none" | "approved" | "denied";
+type Decision = "none" | "approved" | "denied" | "error";
 
 export function DeviceApproval() {
   const t = useTranslations("deviceApproval");
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const initialCode = searchParams.get("code") ?? "";
 
@@ -49,9 +50,15 @@ export function DeviceApproval() {
 
   const approve = trpc.devices.deviceAuth.approve.useMutation({
     onSuccess: () => setDecision("approved"),
+    // A code that expired between lookup and click, or was already decided
+    // in another tab, fails here — surface it instead of silently resetting
+    // isPending with no feedback. The server unifies these as NOT_FOUND, so
+    // reuse the same "invalid or expired" copy as the lookup-error branch.
+    onError: () => setDecision("error"),
   });
   const deny = trpc.devices.deviceAuth.deny.useMutation({
     onSuccess: () => setDecision("denied"),
+    onError: () => setDecision("error"),
   });
 
   if (sessionLoading) {
@@ -65,9 +72,14 @@ export function DeviceApproval() {
   }
 
   if (!session?.user) {
-    const returnTo = encodeURIComponent(
-      `${window.location.pathname}${window.location.search}`,
-    );
+    // sign-in/page.tsx only reads `callbackUrl` (default `/dashboard`) and
+    // passes it straight to `signIn(..., { redirectTo })`, so that's the
+    // param we must use for the post-auth redirect to land back here.
+    // Derived from the SSR-safe next/navigation hooks (not `window.location`)
+    // so this branch has no client-only hazard.
+    const qs = searchParams.toString();
+    const currentPath = qs ? `${pathname}?${qs}` : pathname;
+    const callbackUrl = encodeURIComponent(currentPath);
     return (
       <Shell icon={<Laptop className="h-6 w-6 text-primary" />}>
         <CardHeader className="text-center">
@@ -75,7 +87,9 @@ export function DeviceApproval() {
           <CardDescription>{t("signInPrompt")}</CardDescription>
         </CardHeader>
         <CardFooter className="justify-center">
-          <Button onClick={() => router.push(`/sign-in?returnTo=${returnTo}`)}>
+          <Button
+            onClick={() => router.push(`/sign-in?callbackUrl=${callbackUrl}`)}
+          >
             {t("signInCta")}
           </Button>
         </CardFooter>
@@ -98,6 +112,16 @@ export function DeviceApproval() {
       <Shell icon={<XCircle className="h-6 w-6 text-destructive" />}>
         <CardHeader className="text-center">
           <CardTitle>{t("denied")}</CardTitle>
+        </CardHeader>
+      </Shell>
+    );
+  }
+
+  if (decision === "error") {
+    return (
+      <Shell icon={<ShieldAlert className="h-6 w-6 text-destructive" />}>
+        <CardHeader className="text-center">
+          <CardTitle>{t("notFound")}</CardTitle>
         </CardHeader>
       </Shell>
     );
