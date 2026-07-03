@@ -7,6 +7,8 @@
 // audit.ts) so no DB-side enum / CHECK constraint needs to follow this file.
 export const AUDIT_ACTIONS = {
   DEVICE_SELF_REVOKED: "device.self_revoked",
+  DEVICE_AUTH_APPROVED: "device_auth.approved",
+  DEVICE_AUTH_DENIED: "device_auth.denied",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

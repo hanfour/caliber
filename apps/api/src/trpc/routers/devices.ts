@@ -10,6 +10,16 @@ import {
   router,
 } from "../procedures.js";
 import { writeAudit } from "../../services/audit.js";
+import { resolveUserPrimaryOrgId } from "./_shared.js";
+import { AUDIT_ACTIONS } from "../../services/auditActions.js";
+import {
+  flowKey,
+  userCodeKey,
+  normalizeUserCode,
+  USER_CODE_RE,
+  deviceAuthFlowSchema,
+  type DeviceAuthFlow,
+} from "../../rest/deviceAuth.js";
 
 const uuid = z.string().uuid();
 
@@ -50,6 +60,43 @@ function ensureGatewayEnabled(env: { ENABLE_GATEWAY: boolean }) {
   if (!env.ENABLE_GATEWAY) {
     throw new TRPCError({ code: "NOT_FOUND" });
   }
+}
+
+// Resolve a user_code (as typed/pasted by the operator on the /device page)
+// to its pending Redis flow. Anti-enumeration: unknown, expired, or corrupt
+// codes all collapse to the same NOT_FOUND — never distinguish "doesn't
+// exist" from "exists but bad shape". A flow that's already been decided
+// (approved/denied) is NOT retried here; approve/deny callers get
+// PRECONDITION_FAILED so a second click doesn't silently no-op.
+async function readPendingFlowWithHash(
+  redis: import("ioredis").Redis,
+  rawUserCode: string,
+): Promise<{ flow: DeviceAuthFlow; codeHash: string }> {
+  const userCode = normalizeUserCode(rawUserCode);
+  if (!USER_CODE_RE.test(userCode)) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  }
+  const codeHash = await redis.get(userCodeKey(userCode));
+  if (!codeHash) throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  const raw = await redis.get(flowKey(codeHash));
+  if (!raw) throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  let flow: DeviceAuthFlow;
+  try {
+    flow = deviceAuthFlowSchema.parse(JSON.parse(raw));
+  } catch {
+    throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  }
+  if (flow.status !== "pending") {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "already decided" });
+  }
+  return { flow, codeHash };
+}
+
+async function readPendingFlow(
+  redis: import("ioredis").Redis,
+  rawUserCode: string,
+): Promise<DeviceAuthFlow> {
+  return (await readPendingFlowWithHash(redis, rawUserCode)).flow;
 }
 
 // Member-visible columns — no token_hash, no key material.
@@ -235,6 +282,99 @@ export const devicesRouter = router({
             ),
           )
           .orderBy(asc(deviceEnrollmentTokens.createdAt));
+      }),
+  }),
+
+  // Device-code authorization: the /device web page (session auth) approves a
+  // CLI login flow started via POST /v1/device-auth/start. Approve mints the
+  // SAME enrollment token the dashboard dialog issues, writing it into the
+  // Redis flow so POST /v1/device-auth/poll can return it to the CLI.
+  deviceAuth: router({
+    lookup: protectedProcedure
+      .input(z.object({ userCode: z.string().min(1) }))
+      .query(async ({ ctx, input }) => {
+        ensureGatewayEnabled(ctx.env);
+        const flow = await readPendingFlow(ctx.redis, input.userCode);
+        return {
+          hostname: flow.hostname,
+          os: flow.os,
+          agentVersion: flow.agentVersion,
+          cliVersion: flow.cliVersion,
+        };
+      }),
+
+    approve: protectedProcedure
+      .input(z.object({ userCode: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        ensureGatewayEnabled(ctx.env);
+        const pepper = requirePepper(ctx.env);
+        const { flow, codeHash } = await readPendingFlowWithHash(
+          ctx.redis,
+          input.userCode,
+        );
+        const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
+
+        const token = generateEnrollmentToken();
+        const tokenHash = hashEnrollmentToken(pepper, token);
+        const expiresAt = new Date(Date.now() + ENROLLMENT_TOKEN_TTL_SEC * 1000);
+        const [row] = await ctx.db
+          .insert(deviceEnrollmentTokens)
+          .values({ userId: ctx.user.id, orgId, tokenHash, expiresAt })
+          .returning({ id: deviceEnrollmentTokens.id });
+        if (!row) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "failed to insert enrollment token",
+          });
+        }
+
+        const approved: DeviceAuthFlow = {
+          ...flow,
+          status: "approved",
+          enrollmentToken: token,
+        };
+        const ttl = await ctx.redis.ttl(flowKey(codeHash));
+        await ctx.redis.set(
+          flowKey(codeHash),
+          JSON.stringify(approved),
+          "EX",
+          ttl > 0 ? ttl : 60,
+        );
+
+        await writeAudit(ctx.db, {
+          actorUserId: ctx.user.id,
+          action: AUDIT_ACTIONS.DEVICE_AUTH_APPROVED,
+          targetType: "enrollment_token",
+          targetId: row.id,
+          orgId,
+          metadata: { hostname: flow.hostname, os: flow.os },
+        });
+        return { ok: true as const };
+      }),
+
+    deny: protectedProcedure
+      .input(z.object({ userCode: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        ensureGatewayEnabled(ctx.env);
+        const { flow, codeHash } = await readPendingFlowWithHash(
+          ctx.redis,
+          input.userCode,
+        );
+        const denied: DeviceAuthFlow = { ...flow, status: "denied" };
+        const ttl = await ctx.redis.ttl(flowKey(codeHash));
+        await ctx.redis.set(
+          flowKey(codeHash),
+          JSON.stringify(denied),
+          "EX",
+          ttl > 0 ? ttl : 60,
+        );
+        await writeAudit(ctx.db, {
+          actorUserId: ctx.user.id,
+          action: AUDIT_ACTIONS.DEVICE_AUTH_DENIED,
+          orgId: null,
+          metadata: { hostname: flow.hostname },
+        });
+        return { ok: true as const };
       }),
   }),
 });
