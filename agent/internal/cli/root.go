@@ -43,6 +43,8 @@ func New() *cobra.Command {
 	cmd.AddCommand(newPauseCmd())
 	cmd.AddCommand(newResumeCmd())
 	cmd.AddCommand(newUninstallCmd())
+	cmd.AddCommand(newInstallServiceCmd())
+	cmd.AddCommand(newUninstallServiceCmd())
 	return cmd
 }
 
