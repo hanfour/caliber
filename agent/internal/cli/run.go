@@ -23,6 +23,18 @@ import (
 	"github.com/hanfour/ai-dev-eval/agent/watcher"
 )
 
+// validRedactModes is the set of legal --mode / cfg.Mode values, shared by
+// the run-time load check (below) and the enroll-time boundary check
+// (enroll.go) so both sides of `caliber login` agree on what's legal.
+// Empty string is valid: it means "no override" — run.go defaults it to
+// ModeMetadataOnly, and enroll.go leaves the wizard/--yes default in place.
+var validRedactModes = map[string]bool{
+	string(redact.ModeMetadataOnly): true,
+	string(redact.ModeRedactedBody): true,
+	string(redact.ModeFullBody):     true,
+	"":                              true,
+}
+
 func newRunCmd() *cobra.Command {
 	var once bool
 	var interval time.Duration
@@ -124,13 +136,7 @@ func runRun(cmd *cobra.Command, once bool, interval time.Duration, keychainPath 
 
 	// Validate cfg.Mode before constructing chunker. An unknown mode would
 	// cause ApplyMode's switch to fall through, shipping content unredacted.
-	validModes := map[string]bool{
-		string(redact.ModeMetadataOnly): true,
-		string(redact.ModeRedactedBody): true,
-		string(redact.ModeFullBody):     true,
-		"":                              true, // empty defaults to ModeMetadataOnly below
-	}
-	if !validModes[cfg.Mode] {
+	if !validRedactModes[cfg.Mode] {
 		return &ExitError{Code: 1, Err: fmt.Errorf("config: invalid mode %q (must be one of: metadata-only, redacted-body, full-body)", cfg.Mode)}
 	}
 	mode := redact.Mode(cfg.Mode)

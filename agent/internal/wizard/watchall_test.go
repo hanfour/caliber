@@ -80,20 +80,71 @@ func TestRunEnrollWizard_WatchAll_NoModeOverride_KeepsDefault(t *testing.T) {
 	}
 }
 
-// TestWatchAllRoots_UnresolvableRoot_FallsBackToClean covers the
-// watchAllRoots best-effort branch: a root that doesn't exist yet (so
-// EvalSymlinks fails) still contributes a Clean-only entry instead of being
-// dropped, so `caliber login --watch-all` seeds a usable config even before
-// ~/.claude/projects or ~/.codex/sessions have been created.
-func TestWatchAllRoots_UnresolvableRoot_FallsBackToClean(t *testing.T) {
-	missingClaude := filepath.Join(t.TempDir(), "does-not-exist", "claude-projects")
-	missingCodex := filepath.Join(t.TempDir(), "does-not-exist", "codex-sessions")
+// TestWatchAllRoots_UnresolvableRoot_ResolvesNearestExistingAncestor covers
+// the watchAllRoots best-effort branch: a root that doesn't exist yet (so
+// EvalSymlinks fails on the full path) must still canonicalize through its
+// nearest existing ancestor — NOT fall back to a raw Clean-only path — so the
+// stored entry string-matches what loop.go's allowed() computes at match
+// time (EvalSymlinks(cwd)) when an ancestor (e.g. HOME) is itself reached via
+// a symlink. Both roots must still be present (dropping codex would be worse
+// — it wouldn't be watched until first use).
+//
+// This exercises a real symlink in the wild: on macOS, t.TempDir() lives
+// under /var/folders/..., and /var is itself a symlink to /private/var, so
+// EvalSymlinks(tmp) != tmp — the exact class of bug the reviewer flagged.
+func TestWatchAllRoots_UnresolvableRoot_ResolvesNearestExistingAncestor(t *testing.T) {
+	tmp := t.TempDir()
+	missingClaude := filepath.Join(tmp, "does-not-exist", "claude-projects")
+	missingCodex := filepath.Join(tmp, "does-not-exist", "codex-sessions")
 	t.Setenv("CALIBER_CODEX_SESSIONS", missingCodex)
 
+	resolvedTmp, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	got := watchAllRoots(missingClaude)
-	want := []string{filepath.Clean(missingClaude), filepath.Clean(missingCodex)}
+	want := []string{
+		filepath.Join(resolvedTmp, "does-not-exist", "claude-projects"),
+		filepath.Join(resolvedTmp, "does-not-exist", "codex-sessions"),
+	}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("watchAllRoots = %v, want %v", got, want)
+	}
+}
+
+// TestWatchAllRoots_SymlinkedHome_ResolvesToRealHome is the scenario the
+// reviewer called out directly: HOME (or CALIBER_AGENT-adjacent dirs) is a
+// symlink, and the leaf dir (~/.codex/sessions) doesn't exist yet on a fresh
+// machine, so EvalSymlinks on the full path fails outright. The stored root
+// must still resolve through the symlinked HOME to the real directory,
+// matching what allowed() computes for a cwd reached via the same symlink.
+func TestWatchAllRoots_SymlinkedHome_ResolvesToRealHome(t *testing.T) {
+	realHome := t.TempDir()
+	symHome := filepath.Join(t.TempDir(), "home-link")
+	if err := os.Symlink(realHome, symHome); err != nil {
+		t.Skipf("symlink not supported in this environment: %v", err)
+	}
+	t.Setenv("HOME", symHome)
+	t.Setenv("CALIBER_CODEX_SESSIONS", "") // force default (home-relative) codex root
+
+	claudeRoot := filepath.Join(symHome, ".claude", "projects") // neither leaf exists yet
+
+	// realHome (from t.TempDir()) can itself sit behind a platform symlink
+	// (e.g. macOS /var -> /private/var); resolve it so this test isolates
+	// the "HOME is a symlink" scenario from that unrelated artifact.
+	resolvedRealHome, err := filepath.EvalSymlinks(realHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := watchAllRoots(claudeRoot)
+	want := []string{
+		filepath.Join(resolvedRealHome, ".claude", "projects"),
+		filepath.Join(resolvedRealHome, ".codex", "sessions"),
+	}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("watchAllRoots = %v, want %v (resolved through symlinked HOME)", got, want)
 	}
 }
 

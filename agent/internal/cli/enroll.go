@@ -50,6 +50,16 @@ func newEnrollCmd() *cobra.Command {
 }
 
 func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool, keychainPath string, yes bool, watchAll bool, mode string) error {
+	// Validate --mode at the enroll boundary, before any observable side
+	// effect (preflight I/O, API call, keychain/config write). An unvalidated
+	// --mode would otherwise be persisted verbatim and only fail later when
+	// `caliber-agent run` starts — too late for `caliber login` automation.
+	// validRedactModes (run.go) is the same set `run` enforces at load time;
+	// "" is valid here and means "use the wizard/--yes default" below.
+	if !validRedactModes[mode] {
+		return &ExitError{Code: 1, Err: fmt.Errorf("invalid --mode %q (must be one of: metadata-only, redacted-body, full-body)", mode)}
+	}
+
 	// Early preflight — R17-F1 / R18-F1 (spec §3.8).
 	// Both checks run BEFORE config.Load / API call / keychain write so that
 	// a partially-uninstalled state can never be "healed" by re-enrolling.

@@ -432,6 +432,41 @@ func TestEnroll_HTTPWithoutInsecure_Rejected(t *testing.T) {
 	}
 }
 
+func TestEnroll_InvalidMode_ReturnsExit1_NoAPICall_NoConfig(t *testing.T) {
+	// R-mode: --mode must be validated at the enroll boundary (before any
+	// persistence), not left to fail later when `caliber-agent run` starts —
+	// bad under `caliber login` automation. Covers the reviewer's Finding 1.
+	t.Setenv("CALIBER_AGENT_HOME", filepath.Join(t.TempDir(), "absent"))
+	var calls int32
+	srv := enrollCountingServer(t, &calls)
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"enroll", "tok", "--api-base-url=" + srv.URL, "--insecure", "--yes", "--mode", "banana"})
+	err := cmd.ExecuteContext(context.Background())
+
+	var ee *ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("err = %v, want *ExitError", err)
+	}
+	if ee.Code != 1 {
+		t.Errorf("Code = %d, want 1", ee.Code)
+	}
+	for _, want := range []string{"metadata-only", "redacted-body", "full-body"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name allowed mode %q, got: %v", want, err)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Errorf("API must NOT be called with an invalid --mode; calls=%d", got)
+	}
+	if _, lerr := config.Load(); !errors.Is(lerr, config.ErrNotEnrolled) {
+		t.Errorf("config must not exist after invalid --mode, got: %v", lerr)
+	}
+}
+
 func TestEnroll_HTTPWithInsecure_Allowed(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "absent")
 	t.Setenv("CALIBER_AGENT_HOME", root)

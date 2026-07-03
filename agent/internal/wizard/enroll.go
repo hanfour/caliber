@@ -188,22 +188,57 @@ func canonicalizePath(p string) (resolved string, ok bool) {
 
 // watchAllRoots returns the canonicalized Claude projects root and Codex
 // sessions root for the `--watch-all` non-interactive enroll path (spec
-// Task 5). Roots that fail to canonicalize (e.g. they don't exist yet) are
-// included Clean-only as a best-effort fallback so `caliber login` still
-// seeds a usable config.toml even before the directories are created.
+// Task 5). Both roots are always included — even one that doesn't exist yet
+// (e.g. ~/.codex/sessions on a fresh machine, before Codex has ever run) —
+// so `caliber login` still seeds a usable config.toml. Dropping an
+// unresolvable root would be worse than a best-effort canonicalization: the
+// dir simply wouldn't be watched until first use.
 func watchAllRoots(claudeProjectsRoot string) []string {
 	roots := make([]string, 0, 2)
 	for _, root := range []string{claudeProjectsRoot, codexSessionsRoot()} {
 		if root == "" {
 			continue
 		}
-		if resolved, ok := canonicalizePath(root); ok {
-			roots = append(roots, resolved)
-		} else {
-			roots = append(roots, filepath.Clean(root))
-		}
+		roots = append(roots, resolveAncestorSymlinks(root))
 	}
 	return roots
+}
+
+// resolveAncestorSymlinks canonicalizes path even when its leaf directory
+// doesn't exist yet. It first tries a plain filepath.EvalSymlinks; when that
+// fails (ENOENT on a component of the path — the common case for
+// ~/.codex/sessions or ~/.claude/projects before first use), it walks up
+// the parent chain to find the nearest existing ancestor (HOME always
+// exists), resolves *that* through EvalSymlinks, and rejoins the
+// (nonexistent) remainder.
+//
+// This matters because loop.go's allowed() resolves cwd via EvalSymlinks at
+// match time and expects IncludePaths to already be canonical (spec §4.2):
+// if HOME itself is a symlink, a Clean-only fallback that skips symlink
+// resolution would store a non-canonical entry that never string-matches
+// the resolved cwd, silently dropping every event under that root.
+func resolveAncestorSymlinks(path string) string {
+	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return filepath.Clean(resolved)
+	}
+
+	var suffix []string
+	dir := clean
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the filesystem root without finding an existing
+			// ancestor (should not happen in practice — HOME always
+			// exists). Fall back to the Clean-only path.
+			return clean
+		}
+		suffix = append([]string{filepath.Base(dir)}, suffix...)
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Clean(filepath.Join(append([]string{resolved}, suffix...)...))
+		}
+		dir = parent
+	}
 }
 
 // codexSessionsRoot returns the default ~/.codex/sessions path.
