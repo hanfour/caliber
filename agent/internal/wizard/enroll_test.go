@@ -239,10 +239,12 @@ func TestRunEnrollWizard_BackfillDaysSetsCutoff(t *testing.T) {
 	}
 }
 
-// BackfillDays == 0 (explicit --backfill-days 0, or the zero value) must
-// leave BackfillCutoff zero — disabling the filter entirely, not "0 days
-// before now" which would skip everything.
-func TestRunEnrollWizard_BackfillDaysZero_LeavesCutoffZero(t *testing.T) {
+// BackfillDays == 0 (explicit --backfill-days 0, or the zero value) means
+// "from now": the cutoff must be pinned to ~enroll time so historical
+// sessions are excluded (M3 fix). Leaving BackfillCutoff at its zero Time
+// value here would disable the filter entirely and upload the caller's
+// ENTIRE history — the privacy footgun M3 closes.
+func TestRunEnrollWizard_BackfillDaysZero_MeansFromNow(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "absent")
 	t.Setenv("CALIBER_AGENT_HOME", root)
 
@@ -252,6 +254,35 @@ func TestRunEnrollWizard_BackfillDaysZero_LeavesCutoffZero(t *testing.T) {
 	deps := happyDeps(fp, nil)
 	deps.BackfillDays = 0
 
+	before := time.Now()
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BackfillCutoff.IsZero() {
+		t.Fatalf("BackfillCutoff is zero, want ~now (0 means from-now, not entire-history)")
+	}
+	if cfg.BackfillCutoff.Before(before.Add(-time.Second)) || cfg.BackfillCutoff.After(after.Add(time.Second)) {
+		t.Fatalf("BackfillCutoff = %v, want within [%v, %v]", cfg.BackfillCutoff, before, after)
+	}
+}
+
+// BackfillDays < 0 (e.g. -1) explicitly disables the filter — the caller's
+// entire history is uploaded. BackfillCutoff stays at its zero Time value.
+func TestRunEnrollWizard_BackfillDaysNegative_LeavesCutoffZero(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{0}}
+	deps := happyDeps(fp, nil)
+	deps.BackfillDays = -1
+
 	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +291,7 @@ func TestRunEnrollWizard_BackfillDaysZero_LeavesCutoffZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !cfg.BackfillCutoff.IsZero() {
-		t.Fatalf("BackfillCutoff = %v, want zero", cfg.BackfillCutoff)
+		t.Fatalf("BackfillCutoff = %v, want zero (negative disables filter)", cfg.BackfillCutoff)
 	}
 }
 

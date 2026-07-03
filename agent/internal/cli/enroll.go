@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
@@ -47,7 +48,7 @@ func newEnrollCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&yes, "yes", false, "non-interactive: accept all prompts (for caliber login)")
 	cmd.Flags().BoolVar(&watchAll, "watch-all", false, "watch the entire Claude/Codex roots instead of prompting for paths")
 	cmd.Flags().StringVar(&mode, "mode", "", "redaction mode: metadata-only|redacted-body|full-body (default full-body with --yes)")
-	cmd.Flags().IntVar(&backfillDays, "backfill-days", 90, "only backfill sessions modified within this many days (0 = from now)")
+	cmd.Flags().IntVar(&backfillDays, "backfill-days", 90, "only backfill sessions modified within this many days (N>0 = last N days, 0 = from now, negative = entire history)")
 	return cmd
 }
 
@@ -152,17 +153,43 @@ func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, 
 	return nil
 }
 
+// stderrIsInteractiveTTY reports whether os.Stderr is attached to a real
+// terminal. It's a package-level var (not a plain func) so tests can swap
+// it for a stub without needing a real pty — see withStderrTTY in
+// enroll_test.go. Security M2: printing the raw cda_* device key is only
+// safe when a human is directly watching the terminal — under
+// launchd/SSH/CI, stderr is typically captured to a persisted, possibly
+// group-readable log file.
+var stderrIsInteractiveTTY = func() bool {
+	return term.IsTerminal(int(os.Stderr.Fd()))
+}
+
 func translateEnrollErr(err error) error {
 	var lk *wizard.LostKeyError
 	if errors.As(err, &lk) {
-		// Failure C — emit raw key to stderr per spec §5 before propagating.
-		fmt.Fprintf(os.Stderr,
-			"ERROR: API returned a device key but local storage failed (%v).\n"+
-				"  device_id: %s\n"+
-				"  key:       %s\n"+
-				"To clean up, revoke this device in /dashboard/devices and try again.\n"+
-				"The key has NOT been saved locally and CANNOT be retrieved later.\n",
-			lk.Cause, lk.DeviceID, lk.RawKey)
+		if stderrIsInteractiveTTY() {
+			// Failure C — emit raw key to stderr per spec §5 before propagating.
+			// Safe here: an interactive TTY is not persisted to a log file.
+			fmt.Fprintf(os.Stderr,
+				"ERROR: API returned a device key but local storage failed (%v).\n"+
+					"  device_id: %s\n"+
+					"  key:       %s\n"+
+					"To clean up, revoke this device in /dashboard/devices and try again.\n"+
+					"The key has NOT been saved locally and CANNOT be retrieved later.\n",
+				lk.Cause, lk.DeviceID, lk.RawKey)
+		} else {
+			// Non-interactive (launchd/SSH/CI): never print the raw key —
+			// that stderr is likely captured to a persisted, possibly
+			// group-readable log (security M2). Only the device_id is safe
+			// to log; the operator revokes by device_id in the dashboard.
+			fmt.Fprintf(os.Stderr,
+				"ERROR: API returned a device key but local storage failed (%v).\n"+
+					"  device_id: %s\n"+
+					"To clean up, revoke this device in /dashboard/devices and try again.\n"+
+					"The key has NOT been saved locally and CANNOT be retrieved later.\n"+
+					"(key omitted: stderr is not an interactive terminal)\n",
+				lk.Cause, lk.DeviceID)
+		}
 	}
 	return err
 }

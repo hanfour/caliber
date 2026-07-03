@@ -30,6 +30,6 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)"
       - name: Tests with race detector
-        run: go test ./internal/... -race
+        run: go test ./... -race
       - name: Coverage gate (≥ 80%, excludes interactive TTY code)
         run: ./scripts/coverage.sh

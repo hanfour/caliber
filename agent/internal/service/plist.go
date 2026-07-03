@@ -26,6 +26,13 @@ func LaunchAgentPath() string {
 
 // plistTmpl is text/template (not html/template) so we control escaping
 // explicitly via xmlEscape below; text/template does NOT auto-escape.
+//
+// KeepAlive is scoped to SuccessfulExit=false (restart only on a non-zero
+// exit / crash) rather than the bare <true/> form (restart on ANY exit).
+// run.go exits 0 deliberately on two paths — a revoked device key, and the
+// uninstall sentinel — and a bare KeepAlive would relaunch the daemon every
+// ~10s after either of those, hammering the server with revoked-key
+// requests forever (M2 fix).
 var plistTmpl = template.Must(template.New("plist").Parse(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -40,7 +47,10 @@ var plistTmpl = template.Must(template.New("plist").Parse(`<?xml version="1.0" e
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>StandardOutPath</key>
   <string>{{.Log}}</string>
   <key>StandardErrorPath</key>

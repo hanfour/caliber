@@ -192,7 +192,7 @@ SOURCELOOP:
 				l.log.Printf("[debug] cwd unresolved: %s", ref.Path)
 				continue
 			}
-			if !allowed(cwd, l.config.IncludePaths) {
+			if !l.config.WatchAll && !allowed(cwd, l.config.IncludePaths) {
 				continue
 			}
 

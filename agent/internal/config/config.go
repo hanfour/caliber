@@ -24,18 +24,27 @@ type Config struct {
 	Mode              string   `toml:"mode"`
 	IncludePaths      []string `toml:"include_paths"`
 	InsecureTransport bool     `toml:"insecure_transport"`
+	// WatchAll, when true, disables the IncludePaths cwd allow-list filter
+	// entirely (loop.go's Tick short-circuits the allowed() check). Set by
+	// the `--watch-all` non-interactive enroll path (spec Task 5); IncludePaths
+	// stays empty in that case since the old transcript-root seeding was
+	// itself the bug (C1) — cwd is never under ~/.claude/projects.
+	WatchAll bool `toml:"watch_all,omitempty"`
 	// KeychainPath, when set, points the macOS `security` CLI at a custom
 	// keychain file instead of the login keychain. Enables SSH/headless
 	// daemon operation: the login keychain can't be unlocked from a
 	// non-GUI session, but a dedicated keychain unlocked once via
 	// `security unlock-keychain` works (#168). Empty = login keychain.
 	KeychainPath string `toml:"keychain_path,omitempty"`
-	// BackfillCutoff, when set, is the fixed anchor (enrolled-at minus N days)
-	// below which newly-discovered transcript files are skipped at discovery
-	// time. It is persisted once at enroll — NOT rolling — so the cutoff
-	// stays pinned to the original enroll date across restarts. Zero value
-	// (legacy configs written before this field existed, or --backfill-days
-	// 0) disables the filter entirely (spec Task 6).
+	// BackfillCutoff, when set, is the fixed anchor below which
+	// newly-discovered transcript files are skipped at discovery time. It is
+	// persisted once at enroll — NOT rolling — so the cutoff stays pinned to
+	// the original enroll date across restarts. --backfill-days N>0 sets it
+	// to (enrolled-at minus N days); --backfill-days 0 sets it to
+	// enrolled-at itself ("from now"); --backfill-days negative (or a
+	// legacy config written before this field existed) leaves it at its
+	// zero Time value, which disables the filter entirely — the caller's
+	// full history is uploaded (spec Task 6).
 	BackfillCutoff time.Time `toml:"backfill_cutoff,omitempty"`
 }
 

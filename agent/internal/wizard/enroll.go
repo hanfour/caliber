@@ -33,14 +33,18 @@ type Deps struct {
 
 	// WatchAll and Mode drive the non-interactive `caliber login` path
 	// (spec Task 5): when WatchAll is set, RunEnrollWizard skips the
-	// interactive path-selection prompt entirely and seeds IncludePaths
-	// with both the Claude projects root and the Codex sessions root.
+	// interactive path-selection prompt entirely and persists
+	// config.Config.WatchAll=true, which disables the watcher's cwd
+	// allow-list filter (IncludePaths is left empty — see C1 fix comment
+	// at the call site below).
 	WatchAll bool
 	Mode     string // "" = wizard default (metadata-only); non-empty overrides
 
 	// BackfillDays sets the 90-day-style backfill cutoff (spec Task 6): files
 	// modified before (enroll time − BackfillDays) are skipped at discovery.
-	// 0 disables the filter (from-now-only). Default wired by cli is 90.
+	// 0 means "from now" (cutoff = enroll time; nothing predating enroll is
+	// uploaded). Negative means "no cutoff" (entire history uploaded).
+	// Default wired by cli is 90.
 	BackfillDays int
 }
 
@@ -110,21 +114,37 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 		InsecureTransport: d.InsecureTransport,
 		KeychainPath:      d.KeychainPath,
 	}
-	if d.BackfillDays > 0 {
+	switch {
+	case d.BackfillDays > 0:
 		cfg.BackfillCutoff = time.Now().AddDate(0, 0, -d.BackfillDays)
+	case d.BackfillDays == 0:
+		// "From now": only sessions modified after enroll pass the filter.
+		// Must NOT leave BackfillCutoff at its zero Time value — a zero
+		// value disables the filter entirely (skipForBackfill in
+		// watcher/loop.go), which would upload the caller's ENTIRE history
+		// instead of "nothing predating enroll" (M3 privacy fix).
+		cfg.BackfillCutoff = time.Now()
+	default:
+		// Negative (e.g. -1): explicitly disable the filter — upload
+		// entire history. BackfillCutoff stays at its zero value.
 	}
 	if err := config.SaveConfigInitial(cfg); err != nil {
 		return fmt.Errorf("config save: %w", err)
 	}
 
 	// Step 4b: non-interactive `caliber login` shortcut. When WatchAll is
-	// set, skip the interactive path-selection prompt entirely and seed
-	// IncludePaths with both the Claude projects root and the Codex
-	// sessions root, canonicalized the same way the interactive path does.
+	// set, skip the interactive path-selection prompt entirely. WatchAll
+	// means "no cwd filtering" (watcher/loop.go's Tick short-circuits the
+	// allowed() check when Config.WatchAll is true) — IncludePaths stays
+	// empty. Seeding it with the transcript-file roots (~/.claude/projects,
+	// ~/.codex/sessions) was the C1 bug: IncludePaths is a
+	// project-working-directory allow-list, and a session's resolved cwd
+	// (e.g. /Users/alice/myrepo) is never under those roots, so every event
+	// was silently dropped.
 	if d.WatchAll {
-		cfg.IncludePaths = watchAllRoots(d.ClaudeProjectsRoot)
+		cfg.WatchAll = true
 		if err := config.SaveConfig(cfg); err != nil {
-			return fmt.Errorf("config save (watch-all paths): %w", err)
+			return fmt.Errorf("config save (watch-all): %w", err)
 		}
 		return nil
 	}
@@ -193,74 +213,4 @@ func canonicalizePath(p string) (resolved string, ok bool) {
 		return "", false
 	}
 	return filepath.Clean(r), true
-}
-
-// watchAllRoots returns the canonicalized Claude projects root and Codex
-// sessions root for the `--watch-all` non-interactive enroll path (spec
-// Task 5). Both roots are always included — even one that doesn't exist yet
-// (e.g. ~/.codex/sessions on a fresh machine, before Codex has ever run) —
-// so `caliber login` still seeds a usable config.toml. Dropping an
-// unresolvable root would be worse than a best-effort canonicalization: the
-// dir simply wouldn't be watched until first use.
-func watchAllRoots(claudeProjectsRoot string) []string {
-	roots := make([]string, 0, 2)
-	for _, root := range []string{claudeProjectsRoot, codexSessionsRoot()} {
-		if root == "" {
-			continue
-		}
-		roots = append(roots, resolveAncestorSymlinks(root))
-	}
-	return roots
-}
-
-// resolveAncestorSymlinks canonicalizes path even when its leaf directory
-// doesn't exist yet. It first tries a plain filepath.EvalSymlinks; when that
-// fails (ENOENT on a component of the path — the common case for
-// ~/.codex/sessions or ~/.claude/projects before first use), it walks up
-// the parent chain to find the nearest existing ancestor (HOME always
-// exists), resolves *that* through EvalSymlinks, and rejoins the
-// (nonexistent) remainder.
-//
-// This matters because loop.go's allowed() resolves cwd via EvalSymlinks at
-// match time and expects IncludePaths to already be canonical (spec §4.2):
-// if HOME itself is a symlink, a Clean-only fallback that skips symlink
-// resolution would store a non-canonical entry that never string-matches
-// the resolved cwd, silently dropping every event under that root.
-func resolveAncestorSymlinks(path string) string {
-	clean := filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
-		return filepath.Clean(resolved)
-	}
-
-	var suffix []string
-	dir := clean
-	for {
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached the filesystem root without finding an existing
-			// ancestor (should not happen in practice — HOME always
-			// exists). Fall back to the Clean-only path.
-			return clean
-		}
-		suffix = append([]string{filepath.Base(dir)}, suffix...)
-		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
-			return filepath.Clean(filepath.Join(append([]string{resolved}, suffix...)...))
-		}
-		dir = parent
-	}
-}
-
-// codexSessionsRoot returns the default ~/.codex/sessions path.
-// CALIBER_CODEX_SESSIONS env overrides for advanced/dev use (see
-// agent/README.md), mirroring cli.codexSessionsRoot (duplicated here since
-// wizard cannot import the cli package without a cycle).
-func codexSessionsRoot() string {
-	if override := os.Getenv("CALIBER_CODEX_SESSIONS"); override != "" {
-		return override
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".codex", "sessions")
 }

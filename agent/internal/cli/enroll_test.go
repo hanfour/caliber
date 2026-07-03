@@ -141,7 +141,21 @@ func TestEnrollMissingBaseURL_ReturnsExit1(t *testing.T) {
 	}
 }
 
-func TestTranslateEnrollErr_LostKey_EmitsRawKeyToStderr(t *testing.T) {
+// withStderrTTY overrides the security-M2 interactive-TTY seam for the
+// duration of the test, restoring it on cleanup.
+func withStderrTTY(t *testing.T, interactive bool) {
+	t.Helper()
+	orig := stderrIsInteractiveTTY
+	stderrIsInteractiveTTY = func() bool { return interactive }
+	t.Cleanup(func() { stderrIsInteractiveTTY = orig })
+}
+
+// TestTranslateEnrollErr_LostKey_InteractiveTTY_EmitsRawKeyToStderr covers
+// the interactive path: a human watching a real terminal needs the raw key
+// to be able to act on Failure C, and an interactive TTY is not persisted
+// to a log file the way launchd/SSH/CI capture is.
+func TestTranslateEnrollErr_LostKey_InteractiveTTY_EmitsRawKeyToStderr(t *testing.T) {
+	withStderrTTY(t, true)
 	// Redirect os.Stderr to a pipe so we can capture the Failure-C output.
 	origStderr := os.Stderr
 	r, w, err := os.Pipe()
@@ -161,6 +175,41 @@ func TestTranslateEnrollErr_LostKey_EmitsRawKeyToStderr(t *testing.T) {
 	captured, _ := io.ReadAll(r)
 	got := string(captured)
 	for _, want := range []string{"cda_visible_secret", "d-XYZ", "revoke", "CANNOT be retrieved"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stderr missing %q in %q", want, got)
+		}
+	}
+}
+
+// TestTranslateEnrollErr_LostKey_NonInteractive_OmitsRawKey is the security
+// M2 regression test: under launchd/SSH/CI, stderr is not an interactive
+// terminal and is typically captured to a persisted, possibly
+// group-readable log file. The raw cda_* device key must NOT be printed in
+// that case — only device_id, which is safe (it's the same value the
+// dashboard shows and lets the operator revoke the device).
+func TestTranslateEnrollErr_LostKey_NonInteractive_OmitsRawKey(t *testing.T) {
+	withStderrTTY(t, false)
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	lk := &wizard.LostKeyError{DeviceID: "d-XYZ", RawKey: "cda_visible_secret", Cause: errors.New("permission denied")}
+	out := translateEnrollErr(lk)
+	if out != lk {
+		t.Errorf("translateEnrollErr should pass the error through, got %v", out)
+	}
+
+	w.Close()
+	captured, _ := io.ReadAll(r)
+	got := string(captured)
+	if strings.Contains(got, "cda_visible_secret") {
+		t.Errorf("raw key must NOT be printed to a non-interactive stderr; got %q", got)
+	}
+	for _, want := range []string{"d-XYZ", "revoke"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stderr missing %q in %q", want, got)
 		}

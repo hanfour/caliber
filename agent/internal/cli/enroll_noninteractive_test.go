@@ -23,9 +23,10 @@ func enrollServer(t *testing.T) *httptest.Server {
 }
 
 // setWatchAllRootsEnv points CALIBER_CLAUDE_PROJECTS / CALIBER_CODEX_SESSIONS
-// at real, existing temp directories so watchAllRoots' EvalSymlinks
-// canonicalization is deterministic and independent of the machine running
-// the test (a dev box may or may not have a real ~/.claude/projects).
+// at real, existing temp directories. --watch-all no longer reads these into
+// IncludePaths (C1 fix), but the enroll wizard's interactive-path Scan step
+// still uses CALIBER_CLAUDE_PROJECTS elsewhere, so tests keep pointing it at
+// a deterministic temp dir rather than a dev box's real ~/.claude/projects.
 func setWatchAllRootsEnv(t *testing.T) (claudeRoot, codexRoot string) {
 	t.Helper()
 	base := t.TempDir()
@@ -41,6 +42,11 @@ func setWatchAllRootsEnv(t *testing.T) (claudeRoot, codexRoot string) {
 	return claudeRoot, codexRoot
 }
 
+// TestEnroll_NonInteractive_WatchAll is the C1 regression test at the CLI
+// layer: --watch-all must persist WatchAll=true with EMPTY IncludePaths
+// (not seeded with the Claude/Codex transcript roots — a session's resolved
+// cwd is never under those roots, so seeding them there silently dropped
+// every event; see watcher/loop.go's Tick and Config.WatchAll).
 func TestEnroll_NonInteractive_WatchAll(t *testing.T) {
 	// Use an absent path so the enroll preflight's partial-cleanup check
 	// (root exists but config.toml missing) doesn't fire (mirrors
@@ -48,7 +54,7 @@ func TestEnroll_NonInteractive_WatchAll(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "absent")
 	t.Setenv("CALIBER_AGENT_HOME", home)
 	withFakeSecurity(t, 0, "")
-	claudeRoot, codexRoot := setWatchAllRootsEnv(t)
+	setWatchAllRootsEnv(t)
 
 	srv := enrollServer(t)
 	defer srv.Close()
@@ -65,16 +71,11 @@ func TestEnroll_NonInteractive_WatchAll(t *testing.T) {
 	if cfg.Mode != "full-body" {
 		t.Errorf("Mode = %q, want full-body", cfg.Mode)
 	}
-	if len(cfg.IncludePaths) != 2 {
-		t.Fatalf("IncludePaths = %v, want exactly 2 (claude+codex roots)", cfg.IncludePaths)
+	if !cfg.WatchAll {
+		t.Errorf("WatchAll = false, want true")
 	}
-	wantClaude, _ := filepath.EvalSymlinks(claudeRoot)
-	wantCodex, _ := filepath.EvalSymlinks(codexRoot)
-	if cfg.IncludePaths[0] != filepath.Clean(wantClaude) {
-		t.Errorf("IncludePaths[0] = %q, want %q", cfg.IncludePaths[0], filepath.Clean(wantClaude))
-	}
-	if cfg.IncludePaths[1] != filepath.Clean(wantCodex) {
-		t.Errorf("IncludePaths[1] = %q, want %q", cfg.IncludePaths[1], filepath.Clean(wantCodex))
+	if len(cfg.IncludePaths) != 0 {
+		t.Fatalf("IncludePaths = %v, want empty (WatchAll disables cwd filtering entirely)", cfg.IncludePaths)
 	}
 }
 
@@ -128,9 +129,11 @@ func TestEnroll_BackfillDays_DefaultsTo90(t *testing.T) {
 	}
 }
 
-// --backfill-days 0 disables the filter entirely (from-now-only), not "skip
-// everything modified before right now".
-func TestEnroll_BackfillDaysZero_DisablesCutoff(t *testing.T) {
+// M3: --backfill-days 0 means "from now" — the cutoff must be pinned to
+// (approximately) enroll time so historical sessions are NOT uploaded, not
+// left at the zero Time value (which would disable the filter and upload
+// the caller's entire history — the M3 privacy footgun).
+func TestEnroll_BackfillDaysZero_MeansFromNow(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "absent")
 	t.Setenv("CALIBER_AGENT_HOME", home)
 	withFakeSecurity(t, 0, "")
@@ -139,7 +142,37 @@ func TestEnroll_BackfillDaysZero_DisablesCutoff(t *testing.T) {
 	srv := enrollServer(t)
 	defer srv.Close()
 
+	before := time.Now()
 	code := executeCLI(t, []string{"enroll", "test-token", "--api-base-url", srv.URL, "--insecure", "--yes", "--watch-all", "--backfill-days", "0"})
+	if code != 0 {
+		t.Fatalf("enroll exit = %d, want 0", code)
+	}
+	after := time.Now()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BackfillCutoff.IsZero() {
+		t.Fatalf("BackfillCutoff is zero, want ~now (--backfill-days 0 means from-now, not entire-history)")
+	}
+	if cfg.BackfillCutoff.Before(before.Add(-time.Second)) || cfg.BackfillCutoff.After(after.Add(time.Second)) {
+		t.Fatalf("BackfillCutoff = %v, want within [%v, %v] (from-now)", cfg.BackfillCutoff, before, after)
+	}
+}
+
+// --backfill-days negative disables the filter entirely (entire history
+// uploaded) — BackfillCutoff stays at its zero Time value.
+func TestEnroll_BackfillDaysNegative_DisablesCutoff(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", home)
+	withFakeSecurity(t, 0, "")
+	setWatchAllRootsEnv(t)
+
+	srv := enrollServer(t)
+	defer srv.Close()
+
+	code := executeCLI(t, []string{"enroll", "test-token", "--api-base-url", srv.URL, "--insecure", "--yes", "--watch-all", "--backfill-days", "-1"})
 	if code != 0 {
 		t.Fatalf("enroll exit = %d, want 0", code)
 	}
@@ -149,7 +182,7 @@ func TestEnroll_BackfillDaysZero_DisablesCutoff(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if !cfg.BackfillCutoff.IsZero() {
-		t.Fatalf("BackfillCutoff = %v, want zero (--backfill-days 0 disables filter)", cfg.BackfillCutoff)
+		t.Fatalf("BackfillCutoff = %v, want zero (--backfill-days negative disables filter)", cfg.BackfillCutoff)
 	}
 }
 
