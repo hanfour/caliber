@@ -148,8 +148,8 @@ func TestWatchAllRoots_SymlinkedHome_ResolvesToRealHome(t *testing.T) {
 	}
 }
 
-// TestWatchAllRoots_EmptyClaudeRoot_SkipsEmptyEntries covers the "root == ''"
-// guard: an empty ClaudeProjectsRoot (os.UserHomeDir failed, per
+// TestWatchAllRoots_EmptyClaudeRoot_SkipsEmptyEntries covers the empty-string
+// root guard: an empty ClaudeProjectsRoot (os.UserHomeDir failed, per
 // cli.claudeProjectsRoot's own fallback) must not produce a bogus "." entry.
 func TestWatchAllRoots_EmptyClaudeRoot_SkipsEmptyEntries(t *testing.T) {
 	codexRoot := t.TempDir()
