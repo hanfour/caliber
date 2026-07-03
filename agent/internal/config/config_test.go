@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadMissingReturnsErrNotEnrolled(t *testing.T) {
@@ -270,6 +271,54 @@ func TestConfig_InsecureTransport_RoundTrip(t *testing.T) {
 	}
 	if !out.InsecureTransport {
 		t.Fatalf("InsecureTransport must round-trip as true, got %+v", out)
+	}
+}
+
+// #6: BackfillCutoff is a fixed anchor persisted at enroll. TOML round-trips
+// RFC3339 timestamps natively; this asserts a non-zero cutoff survives a
+// save+load cycle unchanged (to the second — TOML's datetime type is precise
+// enough for this, but we truncate to avoid any monotonic-reading component
+// on the in-memory time.Time tripping up an exact Equal comparison).
+func TestConfig_BackfillCutoff_RoundTrip(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+
+	cutoff := time.Date(2026, 4, 4, 12, 30, 0, 0, time.UTC)
+	in := &Config{DeviceID: "d_x", APIBaseURL: "https://x", BackfillCutoff: cutoff}
+	if err := SaveConfigInitial(in); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !out.BackfillCutoff.Equal(cutoff) {
+		t.Fatalf("BackfillCutoff round-trip: got %v, want %v", out.BackfillCutoff, cutoff)
+	}
+}
+
+// Zero BackfillCutoff (legacy enroll, or --backfill-days 0) must be omitted
+// from the written TOML entirely, mirroring the KeychainPath omitempty
+// contract above, so old configs keep parsing as "filter disabled".
+func TestConfig_BackfillCutoff_ZeroOmitted(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fresh")
+	t.Setenv("CALIBER_AGENT_HOME", dir)
+	if err := SaveConfigInitial(&Config{DeviceID: "x", IncludePaths: []string{}}); err != nil {
+		t.Fatalf("SaveConfigInitial: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "backfill_cutoff") {
+		t.Errorf("zero BackfillCutoff should be omitted; config.toml = %s", raw)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !got.BackfillCutoff.IsZero() {
+		t.Errorf("BackfillCutoff = %v, want zero", got.BackfillCutoff)
 	}
 }
 

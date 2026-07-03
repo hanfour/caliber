@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
@@ -205,6 +206,61 @@ func TestRunEnrollWizard_UserCancelsFinalConfirm_KeepsKeychainAndInitialConfig(t
 	}
 	if len(cfg.IncludePaths) != 0 {
 		t.Errorf("IncludePaths should be empty, got %v", cfg.IncludePaths)
+	}
+}
+
+// #6: BackfillDays > 0 must set a fixed cutoff (now - N days) on the
+// persisted config. The cutoff is an anchor, not rolling, so we only assert
+// it lands within a tight window around the expected value rather than an
+// exact time.Now() match (RunEnrollWizard calls time.Now() internally, a few
+// microseconds after this test computes its own "now").
+func TestRunEnrollWizard_BackfillDaysSetsCutoff(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{0}}
+	deps := happyDeps(fp, nil)
+	deps.BackfillDays = 90
+
+	before := time.Now().AddDate(0, 0, -90)
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now().AddDate(0, 0, -90)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BackfillCutoff.Before(before.Add(-time.Second)) || cfg.BackfillCutoff.After(after.Add(time.Second)) {
+		t.Fatalf("BackfillCutoff = %v, want within [%v, %v]", cfg.BackfillCutoff, before, after)
+	}
+}
+
+// BackfillDays == 0 (explicit --backfill-days 0, or the zero value) must
+// leave BackfillCutoff zero — disabling the filter entirely, not "0 days
+// before now" which would skip everything.
+func TestRunEnrollWizard_BackfillDaysZero_LeavesCutoffZero(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", root)
+
+	fp := NewFakePrompter()
+	fp.Answers.Confirms = []bool{true, true}
+	fp.Answers.Selections = [][]int{{0}}
+	deps := happyDeps(fp, nil)
+	deps.BackfillDays = 0
+
+	if err := RunEnrollWizard(context.Background(), deps, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.BackfillCutoff.IsZero() {
+		t.Fatalf("BackfillCutoff = %v, want zero", cfg.BackfillCutoff)
 	}
 }
 

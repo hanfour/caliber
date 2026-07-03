@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -29,6 +30,13 @@ type Config struct {
 	// non-GUI session, but a dedicated keychain unlocked once via
 	// `security unlock-keychain` works (#168). Empty = login keychain.
 	KeychainPath string `toml:"keychain_path,omitempty"`
+	// BackfillCutoff, when set, is the fixed anchor (enrolled-at minus N days)
+	// below which newly-discovered transcript files are skipped at discovery
+	// time. It is persisted once at enroll — NOT rolling — so the cutoff
+	// stays pinned to the original enroll date across restarts. Zero value
+	// (legacy configs written before this field existed, or --backfill-days
+	// 0) disables the filter entirely (spec Task 6).
+	BackfillCutoff time.Time `toml:"backfill_cutoff,omitempty"`
 }
 
 // Load reads and parses the config file. Returns ErrNotEnrolled if no file.

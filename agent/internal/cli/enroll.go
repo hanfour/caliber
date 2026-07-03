@@ -31,12 +31,13 @@ func newEnrollCmd() *cobra.Command {
 	var yes bool
 	var watchAll bool
 	var mode string
+	var backfillDays int
 	cmd := &cobra.Command{
 		Use:   "enroll <token>",
 		Short: "Enrol this device with caliber using a one-shot enrollment token",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnroll(cmd, args[0], force, apiBaseURL, insecure, keychainPath, yes, watchAll, mode)
+			return runEnroll(cmd, args[0], force, apiBaseURL, insecure, keychainPath, yes, watchAll, mode, backfillDays)
 		},
 	}
 	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "caliber API URL (or set CALIBER_API_BASE_URL)")
@@ -46,10 +47,11 @@ func newEnrollCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&yes, "yes", false, "non-interactive: accept all prompts (for caliber login)")
 	cmd.Flags().BoolVar(&watchAll, "watch-all", false, "watch the entire Claude/Codex roots instead of prompting for paths")
 	cmd.Flags().StringVar(&mode, "mode", "", "redaction mode: metadata-only|redacted-body|full-body (default full-body with --yes)")
+	cmd.Flags().IntVar(&backfillDays, "backfill-days", 90, "only backfill sessions modified within this many days (0 = from now)")
 	return cmd
 }
 
-func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool, keychainPath string, yes bool, watchAll bool, mode string) error {
+func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, insecure bool, keychainPath string, yes bool, watchAll bool, mode string, backfillDays int) error {
 	// Validate --mode at the enroll boundary, before any observable side
 	// effect (preflight I/O, API call, keychain/config write). An unvalidated
 	// --mode would otherwise be persisted verbatim and only fail later when
@@ -134,6 +136,7 @@ func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, 
 		ClaudeProjectsRoot: claudeProjectsRoot(),
 		WatchAll:           watchAll,
 		Mode:               mode,
+		BackfillDays:       backfillDays,
 	}
 	if err := wizard.RunEnrollWizard(cmd.Context(), deps, token); err != nil {
 		return ExitFromErr(translateEnrollErr(err))

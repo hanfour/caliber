@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 )
@@ -97,6 +98,58 @@ func TestEnroll_NonInteractive_ExplicitMode(t *testing.T) {
 	}
 	if cfg.Mode != "redacted-body" {
 		t.Errorf("Mode = %q, want redacted-body (explicit --mode should win over --yes default)", cfg.Mode)
+	}
+}
+
+// #6: --backfill-days defaults to 90 when unset, threaded end-to-end from
+// the cobra flag through wizard.Deps into the persisted config.
+func TestEnroll_BackfillDays_DefaultsTo90(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", home)
+	withFakeSecurity(t, 0, "")
+	setWatchAllRootsEnv(t)
+
+	srv := enrollServer(t)
+	defer srv.Close()
+
+	before := time.Now().AddDate(0, 0, -90)
+	code := executeCLI(t, []string{"enroll", "test-token", "--api-base-url", srv.URL, "--insecure", "--yes", "--watch-all"})
+	if code != 0 {
+		t.Fatalf("enroll exit = %d, want 0", code)
+	}
+	after := time.Now().AddDate(0, 0, -90)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BackfillCutoff.Before(before.Add(-time.Second)) || cfg.BackfillCutoff.After(after.Add(time.Second)) {
+		t.Fatalf("BackfillCutoff = %v, want within [%v, %v] (default 90 days)", cfg.BackfillCutoff, before, after)
+	}
+}
+
+// --backfill-days 0 disables the filter entirely (from-now-only), not "skip
+// everything modified before right now".
+func TestEnroll_BackfillDaysZero_DisablesCutoff(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("CALIBER_AGENT_HOME", home)
+	withFakeSecurity(t, 0, "")
+	setWatchAllRootsEnv(t)
+
+	srv := enrollServer(t)
+	defer srv.Close()
+
+	code := executeCLI(t, []string{"enroll", "test-token", "--api-base-url", srv.URL, "--insecure", "--yes", "--watch-all", "--backfill-days", "0"})
+	if code != 0 {
+		t.Fatalf("enroll exit = %d, want 0", code)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.BackfillCutoff.IsZero() {
+		t.Fatalf("BackfillCutoff = %v, want zero (--backfill-days 0 disables filter)", cfg.BackfillCutoff)
 	}
 }
 

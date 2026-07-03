@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
@@ -36,6 +37,11 @@ type Deps struct {
 	// with both the Claude projects root and the Codex sessions root.
 	WatchAll bool
 	Mode     string // "" = wizard default (metadata-only); non-empty overrides
+
+	// BackfillDays sets the 90-day-style backfill cutoff (spec Task 6): files
+	// modified before (enroll time − BackfillDays) are skipped at discovery.
+	// 0 disables the filter (from-now-only). Default wired by cli is 90.
+	BackfillDays int
 }
 
 // LostKeyError is returned by RunEnrollWizard when the server returned a
@@ -103,6 +109,9 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 		IncludePaths:      []string{},
 		InsecureTransport: d.InsecureTransport,
 		KeychainPath:      d.KeychainPath,
+	}
+	if d.BackfillDays > 0 {
+		cfg.BackfillCutoff = time.Now().AddDate(0, 0, -d.BackfillDays)
 	}
 	if err := config.SaveConfigInitial(cfg); err != nil {
 		return fmt.Errorf("config save: %w", err)

@@ -63,6 +63,7 @@ func (s *ClaudeSource) List(ctx context.Context) ([]FileRef, error) {
 				Path:      filepath.Join(projDir, m.Name()),
 				Source:    "claude",
 				SessionID: sessionID,
+				ModTime:   info.ModTime(),
 			})
 		}
 		for _, m := range mainEntries {
@@ -95,6 +96,7 @@ func (s *ClaudeSource) List(ctx context.Context) ([]FileRef, error) {
 					Source:          "claude-subagent",
 					SessionID:       agentID,
 					ParentSessionID: m.Name(),
+					ModTime:         info.ModTime(),
 				})
 			}
 		}

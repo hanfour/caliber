@@ -149,6 +149,11 @@ SOURCELOOP:
 				continue
 			}
 
+			_, tracked := l.state.Files[ref.Path]
+			if skipForBackfill(ref, l.config.BackfillCutoff, map[string]bool{ref.Path: tracked}) {
+				continue
+			}
+
 			wm := l.state.Files[ref.Path]
 			tr, terr := l.tailer.Read(ref.Path, wm.Offset)
 			if errors.Is(terr, ErrFileGone) {
@@ -343,6 +348,20 @@ var (
 	_ ResolverIface = (*CWDResolver)(nil)
 	_ Logger        = (*config.RFCLogger)(nil)
 )
+
+// skipForBackfill reports whether a newly-discovered file should be skipped
+// because it predates the persisted backfill cutoff. Files already being
+// tracked (present in the watermark map) are never skipped — we keep tailing
+// what we've started. A zero cutoff (legacy enrol) disables the filter.
+func skipForBackfill(ref FileRef, cutoff time.Time, watched map[string]bool) bool {
+	if cutoff.IsZero() {
+		return false
+	}
+	if watched[ref.Path] {
+		return false
+	}
+	return ref.ModTime.Before(cutoff)
+}
 
 // allowed reports whether cwd is within any of the include paths. cwd is
 // resolved via filepath.EvalSymlinks first so attacker-supplied symlinks
