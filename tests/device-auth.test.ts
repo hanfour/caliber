@@ -38,4 +38,15 @@ describe("pollUntilApproved", () => {
     stubFetchSequence([{ status: 400, body: { error: "expired_token" } }]);
     await expect(pollUntilApproved("https://x", start, { sleep: async () => {} })).rejects.toThrow(/expired/i);
   });
+  it("throws once the deadline is exceeded, even without an expired_token error", async () => {
+    stubFetchSequence([{ status: 400, body: { error: "authorization_pending" } }]);
+    const shortStart = { ...start, expires_in: 1 };
+    // Fake clock: first call establishes the deadline, every call after
+    // that reports a time already past it, forcing the deadline branch.
+    let call = 0;
+    const now = () => (call++ === 0 ? 0 : shortStart.expires_in * 1000 + 1);
+    await expect(
+      pollUntilApproved("https://x", shortStart, { sleep: async () => {}, now }),
+    ).rejects.toThrow(/expired/i);
+  });
 });

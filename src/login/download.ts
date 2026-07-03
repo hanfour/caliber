@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createWriteStream, readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
@@ -45,6 +45,9 @@ export async function downloadAndVerify(url: string, sha256Url: string, destTar:
   await downloadTo(url, destTar);
   const expected = await fetchSha256(sha256Url);
   if (!verifySha256(destTar, expected)) {
+    // This function is the supply-chain security gate: never leave a
+    // tampered/corrupt tarball behind at a deterministic path.
+    await rm(destTar, { force: true });
     throw new Error(`sha256 mismatch for ${destTar} (expected ${expected})`);
   }
 }
