@@ -32,12 +32,18 @@ export function DeviceApproval() {
   const searchParams = useSearchParams();
   const initialCode = searchParams.get("code") ?? "";
 
-  // `submitted` gates the lookup query — a code arriving via ?code= is
-  // looked up immediately; a bare visit to /device requires the user to
-  // type + confirm a code first, so we never fire a lookup against an
-  // empty/garbage string.
+  // Security M1: `POST /v1/device-auth/start` is unauthenticated, so a
+  // `?code=` link is fully attacker-shareable (classic RFC 8628 device-code
+  // phishing) — an attacker runs `caliber login` on their own machine and
+  // mails the victim the resulting link. `submitted` gates the lookup query
+  // and MUST default to false even when a code arrives via ?code=: we only
+  // pre-fill the input so the member doesn't have to retype it, but the
+  // lookup (and therefore the attacker-controlled hostname/os in the
+  // consent screen) never fires until the member explicitly clicks
+  // Continue. Auto-firing on mount would remove the one confirmation step
+  // standing between a phishing link and enrollment into the victim's org.
   const [userCode, setUserCode] = useState(initialCode);
-  const [submitted, setSubmitted] = useState(initialCode.length > 0);
+  const [submitted, setSubmitted] = useState(false);
   const [decision, setDecision] = useState<Decision>("none");
 
   const { data: session, isLoading: sessionLoading } =
@@ -186,6 +192,12 @@ export function DeviceApproval() {
         <p className="text-center text-sm text-muted-foreground">
           {t("deviceInfo", { hostname, os })}
         </p>
+        <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <p className="text-sm font-medium text-destructive">
+            {t("phishingWarning")}
+          </p>
+        </div>
         <div className="space-y-1.5 rounded-md border border-input bg-muted/50 p-3">
           <h3 className="text-sm font-medium">{t("consentHeading")}</h3>
           <p className="text-sm text-muted-foreground">{t("consentBody")}</p>

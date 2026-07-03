@@ -25,6 +25,7 @@ const PR6_KEYS = [
 const DEVICE_APPROVAL_KEYS = [
   "deviceApproval.title", "deviceApproval.subtitle", "deviceApproval.codeLabel",
   "deviceApproval.codePlaceholder", "deviceApproval.lookupCta", "deviceApproval.deviceInfo",
+  "deviceApproval.phishingWarning",
   "deviceApproval.consentHeading", "deviceApproval.consentBody", "deviceApproval.approve",
   "deviceApproval.deny", "deviceApproval.approved", "deviceApproval.denied",
   "deviceApproval.notFound", "deviceApproval.signInPrompt", "deviceApproval.signInCta",

@@ -100,7 +100,24 @@ describe("DeviceApproval", () => {
     expect(pushMock.mock.calls[0][0]).toMatch(/^\/sign-in\?callbackUrl=/);
   });
 
-  it("renders the consent body and Authorize button for a looked-up pending flow", () => {
+  // Anti-phishing (Security M1): the ?code= link is attacker-shareable and
+  // unauthenticated (POST /v1/device-auth/start requires no auth), so a
+  // victim must take an explicit action before we ever look up — and thus
+  // display — attacker-controlled hostname/os. Auto-firing the lookup on
+  // mount removed that confirmation step; this is the RED-first regression
+  // guard for restoring it.
+  it("pre-fills the code from ?code= but does NOT auto-fire the lookup on mount", () => {
+    sessionQuery.mockReturnValue({ data: { user: { id: "u1" } }, isLoading: false });
+    lookupQuery.mockReturnValue({ data: undefined, isLoading: false, error: null });
+    render(<DeviceApproval />);
+
+    expect(screen.getByLabelText("Device code")).toHaveValue("ABCD-1234");
+    expect(lookupQuery).toHaveBeenCalledWith({ userCode: "ABCD-1234" }, { enabled: false });
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+  });
+
+  it("only fires the lookup after the user clicks Continue", async () => {
+    const user = userEvent.setup();
     sessionQuery.mockReturnValue({ data: { user: { id: "u1" } }, isLoading: false });
     lookupQuery.mockReturnValue({
       data: { hostname: "hanfour-mac", os: "macOS 15.1", agentVersion: "0.1.0" },
@@ -108,10 +125,34 @@ describe("DeviceApproval", () => {
       error: null,
     });
     render(<DeviceApproval />);
+
+    expect(lookupQuery).toHaveBeenLastCalledWith({ userCode: "ABCD-1234" }, { enabled: false });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(lookupQuery).toHaveBeenLastCalledWith({ userCode: "ABCD-1234" }, { enabled: true });
+    expect(screen.getByRole("button", { name: "Authorize" })).toBeInTheDocument();
+  });
+
+  it("renders the consent body, the phishing warning, and the Authorize button for a looked-up pending flow", async () => {
+    const user = userEvent.setup();
+    sessionQuery.mockReturnValue({ data: { user: { id: "u1" } }, isLoading: false });
+    lookupQuery.mockReturnValue({
+      data: { hostname: "hanfour-mac", os: "macOS 15.1", agentVersion: "0.1.0" },
+      isLoading: false,
+      error: null,
+    });
+    render(<DeviceApproval />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
     expect(screen.getByText(/What will be recorded/)).toBeInTheDocument();
     expect(
       screen.getByText(/Your full Claude Code and Codex conversations/),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Only approve if you just ran `caliber login` on THIS device/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/self-reported by the requesting machine/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Authorize" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
   });
@@ -125,6 +166,7 @@ describe("DeviceApproval", () => {
       error: null,
     });
     render(<DeviceApproval />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Authorize" }));
     expect(approveMutate).toHaveBeenCalledWith({ userCode: "ABCD-1234" });
     await waitFor(() =>
@@ -143,6 +185,7 @@ describe("DeviceApproval", () => {
       error: null,
     });
     render(<DeviceApproval />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Deny" }));
     expect(denyMutate).toHaveBeenCalledWith({ userCode: "ABCD-1234" });
     await waitFor(() =>
@@ -160,6 +203,7 @@ describe("DeviceApproval", () => {
       error: null,
     });
     render(<DeviceApproval />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Authorize" }));
     expect(approveMutate).toHaveBeenCalledWith({ userCode: "ABCD-1234" });
     await waitFor(() =>
@@ -169,7 +213,8 @@ describe("DeviceApproval", () => {
     );
   });
 
-  it("shows the not-found message when the lookup errors with NOT_FOUND", () => {
+  it("shows the not-found message when the lookup errors with NOT_FOUND", async () => {
+    const user = userEvent.setup();
     sessionQuery.mockReturnValue({ data: { user: { id: "u1" } }, isLoading: false });
     lookupQuery.mockReturnValue({
       data: undefined,
@@ -177,6 +222,7 @@ describe("DeviceApproval", () => {
       error: { data: { code: "NOT_FOUND" } },
     });
     render(<DeviceApproval />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(
       screen.getByText("That code is invalid or has expired. Run `caliber login` again."),
     ).toBeInTheDocument();
