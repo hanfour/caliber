@@ -1,4 +1,6 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { auditLogs } from "@caliber/db";
 import {
   setupTestDb,
   makeOrg,
@@ -8,16 +10,19 @@ import {
   defaultTestEnv,
 } from "../../factories/index.js";
 import { hashDeviceCode, flowKey, userCodeKey } from "../../../src/rest/deviceAuth.js";
+import { AUDIT_ACTIONS } from "../../../src/services/auditActions.js";
 
 let testDb: Awaited<ReturnType<typeof setupTestDb>>;
 const redis = makeTestRedis();
 let userId: string;
+let orgId: string;
 
 beforeAll(async () => {
   testDb = await setupTestDb();
   const org = await makeOrg(testDb.db);
   const user = await makeUser(testDb.db, { orgId: org.id });
   userId = user.id;
+  orgId = org.id;
 });
 afterAll(async () => {
   await testDb.stop();
@@ -81,12 +86,25 @@ describe("devices.deviceAuth", () => {
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
-  it("deny marks the flow denied", async () => {
+  it("deny marks the flow denied and audits with the caller's real orgId (not null)", async () => {
     const { codeHash } = await seedPending();
     const c = await caller();
     await c.devices.deviceAuth.deny({ userCode: "BCDF-GHJK" });
     const flow = JSON.parse((await redis.get(flowKey(codeHash)))!);
     expect(flow.status).toBe("denied");
+
+    const [auditRow] = await testDb.db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.actorUserId, userId),
+          eq(auditLogs.action, AUDIT_ACTIONS.DEVICE_AUTH_DENIED),
+        ),
+      )
+      .limit(1);
+    expect(auditRow).toBeDefined();
+    expect(auditRow!.orgId).toBe(orgId);
   });
 });
 

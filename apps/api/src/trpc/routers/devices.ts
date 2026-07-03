@@ -361,6 +361,7 @@ export const devicesRouter = router({
           ctx.redis,
           input.userCode,
         );
+        const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
         const denied: DeviceAuthFlow = { ...flow, status: "denied" };
         const ttl = await ctx.redis.ttl(flowKey(codeHash));
         await ctx.redis.set(
@@ -372,7 +373,7 @@ export const devicesRouter = router({
         await writeAudit(ctx.db, {
           actorUserId: ctx.user.id,
           action: AUDIT_ACTIONS.DEVICE_AUTH_DENIED,
-          orgId: null,
+          orgId,
           metadata: { hostname: flow.hostname },
         });
         return { ok: true as const };

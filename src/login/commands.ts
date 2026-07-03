@@ -8,8 +8,9 @@ import { assetName, assetUrl, downloadAndVerify, extractBinary, resolvePlatform 
 import { agentBinaryPath, cliStateDir, clearCliState, loadCliState, saveCliState } from "./state.js";
 import { AGENT_REPO, AGENT_TAG, DEFAULT_SERVER_URL } from "./constants.js";
 
-// Keep in sync with the `program.version(...)` declared in cli.ts.
-const CLI_VERSION = "0.1.0";
+// Keep in sync with the `program.version(...)` declared in cli.ts, and both
+// with package.json's `version` field.
+const CLI_VERSION = "0.1.2";
 
 const log = (msg: string) => process.stderr.write(msg + "\n");
 
@@ -20,6 +21,29 @@ function openBrowser(url: string): void {
 
 export interface LoginOptions {
   server?: string;
+}
+
+// Builds the argv passed to the Go agent's `enroll` subcommand. Kept as a
+// standalone pure function so the TS↔Go flag contract (agent/internal/cli/enroll.go)
+// is unit-testable without spawning the real binary — the agent has NO
+// `--server` flag (that was the bug this guards against); the real flag is
+// `--api-base-url`, and `--insecure` is required to allow a non-https (e.g.
+// local dev http://) API base URL.
+export function buildEnrollArgs(enrollmentToken: string, serverUrl: string): string[] {
+  const args = [
+    "enroll",
+    enrollmentToken,
+    "--api-base-url",
+    serverUrl,
+    "--yes",
+    "--watch-all",
+    "--mode",
+    "full-body",
+  ];
+  if (serverUrl.startsWith("http://")) {
+    args.push("--insecure");
+  }
+  return args;
 }
 
 export async function loginCommand(opts: LoginOptions): Promise<void> {
@@ -61,11 +85,7 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
   }
 
   // 3. Non-interactive enroll (watch-all, full-body)
-  const enroll = spawnSync(
-    binPath,
-    ["enroll", enrollmentToken, "--server", serverUrl, "--yes", "--watch-all", "--mode", "full-body"],
-    { stdio: "inherit" },
-  );
+  const enroll = spawnSync(binPath, buildEnrollArgs(enrollmentToken, serverUrl), { stdio: "inherit" });
   if (enroll.status !== 0) throw new Error("Agent enrollment failed.");
 
   // 4. Install the resident service (macOS launchd; other platforms print guidance)
@@ -75,7 +95,7 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
   } else {
     log(
       chalk.yellow(
-        "Linux: resident mode not auto-installed. Run `caliber agent run` (or add a systemd user unit) to keep it running.",
+        `Linux: resident mode not auto-installed. Run \`${binPath} run\` to keep it running (or add a systemd user unit).`,
       ),
     );
   }

@@ -56,7 +56,7 @@ program
       "Analyze Claude Code & Codex usage for technical performance review\n" +
       "以技術績效審核者角色，分析 AI 工具使用狀況並產出評核報告",
   )
-  .version("0.1.0");
+  .version("0.1.2");
 
 // ── Config command ──
 
