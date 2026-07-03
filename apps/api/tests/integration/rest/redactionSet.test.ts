@@ -100,6 +100,18 @@ describe("GET /v1/redaction-set", () => {
     expect(JSON.parse(res.body)).toEqual({ error: "missing_token" });
   });
 
+  it("404s (before auth) when the gateway is disabled", async () => {
+    const off = Fastify({ logger: false });
+    off.decorate("db", testDb.db);
+    await off.register(
+      redactionSetRoutes({ ...defaultTestEnv, ENABLE_GATEWAY: false }),
+    );
+    const res = await off.inject({ method: "GET", url: "/v1/redaction-set" });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body)).toEqual({ error: "not_found" });
+    await off.close();
+  });
+
   it("rejects malformed token with 401 invalid_token", async () => {
     const res = await app.inject({
       method: "GET",

@@ -34,6 +34,12 @@ function patternsVersion(patterns: RedactionPattern[]): string {
 export function redactionSetRoutes(env: ServerEnv): FastifyPluginAsync {
   return async (fastify) => {
     fastify.get("/v1/redaction-set", async (req, reply) => {
+      // Match the sibling device routes (ingest, agent-config, enroll): the
+      // gateway/device surface is 404 when the gateway is disabled.
+      if (!env.ENABLE_GATEWAY) {
+        reply.code(404);
+        return { error: "not_found" };
+      }
       const auth = await resolveDeviceFromAuth(fastify.db, env, req.headers.authorization);
       if (!auth.ok) {
         if (auth.error === "server_misconfigured") {

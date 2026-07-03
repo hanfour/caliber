@@ -334,13 +334,21 @@ export const devicesRouter = router({
           status: "approved",
           enrollmentToken: token,
         };
-        const ttl = await ctx.redis.ttl(flowKey(codeHash));
-        await ctx.redis.set(
+        // XX + KEEPTTL: only overwrite an existing flow, preserving its
+        // remaining TTL. If the flow expired between the read and here, XX
+        // returns null and we do NOT resurrect it (nor mint a usable token).
+        const stored = await ctx.redis.set(
           flowKey(codeHash),
           JSON.stringify(approved),
-          "EX",
-          ttl > 0 ? ttl : 60,
+          "KEEPTTL",
+          "XX",
         );
+        if (!stored) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "flow expired",
+          });
+        }
 
         await writeAudit(ctx.db, {
           actorUserId: ctx.user.id,
@@ -363,12 +371,13 @@ export const devicesRouter = router({
         );
         const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
         const denied: DeviceAuthFlow = { ...flow, status: "denied" };
-        const ttl = await ctx.redis.ttl(flowKey(codeHash));
+        // XX + KEEPTTL: don't resurrect a flow that expired between read and
+        // write (see approve). A vanished flow is already effectively denied.
         await ctx.redis.set(
           flowKey(codeHash),
           JSON.stringify(denied),
-          "EX",
-          ttl > 0 ? ttl : 60,
+          "KEEPTTL",
+          "XX",
         );
         await writeAudit(ctx.db, {
           actorUserId: ctx.user.id,

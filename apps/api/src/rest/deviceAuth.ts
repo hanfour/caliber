@@ -9,6 +9,8 @@ import type { ServerEnv } from "@caliber/config";
 // Spec: docs/superpowers/specs/2026-07-03-cli-login-resident-agent-design.md §2
 const FLOW_TTL_SEC = 900;
 const POLL_INTERVAL_SEC = 5;
+// How many distinct user_codes to try before giving up (collision guard).
+const USER_CODE_CLAIM_ATTEMPTS = 5;
 const RATE_LIMIT_PER_MIN = 60;
 // Unambiguous alphabet: no vowels (no accidental words), no 0/O/1/I.
 const USER_CODE_ALPHABET = "BCDFGHJKMNPQRSTVWXYZ23456789";
@@ -71,12 +73,35 @@ export function deviceAuthRoutes(env: ServerEnv, redis: Redis): FastifyPluginAsy
       }
       const parsed = startBodySchema.safeParse(req.body);
       if (!parsed.success) {
+        // Bare error code only — do not echo zod's field-path shape (matches
+        // the /poll handler and avoids leaking request-schema internals).
         reply.code(400);
-        return { error: "invalid_body", details: parsed.error.flatten() };
+        return { error: "invalid_body" };
       }
       const deviceCode = randomBytes(32).toString("base64url");
       const codeHash = hashDeviceCode(deviceCode);
-      const userCode = generateUserCode();
+
+      // Claim a user_code atomically with SET NX so a (vanishingly unlikely)
+      // collision can never silently rebind another in-flight flow's index.
+      let userCode = "";
+      for (let attempt = 0; attempt < USER_CODE_CLAIM_ATTEMPTS; attempt += 1) {
+        const candidate = generateUserCode();
+        const claimed = await redis.set(
+          userCodeKey(candidate),
+          codeHash,
+          "EX",
+          FLOW_TTL_SEC,
+          "NX",
+        );
+        if (claimed) {
+          userCode = candidate;
+          break;
+        }
+      }
+      if (!userCode) {
+        reply.code(500);
+        return { error: "user_code_unavailable" };
+      }
       const flow: DeviceAuthFlow = {
         status: "pending",
         userCode,
@@ -84,7 +109,6 @@ export function deviceAuthRoutes(env: ServerEnv, redis: Redis): FastifyPluginAsy
         createdAt: new Date().toISOString(),
       };
       await redis.set(flowKey(codeHash), JSON.stringify(flow), "EX", FLOW_TTL_SEC);
-      await redis.set(userCodeKey(userCode), codeHash, "EX", FLOW_TTL_SEC);
       const verificationUri = `${env.NEXTAUTH_URL.replace(/\/$/, "")}/device`;
       reply.code(201);
       return {
