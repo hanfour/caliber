@@ -45,6 +45,7 @@ import {
   localizeSectionScoreLine,
   t,
 } from "./i18n.js";
+import { loginCommand, logoutCommand, agentPassthrough } from "./login/commands.js";
 
 const program = new Command();
 
@@ -219,6 +220,41 @@ program
       chalk.dim(dict.defaultStandardHint) + "\n",
     );
   });
+
+// ── Login / logout / agent commands ──
+
+program
+  .command("login")
+  .description("Log in and start recording Claude Code / Codex usage on this machine")
+  .option("--server <url>", "Caliber server URL")
+  .action(async (opts: { server?: string }) => {
+    try {
+      await loginCommand(opts);
+    } catch (err) {
+      process.stderr.write(chalk.red(err instanceof Error ? err.message : String(err)) + "\n");
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("logout")
+  .description("Stop recording and remove the local agent")
+  .action(() => {
+    try {
+      logoutCommand();
+    } catch (err) {
+      process.stderr.write(chalk.red(err instanceof Error ? err.message : String(err)) + "\n");
+      process.exitCode = 1;
+    }
+  });
+
+const agentCmd = program.command("agent").description("Control the local recording agent");
+for (const sub of ["status", "pause", "resume"] as const) {
+  agentCmd
+    .command(sub)
+    .description(`${sub} the local recording agent`)
+    .action(() => agentPassthrough(sub));
+}
 
 // Default: show help
 program.action(() => {
