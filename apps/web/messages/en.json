@@ -1186,5 +1186,22 @@
       "copied": "Copied",
       "copyFail": "Clipboard unavailable"
     }
+  },
+  "deviceApproval": {
+    "title": "Authorize this device",
+    "subtitle": "A CLI on {hostname} is requesting to record your Claude Code and Codex sessions.",
+    "codeLabel": "Device code",
+    "codePlaceholder": "XXXX-XXXX",
+    "lookupCta": "Continue",
+    "deviceInfo": "{hostname} · {os}",
+    "consentHeading": "What will be recorded",
+    "consentBody": "Your full Claude Code and Codex conversations on this machine (with secrets automatically redacted) will be uploaded to your organization, including the past 90 days of history. You can pause anytime with `caliber agent pause` or revoke this device from the dashboard.",
+    "approve": "Authorize",
+    "deny": "Deny",
+    "approved": "Device authorized. Return to your terminal — it will finish setup automatically.",
+    "denied": "Request denied.",
+    "notFound": "That code is invalid or has expired. Run `caliber login` again.",
+    "signInPrompt": "Please sign in to authorize this device.",
+    "signInCta": "Sign in"
   }
 }
