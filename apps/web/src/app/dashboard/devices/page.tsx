@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { DeviceList } from "@/components/devices/DeviceList";
+import { AgentConfigCard } from "@/components/devices/AgentConfigCard";
 
 export default function DevicesPage() {
   const t = useTranslations("devices");
@@ -12,6 +13,7 @@ export default function DevicesPage() {
         <p className="mt-1 text-sm text-muted-foreground">{t("pageSubtitle")}</p>
       </div>
       <DeviceList />
+      <AgentConfigCard />
     </div>
   );
 }

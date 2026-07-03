@@ -1185,6 +1185,14 @@
       "done": "完成",
       "copied": "已复制",
       "copyFail": "剪贴板不可用"
+    },
+    "agentConfig": {
+      "title": "Agent 设置",
+      "intervalLabel": "上传间隔（秒）",
+      "intervalHint": "每台设备上传新活动的频率。30–1800 秒。越低仪表盘越实时，越高越省资源。",
+      "save": "保存",
+      "saved": "已保存",
+      "outOfRange": "数值已被限制在允许的 30–1800 秒范围内。"
     }
   },
   "deviceApproval": {

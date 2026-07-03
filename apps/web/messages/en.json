@@ -1185,6 +1185,14 @@
       "done": "Done",
       "copied": "Copied",
       "copyFail": "Clipboard unavailable"
+    },
+    "agentConfig": {
+      "title": "Agent settings",
+      "intervalLabel": "Upload interval (seconds)",
+      "intervalHint": "How often each device uploads new activity. 30–1800s. Lower = fresher dashboards; higher = lighter.",
+      "save": "Save",
+      "saved": "Saved",
+      "outOfRange": "Value was clamped to the allowed 30–1800s range."
     }
   },
   "deviceApproval": {

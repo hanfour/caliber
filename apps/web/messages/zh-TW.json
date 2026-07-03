@@ -1185,6 +1185,14 @@
       "done": "完成",
       "copied": "已複製",
       "copyFail": "剪貼簿不可用"
+    },
+    "agentConfig": {
+      "title": "Agent 設定",
+      "intervalLabel": "上傳間隔（秒）",
+      "intervalHint": "每台裝置上傳新活動的頻率。30–1800 秒。越低儀表板越即時，越高越省資源。",
+      "save": "儲存",
+      "saved": "已儲存",
+      "outOfRange": "數值已被限制在允許的 30–1800 秒範圍內。"
     }
   },
   "deviceApproval": {
