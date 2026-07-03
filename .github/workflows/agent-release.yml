@@ -5,6 +5,10 @@ on:
     tags:
       - 'agent/v*'
 
+# softprops/action-gh-release needs write access to create/update the Release.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14

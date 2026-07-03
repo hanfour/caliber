@@ -29,6 +29,12 @@ jobs:
       - run: staticcheck ./...
       - name: gofmt
         run: test -z "$(gofmt -l .)"
+      - name: Linux cross-build (release ships linux tarballs; catch breaks pre-tag)
+        env:
+          CGO_ENABLED: 0
+        run: |
+          GOOS=linux GOARCH=amd64 go build ./...
+          GOOS=linux GOARCH=arm64 go build ./...
       - name: Tests with race detector
         run: go test ./... -race
       - name: Coverage gate (≥ 80%, excludes interactive TTY code)

@@ -21,6 +21,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo run lint typecheck test build
+      - name: Root CLI tests (@hanfour.huang/caliber — NOT in the turbo workspace)
+        # The published CLI package lives at the repo root and is absent from
+        # pnpm-workspace.yaml, so `turbo run test` never touches it. Build the
+        # CLI + run its subprocess/unit tests explicitly so the login flow's
+        # tests actually gate CI.
+        run: |
+          npx tsc -p tsconfig.json --noEmit
+          pnpm build
+          pnpm exec vitest run
       - name: Audit — no inline literal Zod messages / no template-literal message regression
         # Greps apps/{api,web}/src for `validation.*`-related anti-patterns.
         # `kind=template` is the post-PR-#138 regression guard: every
