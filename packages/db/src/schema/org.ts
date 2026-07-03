@@ -49,6 +49,9 @@ export const organizations = pgTable("organizations", {
   // When the halt flag was set (UTC). NULL when halt is off.
   // Used by enforceBudget to detect month rollover and auto-clear stale halts.
   llmHaltedAt: timestamp("llm_halted_at", { withTimezone: true }),
+  // Resident telemetry agent poll interval override, in seconds.
+  // NULL = use the server default (60s).
+  agentPollIntervalSeconds: integer("agent_poll_interval_seconds"),
 });
 
 export const departments = pgTable(
