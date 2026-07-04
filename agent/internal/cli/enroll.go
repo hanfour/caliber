@@ -144,11 +144,11 @@ func runEnroll(cmd *cobra.Command, token string, force bool, apiBaseURL string, 
 	}
 	if cfg, lerr := config.Load(); lerr == nil {
 		fmt.Fprintf(cmd.OutOrStdout(),
-			"✓ Enrolled as device %s. Configured %d paths. Watcher arrives in next release.\n",
+			"✓ Enrolled as device %s. Configured %d paths. Uploads begin when the agent runs (`caliber-agent install-service` or `caliber-agent run`).\n",
 			cfg.DeviceID, len(cfg.IncludePaths))
 	} else {
 		// Should be unreachable — RunEnrollWizard just wrote it.
-		fmt.Fprintln(cmd.OutOrStdout(), "✓ Enrolled. Watcher arrives in next release.")
+		fmt.Fprintln(cmd.OutOrStdout(), "✓ Enrolled. Uploads begin when the agent runs (`caliber-agent install-service` or `caliber-agent run`).")
 	}
 	return nil
 }

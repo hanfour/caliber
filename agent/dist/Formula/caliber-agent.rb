@@ -17,8 +17,9 @@ class CaliberAgent < Formula
   end
   def caveats
     <<~EOS
-      caliber-agent is currently an interactive CLI. Background daemon
-      mode (launchd integration) ships in the next release.
+      After enrolling (`caliber-agent enroll`), install the background
+      service with `caliber-agent install-service` — uploads begin as
+      soon as the agent is running.
     EOS
   end
 end

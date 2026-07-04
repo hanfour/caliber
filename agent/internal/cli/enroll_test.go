@@ -95,6 +95,14 @@ func TestEnrollHappyPath_WritesConfigAndKeychain(t *testing.T) {
 	if !strings.Contains(buf.String(), "Configured 0 paths") {
 		t.Errorf("success message missing path count: %q", buf.String())
 	}
+	// The watcher ships in this release — the old "Watcher arrives in next
+	// release" copy told users uploads had not started when they had.
+	if strings.Contains(buf.String(), "next release") {
+		t.Errorf("stale watcher-not-shipped message: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "Uploads begin") {
+		t.Errorf("success message missing sync guidance: %q", buf.String())
+	}
 }
 
 func TestEnrollAlreadyEnrolled_ReturnsExit1(t *testing.T) {
