@@ -90,6 +90,43 @@ describe("i18n catalog parity — device approval keys", () => {
   }
 });
 
+// The app renders message values as plain text (no Markdown renderer), so
+// literal `**bold**` markers introduced during translation show up verbatim
+// in the UI — this actually shipped in 4 locales' phishingWarning.
+describe("i18n catalogs contain no literal Markdown bold markers", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  function collectStrings(node: unknown, path: string, out: Array<{ path: string; value: string }>): void {
+    if (typeof node === "string") {
+      out.push({ path, value: node });
+      return;
+    }
+    if (node != null && typeof node === "object") {
+      for (const [key, child] of Object.entries(node)) {
+        collectStrings(child, path ? `${path}.${key}` : key, out);
+      }
+    }
+  }
+
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    it(`${locale} has no "**" in any message value`, () => {
+      const strings: Array<{ path: string; value: string }> = [];
+      collectStrings(catalog, "", strings);
+      const offenders = strings.filter((s) => s.value.includes("**"));
+      expect(
+        offenders.map((o) => `${o.path}: ${o.value}`),
+        `literal Markdown bold in ${locale}`,
+      ).toEqual([]);
+    });
+  }
+});
+
 describe("i18n catalog parity — agent config keys (Task 14)", () => {
   const catalogs: Record<string, Record<string, unknown>> = {
     en: en as unknown as Record<string, unknown>,

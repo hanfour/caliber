@@ -1202,7 +1202,7 @@
     "codePlaceholder": "XXXX-XXXX",
     "lookupCta": "繼續",
     "deviceInfo": "由請求裝置自行回報：{hostname} · {os}",
-    "phishingWarning": "只有在你剛剛於**這台裝置**執行過 `caliber login` 時才按授權。下方裝置資訊由請求端自行回報，可能造假。",
+    "phishingWarning": "只有在你剛剛於這台裝置執行過 `caliber login` 時才按授權。下方裝置資訊由請求端自行回報，可能造假。",
     "consentHeading": "將會記錄的內容",
     "consentBody": "這台機器上完整的 Claude Code 與 Codex 對話內容（機密會自動遮罩）將上傳至你的組織，包含過去 90 天的歷史紀錄。你可隨時用 `caliber agent pause` 暫停，或從儀表板撤銷此裝置。",
     "approve": "授權",

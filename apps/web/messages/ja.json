@@ -1202,7 +1202,7 @@
     "codePlaceholder": "XXXX-XXXX",
     "lookupCta": "続ける",
     "deviceInfo": "リクエスト元のデバイスによる自己申告：{hostname} · {os}",
-    "phishingWarning": "**このデバイス**で今しがた `caliber login` を実行した場合のみ承認してください。以下のデバイス情報はリクエスト元が自己申告したものであり、偽装されている可能性があります。",
+    "phishingWarning": "このデバイスで今しがた `caliber login` を実行した場合のみ承認してください。以下のデバイス情報はリクエスト元が自己申告したものであり、偽装されている可能性があります。",
     "consentHeading": "記録される内容",
     "consentBody": "このマシン上の Claude Code と Codex の会話全体（機密情報は自動的にマスクされます）が組織にアップロードされます。過去 90 日間の履歴も含まれます。`caliber agent pause` でいつでも一時停止したり、ダッシュボードからこのデバイスを取り消したりできます。",
     "approve": "承認",
