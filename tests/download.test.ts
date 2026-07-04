@@ -1,9 +1,9 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assetName, assetUrl, resolvePlatform, verifySha256 } from "../src/login/download.js";
+import { assetName, assetUrl, downloadTo, fetchSha256, resolvePlatform, verifySha256 } from "../src/login/download.js";
 
 describe("resolvePlatform", () => {
   const origPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
@@ -101,5 +101,35 @@ describe("verifySha256", () => {
     filePath = join(tmp, "payload.bin");
     writeFileSync(filePath, "hello world");
     expect(verifySha256(filePath, "0".repeat(64))).toBe(false);
+  });
+});
+
+// Node's fetch has NO default timeout: a connection that stalls after the
+// handshake hangs the promise forever, so every download-path request must
+// carry an abort/timeout signal.
+describe("request timeouts", () => {
+  let tmp: string;
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("downloadTo passes an abort/timeout signal and writes the body", async () => {
+    tmp = mkdtempSync(join(tmpdir(), "caliber-dl-"));
+    const dest = join(tmp, "asset.tar.gz");
+    const mock = vi.fn(async () => new Response("tarball-bytes"));
+    vi.stubGlobal("fetch", mock);
+    await downloadTo("https://example.test/asset.tar.gz", dest);
+    expect(readFileSync(dest, "utf-8")).toBe("tarball-bytes");
+    const init = mock.mock.calls[0]![1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("fetchSha256 passes an abort/timeout signal", async () => {
+    const mock = vi.fn(async () => new Response(`${"a".repeat(64)}  asset.tar.gz\n`));
+    vi.stubGlobal("fetch", mock);
+    await expect(fetchSha256("https://example.test/asset.tar.gz.sha256")).resolves.toBe("a".repeat(64));
+    const init = mock.mock.calls[0]![1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });

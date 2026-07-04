@@ -35,15 +35,22 @@ export function verifySha256(filePath: string, expectedHex: string): boolean {
   return hash.toLowerCase() === expectedHex.trim().toLowerCase().split(/\s+/)[0];
 }
 
+// Node's fetch has NO default timeout, so a stalled connection would hang
+// the CLI forever. The tarball is a multi-MB GitHub-Releases download, so
+// its budget covers the WHOLE transfer (AbortSignal.timeout spans the
+// response body too, not just the headers); the sha256 sidecar is tiny.
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+const SHA256_TIMEOUT_MS = 10_000;
+
 export async function downloadTo(url: string, dest: string): Promise<void> {
   await mkdir(dirname(dest), { recursive: true });
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
   if (!res.ok || !res.body) throw new Error(`download failed (HTTP ${res.status}): ${url}`);
   await pipeline(Readable.fromWeb(res.body as any), createWriteStream(dest));
 }
 
 export async function fetchSha256(sha256Url: string): Promise<string> {
-  const res = await fetch(sha256Url);
+  const res = await fetch(sha256Url, { signal: AbortSignal.timeout(SHA256_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`sha256 fetch failed (HTTP ${res.status})`);
   return (await res.text()).trim().split(/\s+/)[0];
 }
