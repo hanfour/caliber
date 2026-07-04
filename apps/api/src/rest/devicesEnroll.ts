@@ -36,7 +36,10 @@ export function devicesEnrollRoutes(env: ServerEnv): FastifyPluginAsync {
       const parsed = enrollBodySchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
-        return { error: "invalid_body", details: parsed.error.flatten() };
+        // Bare error code only — this runs BEFORE the token check, so the
+        // response is unauthenticated; do not echo zod's field-path shape
+        // (matches deviceAuth.ts).
+        return { error: "invalid_body" };
       }
       const { token, hostname, os, agentVersion } = parsed.data;
 
