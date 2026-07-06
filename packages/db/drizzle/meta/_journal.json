@@ -169,6 +169,13 @@
       "when": 1782890988850,
       "tag": "0023_keen_energizer",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783051316574,
+      "tag": "0024_famous_romulus",
+      "breakpoints": true
     }
   ]
 }

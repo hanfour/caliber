@@ -185,6 +185,74 @@ func TestLoop_AllowListFilter_SkipsNonMatchingRefs(t *testing.T) {
 	}
 }
 
+// TestLoop_WatchAll_BypassesIncludePathsFilter is the C1 regression test:
+// --watch-all persists WatchAll=true with an EMPTY IncludePaths (the old
+// behaviour of seeding IncludePaths with the transcript-file roots like
+// ~/.claude/projects was itself the bug, since a session's resolved cwd is
+// never under that root). With WatchAll set, the cwd allow-list check must
+// be skipped entirely so events flow through regardless of the resolved
+// cwd's value.
+func TestLoop_WatchAll_BypassesIncludePathsFilter(t *testing.T) {
+	tmp := t.TempDir()
+	seedRoot(t, tmp)
+
+	proj := filepath.Join(tmp, "claude-projects", "-Users-alice-myrepo")
+	os.MkdirAll(proj, 0o755)
+	sess := filepath.Join(proj, "s.jsonl")
+	os.WriteFile(sess, []byte(`{"a":1}`+"\n"), 0o644)
+
+	// Resolved cwd is an arbitrary dir NOT under any include path (and
+	// IncludePaths is empty, as watch-all enroll now persists it).
+	cap := &captureSink{}
+	loop := NewLoop(LoopOpts{
+		Sources: []Source{&fakeSource{name: "claude", refs: []FileRef{
+			{Path: sess, Source: "claude", SessionID: "s"},
+		}}},
+		Tailer: &Tailer{}, Chunker: &Chunker{}, Sink: cap,
+		Config:   &config.Config{WatchAll: true, IncludePaths: []string{}},
+		State:    &config.State{Files: map[string]config.FileWatermark{}},
+		Resolver: &fakeResolver{byDir: map[string]string{proj: "/Users/alice/myrepo"}},
+		Log:      &fakeLogger{}, Interval: time.Hour,
+	})
+	if err := loop.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(cap.Chunks()) != 1 {
+		t.Fatalf("got %d chunks, want 1 (watch-all must bypass the cwd allow-list)", len(cap.Chunks()))
+	}
+}
+
+// TestLoop_WatchAllFalse_NonMatchingCWD_StillSkipped preserves the existing
+// allowed() behaviour: with WatchAll unset (the zero value) and a cwd that
+// doesn't match any IncludePaths entry, the event must still be skipped.
+func TestLoop_WatchAllFalse_NonMatchingCWD_StillSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	seedRoot(t, tmp)
+
+	proj := filepath.Join(tmp, "claude-projects", "-Users-alice-myrepo")
+	os.MkdirAll(proj, 0o755)
+	sess := filepath.Join(proj, "s.jsonl")
+	os.WriteFile(sess, []byte(`{"a":1}`+"\n"), 0o644)
+
+	cap := &captureSink{}
+	loop := NewLoop(LoopOpts{
+		Sources: []Source{&fakeSource{name: "claude", refs: []FileRef{
+			{Path: sess, Source: "claude", SessionID: "s"},
+		}}},
+		Tailer: &Tailer{}, Chunker: &Chunker{}, Sink: cap,
+		Config:   &config.Config{WatchAll: false, IncludePaths: []string{"/Users/h/allowed"}},
+		State:    &config.State{Files: map[string]config.FileWatermark{}},
+		Resolver: &fakeResolver{byDir: map[string]string{proj: "/Users/alice/myrepo"}},
+		Log:      &fakeLogger{}, Interval: time.Hour,
+	})
+	if err := loop.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(cap.Chunks()) != 0 {
+		t.Fatalf("got %d chunks, want 0 (non-matching cwd should still be skipped)", len(cap.Chunks()))
+	}
+}
+
 func TestLoop_SinkError_StateUntouched(t *testing.T) {
 	tmp := t.TempDir()
 	seedRoot(t, tmp)

@@ -380,6 +380,8 @@ describe("POST /v1/ingest", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("invalid_body");
+    // Bare error code only — no zod flatten() echo (matches deviceAuth.ts).
+    expect(res.json().details).toBeUndefined();
   });
 
   it("gateway disabled → 404", async () => {

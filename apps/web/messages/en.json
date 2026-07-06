@@ -1185,6 +1185,32 @@
       "done": "Done",
       "copied": "Copied",
       "copyFail": "Clipboard unavailable"
+    },
+    "agentConfig": {
+      "title": "Agent settings",
+      "intervalLabel": "Upload interval (seconds)",
+      "intervalHint": "How often each device uploads new activity. 30–1800s. Lower = fresher dashboards; higher = lighter.",
+      "save": "Save",
+      "saved": "Saved",
+      "outOfRange": "Value was clamped to the allowed 30–1800s range."
     }
+  },
+  "deviceApproval": {
+    "title": "Authorize this device",
+    "subtitle": "A CLI on {hostname} is requesting to record your Claude Code and Codex sessions.",
+    "codeLabel": "Device code",
+    "codePlaceholder": "XXXX-XXXX",
+    "lookupCta": "Continue",
+    "deviceInfo": "Self-reported by the requesting device: {hostname} · {os}",
+    "phishingWarning": "Only approve if you just ran `caliber login` on THIS device. The device details below are self-reported by the requesting machine and could be forged.",
+    "consentHeading": "What will be recorded",
+    "consentBody": "Your full Claude Code and Codex conversations on this machine (with secrets automatically redacted) will be uploaded to your organization, including the past 90 days of history. You can pause anytime with `caliber agent pause` or revoke this device from the dashboard.",
+    "approve": "Authorize",
+    "deny": "Deny",
+    "approved": "Device authorized. Return to your terminal — it will finish setup automatically.",
+    "denied": "Request denied.",
+    "notFound": "That code is invalid or has expired. Run `caliber login` again.",
+    "signInPrompt": "Please sign in to authorize this device.",
+    "signInCta": "Sign in"
   }
 }

@@ -7,10 +7,12 @@ import { Queue } from "bullmq";
 import { parseServerEnv } from "@caliber/config/env";
 import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
+import { deviceAuthRoutes } from "./rest/deviceAuth.js";
 import { devicesEnrollRoutes } from "./rest/devicesEnroll.js";
 import { devicesRevokeSelfRoutes } from "./rest/devicesRevokeSelf.js";
 import { ingestRoutes } from "./rest/ingest.js";
 import { redactionSetRoutes } from "./rest/redactionSet.js";
+import { agentConfigRoutes } from "./rest/agentConfig.js";
 import { startPartitionRollForwardCron } from "./services/clientEventsPartitions.js";
 import { cookiesPlugin } from "./plugins/cookies.js";
 import { authPlugin } from "./plugins/auth.js";
@@ -73,6 +75,7 @@ export async function buildServer() {
   await app.register(devicesRevokeSelfRoutes(env));
   await app.register(ingestRoutes(env));
   await app.register(redactionSetRoutes(env));
+  await app.register(agentConfigRoutes(env));
 
   // Daily roll-forward for client_events monthly partitions. Runs immediately
   // on boot so a fresh deploy is safe even if the daily timer hasn't ticked.
@@ -122,6 +125,11 @@ export async function buildServer() {
   } else {
     redis = makeDisabledRedis();
   }
+
+  // RFC 8628-style device-authorization endpoints for `caliber login`.
+  // Registered after `redis` exists; when ENABLE_GATEWAY=false both handlers
+  // 404 before ever touching the throwing disabled-redis proxy.
+  await app.register(deviceAuthRoutes(env, redis));
 
   // Instantiate the evaluator BullMQ queue when the feature flag is on.
   // Skipped entirely when ENABLE_EVALUATOR=false or REDIS_URL is absent —

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
@@ -29,6 +30,22 @@ type Deps struct {
 	InsecureTransport  bool
 	KeychainPath       string // custom keychain file; "" = login keychain (#168)
 	ClaudeProjectsRoot string // typically ~/.claude/projects
+
+	// WatchAll and Mode drive the non-interactive `caliber login` path
+	// (spec Task 5): when WatchAll is set, RunEnrollWizard skips the
+	// interactive path-selection prompt entirely and persists
+	// config.Config.WatchAll=true, which disables the watcher's cwd
+	// allow-list filter (IncludePaths is left empty — see C1 fix comment
+	// at the call site below).
+	WatchAll bool
+	Mode     string // "" = wizard default (metadata-only); non-empty overrides
+
+	// BackfillDays sets the 90-day-style backfill cutoff (spec Task 6): files
+	// modified before (enroll time − BackfillDays) are skipped at discovery.
+	// 0 means "from now" (cutoff = enroll time; nothing predating enroll is
+	// uploaded). Negative means "no cutoff" (entire history uploaded).
+	// Default wired by cli is 90.
+	BackfillDays int
 }
 
 // LostKeyError is returned by RunEnrollWizard when the server returned a
@@ -79,18 +96,57 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 	// SaveConfigInitial is the first-write-aware variant: it may MkdirAll the
 	// root, but re-runs sentinel + partial-uninstall checks to catch the
 	// runEnroll preflight → here TOCTOU window (R15-F2 / R16-F2).
+	//
+	// Mode defaults to "metadata-only" (privacy-first); d.Mode overrides it
+	// whenever the caller set one (e.g. `--yes` defaults to "full-body" —
+	// see cli.runEnroll — regardless of whether --watch-all is also set).
+	mode := "metadata-only"
+	if d.Mode != "" {
+		mode = d.Mode
+	}
 	cfg := &config.Config{
 		DeviceID:          resp.DeviceID,
 		Hostname:          d.Hostname,
 		OS:                d.OS,
 		APIBaseURL:        d.APIBaseURL,
-		Mode:              "metadata-only",
+		Mode:              mode,
 		IncludePaths:      []string{},
 		InsecureTransport: d.InsecureTransport,
 		KeychainPath:      d.KeychainPath,
 	}
+	switch {
+	case d.BackfillDays > 0:
+		cfg.BackfillCutoff = time.Now().AddDate(0, 0, -d.BackfillDays)
+	case d.BackfillDays == 0:
+		// "From now": only sessions modified after enroll pass the filter.
+		// Must NOT leave BackfillCutoff at its zero Time value — a zero
+		// value disables the filter entirely (skipForBackfill in
+		// watcher/loop.go), which would upload the caller's ENTIRE history
+		// instead of "nothing predating enroll" (M3 privacy fix).
+		cfg.BackfillCutoff = time.Now()
+	default:
+		// Negative (e.g. -1): explicitly disable the filter — upload
+		// entire history. BackfillCutoff stays at its zero value.
+	}
 	if err := config.SaveConfigInitial(cfg); err != nil {
 		return fmt.Errorf("config save: %w", err)
+	}
+
+	// Step 4b: non-interactive `caliber login` shortcut. When WatchAll is
+	// set, skip the interactive path-selection prompt entirely. WatchAll
+	// means "no cwd filtering" (watcher/loop.go's Tick short-circuits the
+	// allowed() check when Config.WatchAll is true) — IncludePaths stays
+	// empty. Seeding it with the transcript-file roots (~/.claude/projects,
+	// ~/.codex/sessions) was the C1 bug: IncludePaths is a
+	// project-working-directory allow-list, and a session's resolved cwd
+	// (e.g. /Users/alice/myrepo) is never under those roots, so every event
+	// was silently dropped.
+	if d.WatchAll {
+		cfg.WatchAll = true
+		if err := config.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("config save (watch-all): %w", err)
+		}
+		return nil
 	}
 
 	// Step 5: Scan + present candidate paths. Default is "none".
@@ -123,12 +179,11 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 	// (plan §8.2; re-prompting would be friendlier but is out of scope for PR4).
 	include := make([]string, 0, len(selected))
 	for _, p := range selected {
-		resolved, rerr := filepath.EvalSymlinks(p)
-		if rerr != nil {
-			fmt.Fprintf(os.Stderr, "warning: skipping %q (cannot resolve: %v)\n", p, rerr)
+		resolved, ok := canonicalizePath(p)
+		if !ok {
 			continue
 		}
-		include = append(include, filepath.Clean(resolved))
+		include = append(include, resolved)
 	}
 
 	// Step 6: Final confirm + write. SaveConfig is the runtime-flavored
@@ -145,4 +200,17 @@ func RunEnrollWizard(ctx context.Context, d Deps, token string) error {
 		return fmt.Errorf("config save (paths): %w", err)
 	}
 	return nil
+}
+
+// canonicalizePath resolves p through EvalSymlinks + Clean so the watcher's
+// allow-list only ever contains canonical absolute paths. ok is false (and a
+// warning is printed to stderr) when EvalSymlinks fails — e.g. a broken
+// symlink or a race-removed directory.
+func canonicalizePath(p string) (resolved string, ok bool) {
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping %q (cannot resolve: %v)\n", p, err)
+		return "", false
+	}
+	return filepath.Clean(r), true
 }

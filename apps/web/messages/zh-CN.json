@@ -1185,6 +1185,32 @@
       "done": "完成",
       "copied": "已复制",
       "copyFail": "剪贴板不可用"
+    },
+    "agentConfig": {
+      "title": "Agent 设置",
+      "intervalLabel": "上传间隔（秒）",
+      "intervalHint": "每台设备上传新活动的频率。30–1800 秒。越低仪表盘越实时，越高越省资源。",
+      "save": "保存",
+      "saved": "已保存",
+      "outOfRange": "数值已被限制在允许的 30–1800 秒范围内。"
     }
+  },
+  "deviceApproval": {
+    "title": "授权此设备",
+    "subtitle": "{hostname} 上的 CLI 请求记录你的 Claude Code 与 Codex 使用记录。",
+    "codeLabel": "设备代码",
+    "codePlaceholder": "XXXX-XXXX",
+    "lookupCta": "继续",
+    "deviceInfo": "由请求设备自行报告：{hostname} · {os}",
+    "phishingWarning": "只有在你刚刚在这台设备上运行过 `caliber login` 时才点击授权。下方的设备信息由请求方自行报告，可能是伪造的。",
+    "consentHeading": "将会记录的内容",
+    "consentBody": "这台机器上完整的 Claude Code 与 Codex 对话内容（机密会自动遮罩）将上传至你的组织，包含过去 90 天的历史记录。你可随时用 `caliber agent pause` 暂停，或从仪表板撤销此设备。",
+    "approve": "授权",
+    "deny": "拒绝",
+    "approved": "设备已授权。回到终端，它会自动完成设置。",
+    "denied": "已拒绝请求。",
+    "notFound": "代码无效或已过期。请重新运行 `caliber login`。",
+    "signInPrompt": "请先登录以授权此设备。",
+    "signInCta": "登录"
   }
 }

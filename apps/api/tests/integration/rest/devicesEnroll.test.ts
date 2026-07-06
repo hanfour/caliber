@@ -200,6 +200,10 @@ describe("POST /v1/devices/enroll", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("invalid_body");
+    // Bare error code only: this route is reachable UNauthenticated (body
+    // validation runs before the token check), so echoing zod's flatten()
+    // would hand out the request-schema field map to anyone.
+    expect(res.json().details).toBeUndefined();
   });
 
   it("returns 404 when gateway is disabled", async () => {

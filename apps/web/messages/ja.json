@@ -1185,6 +1185,32 @@
       "done": "完了",
       "copied": "コピーしました",
       "copyFail": "クリップボードを利用できません"
+    },
+    "agentConfig": {
+      "title": "Agent 設定",
+      "intervalLabel": "アップロード間隔（秒）",
+      "intervalHint": "各デバイスが新しいアクティビティをアップロードする頻度です。30〜1800秒。低いほどダッシュボードが最新になり、高いほど負荷が軽くなります。",
+      "save": "保存",
+      "saved": "保存しました",
+      "outOfRange": "値は許容範囲の30〜1800秒にクランプされました。"
     }
+  },
+  "deviceApproval": {
+    "title": "このデバイスを承認",
+    "subtitle": "{hostname} 上の CLI が、あなたの Claude Code と Codex のセッションを記録しようとしています。",
+    "codeLabel": "デバイスコード",
+    "codePlaceholder": "XXXX-XXXX",
+    "lookupCta": "続ける",
+    "deviceInfo": "リクエスト元のデバイスによる自己申告：{hostname} · {os}",
+    "phishingWarning": "このデバイスで今しがた `caliber login` を実行した場合のみ承認してください。以下のデバイス情報はリクエスト元が自己申告したものであり、偽装されている可能性があります。",
+    "consentHeading": "記録される内容",
+    "consentBody": "このマシン上の Claude Code と Codex の会話全体（機密情報は自動的にマスクされます）が組織にアップロードされます。過去 90 日間の履歴も含まれます。`caliber agent pause` でいつでも一時停止したり、ダッシュボードからこのデバイスを取り消したりできます。",
+    "approve": "承認",
+    "deny": "拒否",
+    "approved": "デバイスが承認されました。ターミナルに戻ると自動的にセットアップが完了します。",
+    "denied": "リクエストを拒否しました。",
+    "notFound": "コードが無効か期限切れです。もう一度 `caliber login` を実行してください。",
+    "signInPrompt": "このデバイスを承認するにはサインインしてください。",
+    "signInCta": "サインイン"
   }
 }

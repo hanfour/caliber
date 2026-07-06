@@ -8,12 +8,40 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hanfour/ai-dev-eval/agent/internal/api"
 	"github.com/hanfour/ai-dev-eval/agent/internal/config"
 	"github.com/hanfour/ai-dev-eval/agent/sink"
 )
+
+// IntervalProvider is the mutable poll-interval cell shared between the
+// run.go agent-config refresher goroutine and Loop.Run's main tick sleep.
+// Mirrors cli.RedactionSetProvider's sync.RWMutex Current()/Set() shape.
+type IntervalProvider struct {
+	mu sync.RWMutex
+	d  time.Duration
+}
+
+// NewIntervalProvider constructs a provider seeded with d.
+func NewIntervalProvider(d time.Duration) *IntervalProvider {
+	return &IntervalProvider{d: d}
+}
+
+// Current returns the currently active interval.
+func (p *IntervalProvider) Current() time.Duration {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.d
+}
+
+// Set replaces the active interval.
+func (p *IntervalProvider) Set(d time.Duration) {
+	p.mu.Lock()
+	p.d = d
+	p.mu.Unlock()
+}
 
 // ErrPausedSkip is returned by preTickChecks when the `paused` sentinel is
 // present. Loop.Run catches it and continues to the next interval instead of
@@ -42,22 +70,30 @@ type LoopOpts struct {
 	Resolver ResolverIface
 	Log      Logger
 	Now      func() time.Time
+	// Interval is the fixed poll interval used when IntervalProvider is nil
+	// (e.g. --once / tests). When IntervalProvider is set, it takes
+	// precedence in Loop.Run's tick sleep.
 	Interval time.Duration
+	// IntervalProvider, when non-nil, supplies the tick sleep duration
+	// dynamically (server-driven agent-config refresh). Interval remains
+	// the fallback if this is nil.
+	IntervalProvider *IntervalProvider
 }
 
 // Loop is the orchestrator that wires sources × tail × chunker × sink.
 type Loop struct {
-	sources  []Source
-	tailer   *Tailer
-	chunker  *Chunker
-	sink     sink.Sink
-	config   *config.Config
-	state    *config.State
-	resolver ResolverIface
-	log      Logger
-	now      func() time.Time
-	interval time.Duration
-	cwdCache map[string]string
+	sources          []Source
+	tailer           *Tailer
+	chunker          *Chunker
+	sink             sink.Sink
+	config           *config.Config
+	state            *config.State
+	resolver         ResolverIface
+	log              Logger
+	now              func() time.Time
+	interval         time.Duration
+	intervalProvider *IntervalProvider
+	cwdCache         map[string]string
 }
 
 // NewLoop constructs a Loop from opts.
@@ -69,18 +105,29 @@ func NewLoop(opts LoopOpts) *Loop {
 		opts.Resolver = NewCWDResolver(nil)
 	}
 	return &Loop{
-		sources:  opts.Sources,
-		tailer:   opts.Tailer,
-		chunker:  opts.Chunker,
-		sink:     opts.Sink,
-		config:   opts.Config,
-		state:    opts.State,
-		resolver: opts.Resolver,
-		log:      opts.Log,
-		now:      opts.Now,
-		interval: opts.Interval,
-		cwdCache: make(map[string]string),
+		sources:          opts.Sources,
+		tailer:           opts.Tailer,
+		chunker:          opts.Chunker,
+		sink:             opts.Sink,
+		config:           opts.Config,
+		state:            opts.State,
+		resolver:         opts.Resolver,
+		log:              opts.Log,
+		now:              opts.Now,
+		interval:         opts.Interval,
+		intervalProvider: opts.IntervalProvider,
+		cwdCache:         make(map[string]string),
 	}
+}
+
+// currentInterval returns the active tick-sleep duration: the
+// IntervalProvider's Current() value when set, otherwise the fixed
+// Interval field (--once / tests).
+func (l *Loop) currentInterval() time.Duration {
+	if l.intervalProvider != nil {
+		return l.intervalProvider.Current()
+	}
+	return l.interval
 }
 
 // Run drives the loop until ctx is cancelled, sleeping interval between ticks.
@@ -98,7 +145,7 @@ func (l *Loop) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(l.interval):
+		case <-time.After(l.currentInterval()):
 		}
 	}
 }
@@ -145,7 +192,12 @@ SOURCELOOP:
 				l.log.Printf("[debug] cwd unresolved: %s", ref.Path)
 				continue
 			}
-			if !allowed(cwd, l.config.IncludePaths) {
+			if !l.config.WatchAll && !allowed(cwd, l.config.IncludePaths) {
+				continue
+			}
+
+			_, tracked := l.state.Files[ref.Path]
+			if skipForBackfill(ref, l.config.BackfillCutoff, map[string]bool{ref.Path: tracked}) {
 				continue
 			}
 
@@ -343,6 +395,20 @@ var (
 	_ ResolverIface = (*CWDResolver)(nil)
 	_ Logger        = (*config.RFCLogger)(nil)
 )
+
+// skipForBackfill reports whether a newly-discovered file should be skipped
+// because it predates the persisted backfill cutoff. Files already being
+// tracked (present in the watermark map) are never skipped — we keep tailing
+// what we've started. A zero cutoff (legacy enrol) disables the filter.
+func skipForBackfill(ref FileRef, cutoff time.Time, watched map[string]bool) bool {
+	if cutoff.IsZero() {
+		return false
+	}
+	if watched[ref.Path] {
+		return false
+	}
+	return ref.ModTime.Before(cutoff)
+}
 
 // allowed reports whether cwd is within any of the include paths. cwd is
 // resolved via filepath.EvalSymlinks first so attacker-supplied symlinks

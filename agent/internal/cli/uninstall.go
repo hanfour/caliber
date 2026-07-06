@@ -83,7 +83,7 @@ func runUninstall(cmd *cobra.Command, yes, keepRemote, force bool, keychainPath 
 			return &ExitError{Code: 130, Err: errors.New("non-interactive shell detected; pass --yes to confirm uninstall")}
 		}
 		fmt.Fprintf(cmd.OutOrStdout(),
-			"This will:\n  1. Revoke this device at %s (DELETE /v1/devices/me)\n  2. Remove %s (config, state, redaction-set, agent.log, .lock, .uninstalling)\n  3. Remove keychain entry: %s / %s\nContinue? [y/N] ",
+			"This will:\n  1. Revoke this device at %s (DELETE /v1/devices/me)\n  2. Remove %s (config, state, agent-config, redaction-set, agent.log, .lock, .uninstalling)\n  3. Remove keychain entry: %s / %s\nContinue? [y/N] ",
 			cfg.APIBaseURL, config.RootDir(), keychain.ServiceName, cfg.DeviceID)
 		reader := bufio.NewReader(os.Stdin)
 		ans, _ := reader.ReadString('\n')
@@ -193,7 +193,7 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 	//
 	// Steps (a)-(e) (optional artifacts): ErrNotExist is benign, any other
 	// IO error is hard-fail with sentinel restore.
-	optional := []string{"state.json", "redaction-set.json", "agent.log", "paused", ".lock"}
+	optional := []string{"state.json", "redaction-set.json", "agent-config.json", "agent.log", "paused", ".lock"}
 	for _, name := range optional {
 		p := filepath.Join(root, name)
 		if err := osRemove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -206,7 +206,7 @@ func runUninstallCleanup(cmd *cobra.Command, cfg *config.Config, keepRemote bool
 	// (f) tmp glob cleanup — leftover CreateTemp suffixes from atomic writes
 	// in config.SaveConfig / state.Save / redactionset.Save. R13-F2 says any
 	// failure here is hard-fail with restore so the operator can retry.
-	for _, pattern := range []string{".config.toml.*", ".state.json.*", ".redaction-set.json.*"} {
+	for _, pattern := range []string{".config.toml.*", ".state.json.*", ".redaction-set.json.*", ".agent-config.json.*"} {
 		matches, _ := filepath.Glob(filepath.Join(root, pattern))
 		for _, m := range matches {
 			if err := osRemove(m); err != nil && !errors.Is(err, fs.ErrNotExist) {

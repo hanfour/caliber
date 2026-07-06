@@ -1185,6 +1185,32 @@
       "done": "完成",
       "copied": "已複製",
       "copyFail": "剪貼簿不可用"
+    },
+    "agentConfig": {
+      "title": "Agent 設定",
+      "intervalLabel": "上傳間隔（秒）",
+      "intervalHint": "每台裝置上傳新活動的頻率。30–1800 秒。越低儀表板越即時，越高越省資源。",
+      "save": "儲存",
+      "saved": "已儲存",
+      "outOfRange": "數值已被限制在允許的 30–1800 秒範圍內。"
     }
+  },
+  "deviceApproval": {
+    "title": "授權此裝置",
+    "subtitle": "{hostname} 上的 CLI 要求記錄你的 Claude Code 與 Codex 使用紀錄。",
+    "codeLabel": "裝置代碼",
+    "codePlaceholder": "XXXX-XXXX",
+    "lookupCta": "繼續",
+    "deviceInfo": "由請求裝置自行回報：{hostname} · {os}",
+    "phishingWarning": "只有在你剛剛於這台裝置執行過 `caliber login` 時才按授權。下方裝置資訊由請求端自行回報，可能造假。",
+    "consentHeading": "將會記錄的內容",
+    "consentBody": "這台機器上完整的 Claude Code 與 Codex 對話內容（機密會自動遮罩）將上傳至你的組織，包含過去 90 天的歷史紀錄。你可隨時用 `caliber agent pause` 暫停，或從儀表板撤銷此裝置。",
+    "approve": "授權",
+    "deny": "拒絕",
+    "approved": "裝置已授權。回到終端機，它會自動完成設定。",
+    "denied": "已拒絕請求。",
+    "notFound": "代碼無效或已過期。請重新執行 `caliber login`。",
+    "signInPrompt": "請先登入以授權此裝置。",
+    "signInCta": "登入"
   }
 }

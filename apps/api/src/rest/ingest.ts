@@ -204,7 +204,9 @@ export function ingestRoutes(env: ServerEnv): FastifyPluginAsync {
         const parsed = ingestBodySchema.safeParse(req.body);
         if (!parsed.success) {
           reply.code(400);
-          return { error: "invalid_body", details: parsed.error.flatten() };
+          // Bare error code only — do not echo zod's field-path shape
+          // (matches deviceAuth.ts).
+          return { error: "invalid_body" };
         }
 
         const errors: IngestError[] = [];

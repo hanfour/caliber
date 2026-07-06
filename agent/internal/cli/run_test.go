@@ -356,6 +356,9 @@ func TestRun_OnceEndToEnd_FetchAndIngest(t *testing.T) {
 			redactionFetches++
 			w.WriteHeader(200)
 			w.Write([]byte(`{"patterns":[{"name":"n","regex":"[0-9]+","replacement":"#"}],"version":"v-1","ttl_seconds":3600}`))
+		case "/v1/agent-config":
+			w.WriteHeader(200)
+			w.Write([]byte(`{"poll_interval_seconds":60,"ttl_seconds":3600}`))
 		case "/v1/ingest":
 			ingestPosts++
 			gr, err := gzip.NewReader(r.Body)

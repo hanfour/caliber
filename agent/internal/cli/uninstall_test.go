@@ -250,6 +250,34 @@ func indexOf(slice []string, item string) int {
 	return -1
 }
 
+// TestUninstall_AgentConfigJSON_RemovedCleanly is the H1 regression test:
+// config.SaveAgentConfig writes <root>/agent-config.json (the run.go
+// hourly-refresh cache), but the ordered_delete optional-artifact list
+// didn't know about it — leaving it behind made step (i) rmdir fail with
+// ENOTEMPTY and exit 1, permanently blocking re-enroll ("partial uninstall
+// detected"). Seed a root with agent-config.json present and assert
+// uninstall exits 0 with the root fully removed.
+func TestUninstall_AgentConfigJSON_RemovedCleanly(t *testing.T) {
+	root := setupEnrolledRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "agent-config.json"), []byte(`{"poll_interval_seconds":300,"ttl_seconds":3600}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Also seed a leftover atomic-write tmp file matching SaveAgentConfig's
+	// CreateTemp pattern (.agent-config.json.*), so the tmp-glob cleanup is
+	// exercised too.
+	if err := os.WriteFile(filepath.Join(root, ".agent-config.json.abc123"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code := executeCLI(t, []string{"uninstall", "--yes", "--keep-remote"})
+	if code != 0 {
+		t.Fatalf("want 0, got %d", code)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("rmdir must succeed with agent-config.json present; root still exists: %v", err)
+	}
+}
+
 // TestUninstall_OrderedCleanup_SentinelDeletedLastBeforeRmdir asserts the
 // (h) → (i) ordering: .uninstalling is the LAST file removed before rmdir.
 func TestUninstall_OrderedCleanup_SentinelDeletedLastBeforeRmdir(t *testing.T) {

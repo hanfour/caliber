@@ -4,7 +4,10 @@
 // or the source-discovery code.
 package watcher
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // FileRef is one transcript file discovered by a Source. CWD is
 // populated by sources that know the cwd cheaply (codex via
@@ -14,8 +17,9 @@ type FileRef struct {
 	Path            string // absolute
 	Source          string // "claude" | "claude-subagent" | "codex"
 	SessionID       string
-	ParentSessionID string // empty unless Source == "claude-subagent"
-	CWD             string // empty for claude (resolver fills); cheap for codex
+	ParentSessionID string    // empty unless Source == "claude-subagent"
+	CWD             string    // empty for claude (resolver fills); cheap for codex
+	ModTime         time.Time // file mtime, for backfill cutoff filtering
 }
 
 // Source enumerates files under one root. It does not open them for

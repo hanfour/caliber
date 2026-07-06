@@ -107,6 +107,7 @@ func (s *CodexSource) List(ctx context.Context) ([]FileRef, error) {
 						Source:    "codex",
 						SessionID: sessID,
 						CWD:       s.readCWD(path),
+						ModTime:   info.ModTime(),
 					})
 				}
 			}

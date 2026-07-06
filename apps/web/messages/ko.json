@@ -1185,6 +1185,32 @@
       "done": "완료",
       "copied": "복사됨",
       "copyFail": "클립보드를 사용할 수 없음"
+    },
+    "agentConfig": {
+      "title": "Agent 설정",
+      "intervalLabel": "업로드 간격(초)",
+      "intervalHint": "각 디바이스가 새 활동을 업로드하는 빈도입니다. 30~1800초. 낮을수록 대시보드가 더 실시간이고, 높을수록 더 가볍습니다.",
+      "save": "저장",
+      "saved": "저장되었습니다",
+      "outOfRange": "값이 허용 범위인 30~1800초로 조정되었습니다."
     }
+  },
+  "deviceApproval": {
+    "title": "이 기기 승인",
+    "subtitle": "{hostname}의 CLI가 회원님의 Claude Code 및 Codex 세션 기록을 요청하고 있습니다.",
+    "codeLabel": "기기 코드",
+    "codePlaceholder": "XXXX-XXXX",
+    "lookupCta": "계속",
+    "deviceInfo": "요청 기기가 자체 보고한 정보: {hostname} · {os}",
+    "phishingWarning": "이 기기에서 방금 `caliber login`을 실행한 경우에만 승인하세요. 아래 기기 정보는 요청 기기가 자체적으로 보고한 것으로, 위조되었을 수 있습니다.",
+    "consentHeading": "기록되는 내용",
+    "consentBody": "이 기기의 전체 Claude Code 및 Codex 대화 내용(민감 정보는 자동으로 마스킹됨)이 지난 90일간의 기록을 포함하여 조직에 업로드됩니다. 언제든지 `caliber agent pause`로 일시 중지하거나 대시보드에서 이 기기를 취소할 수 있습니다.",
+    "approve": "승인",
+    "deny": "거부",
+    "approved": "기기가 승인되었습니다. 터미널로 돌아가면 자동으로 설정이 완료됩니다.",
+    "denied": "요청이 거부되었습니다.",
+    "notFound": "코드가 유효하지 않거나 만료되었습니다. `caliber login`을 다시 실행하세요.",
+    "signInPrompt": "이 기기를 승인하려면 로그인하세요.",
+    "signInCta": "로그인"
   }
 }
