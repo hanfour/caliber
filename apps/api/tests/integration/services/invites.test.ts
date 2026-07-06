@@ -117,6 +117,75 @@ describe("invites service (cross-tenant guard)", () => {
   });
 
   describe("acceptInvite", () => {
+    // First-time invited members hit a double-accept: NextAuth's createUser
+    // event consumes the invite at sign-in, then /invite/[token] calls
+    // invites.accept with the same token and used to get NOT_FOUND — the UI
+    // showed "invalid or expired" to a user who was successfully onboarded.
+    it("replaying an already-accepted invite with the matching email succeeds idempotently", async () => {
+      const org = await makeOrg(testDb.db);
+      const inviter = await makeUser(testDb.db);
+      const invitee = await makeUser(testDb.db, { email: "steve@x.test" });
+      const inv = await createInvite(testDb.db, inviter, {
+        orgId: org.id,
+        email: "steve@x.test",
+        role: "member",
+        scopeType: "organization",
+        scopeId: org.id,
+      });
+
+      const first = await acceptInvite(
+        testDb.db,
+        { id: invitee.id, email: invitee.email },
+        inv.token,
+      );
+      expect(first.orgId).toBe(org.id);
+
+      const replay = await acceptInvite(
+        testDb.db,
+        { id: invitee.id, email: invitee.email },
+        inv.token,
+      );
+      expect(replay.orgId).toBe(org.id);
+
+      // The replay must not duplicate the role grant.
+      const grants = await testDb.db
+        .select()
+        .from(roleAssignments)
+        .where(eq(roleAssignments.userId, invitee.id));
+      expect(grants).toHaveLength(1);
+    });
+
+    it("replaying an already-accepted invite with a different email stays NOT_FOUND", async () => {
+      const org = await makeOrg(testDb.db);
+      const inviter = await makeUser(testDb.db);
+      const invitee = await makeUser(testDb.db, { email: "steve@x.test" });
+      const stranger = await makeUser(testDb.db, { email: "mallory@x.test" });
+      const inv = await createInvite(testDb.db, inviter, {
+        orgId: org.id,
+        email: "steve@x.test",
+        role: "member",
+        scopeType: "organization",
+        scopeId: org.id,
+      });
+      await acceptInvite(
+        testDb.db,
+        { id: invitee.id, email: invitee.email },
+        inv.token,
+      );
+
+      // A consumed token must not confirm anything to a non-matching account.
+      await expect(
+        acceptInvite(
+          testDb.db,
+          { id: stranger.id, email: stranger.email },
+          inv.token,
+        ),
+      ).rejects.toMatchObject({
+        constructor: ServiceError,
+        code: "NOT_FOUND",
+      });
+    });
+
     it("rejects accept when the invite scopeId no longer belongs to the org", async () => {
       // Simulates a legacy invite row that predates the create-time guard,
       // or a dept reassigned between create and accept.

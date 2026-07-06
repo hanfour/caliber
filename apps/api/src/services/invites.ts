@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { and, eq, gt, isNull } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import type { Database } from '@caliber/db'
 import { invites, organizationMembers, roleAssignments } from '@caliber/db'
 import type { Role, ScopeType } from '@caliber/auth'
@@ -126,17 +126,34 @@ export async function acceptInvite(
     const [invite] = await tx
       .select()
       .from(invites)
-      .where(
-        and(
-          eq(invites.token, token),
-          isNull(invites.acceptedAt),
-          gt(invites.expiresAt, new Date())
-        )
-      )
+      .where(eq(invites.token, token))
       .limit(1)
       .for('update')
     if (!invite) throw new ServiceError('NOT_FOUND', 'invalid or expired invite')
-    if (invite.email.toLowerCase() !== actor.email.toLowerCase()) {
+    const emailMatches =
+      invite.email.toLowerCase() === actor.email.toLowerCase()
+
+    // Idempotent replay: a first-time member's invite is consumed by the
+    // NextAuth createUser event during sign-in, and then /invite/[token]
+    // calls accept with the same token. That replay must read as success —
+    // reporting NOT_FOUND here made fully-onboarded members believe the
+    // invite was broken. The role grant already happened when the invite
+    // was consumed, so only re-assert membership (conflict-free) and
+    // return. A consumed token presented by a non-matching account gets
+    // the same NOT_FOUND as an unknown token (no enumeration).
+    if (invite.acceptedAt) {
+      if (!emailMatches) throw new ServiceError('NOT_FOUND', 'invalid or expired invite')
+      await tx
+        .insert(organizationMembers)
+        .values({ orgId: invite.orgId, userId: actor.id })
+        .onConflictDoNothing()
+      return { orgId: invite.orgId }
+    }
+
+    if (invite.expiresAt <= new Date()) {
+      throw new ServiceError('NOT_FOUND', 'invalid or expired invite')
+    }
+    if (!emailMatches) {
       throw new ServiceError('FORBIDDEN', 'invite email does not match')
     }
     // Defensive re-check: invite was validated at create time, but the
