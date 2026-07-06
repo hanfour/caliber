@@ -4,7 +4,7 @@
   "description": "Caliber — AI Development Performance Evaluator. Analyze Claude Code & Codex usage for technical performance review.",
   "type": "module",
   "private": false,
-  "bin": { "caliber": "./dist/cli.js" },
+  "bin": { "caliber": "dist/cli.js" },
   "files": ["dist", "templates", "README.md"],
   "repository": { "type": "git", "url": "git+https://github.com/hanfour/caliber.git" },
   "homepage": "https://hanfour.github.io/caliber/",
