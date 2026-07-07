@@ -1462,6 +1462,65 @@ describe("POST /v1/messages", () => {
     await app.close();
   });
 
+  // ── Task 13: eval-pin bypasses ownership for a USER-OWNED pinned account (I1) ──
+  // Final-review finding I1: the eval loopback always runs with
+  // `routingPolicy: "pool"` (buildFailoverInput derives it from the caller's
+  // group context, and the eval key here carries no group). Before this task,
+  // `ownershipOk` rejected ANY `userId != null` row for a pool request, so if
+  // the operator pinned eval traffic at a user-owned (BYOK OAuth subscription)
+  // account — the operator's actual documented deployment target — the forced
+  // layer silently no-opped and the request fell through to normal pool
+  // selection instead of the pinned account. This must now route to the
+  // user-owned pinned account.
+  it("eval key + pin header routes to a USER-OWNED pinned account (I1)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "cred-A" }),
+      { name: "A" },
+    );
+    // Account B is USER-OWNED (userId != null) — e.g. a BYOK OAuth
+    // subscription account the operator registered for a specific person.
+    const acctB = await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "cred-B" }),
+      { name: "B", userId },
+    );
+
+    const rawEvalKey = `caliber-eval-${"b".repeat(64)}`;
+    await db.insert(apiKeys).values({
+      orgId,
+      userId,
+      keyHash: hashApiKey(pepper, rawEvalKey),
+      keyPrefix: "caliber-eval",
+      name: "eval-key",
+    });
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: {
+        authorization: `Bearer ${rawEvalKey}`,
+        "x-caliber-eval-account-id": acctB,
+      },
+      payload: { model: "claude-3-haiku-20240307", max_tokens: 10 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Without the fix: ownershipOk rejects the user-owned row under the
+    // eval loopback's `routingPolicy: "pool"` → forced layer no-ops → falls
+    // through to normal pool selection, which would pick A ("cred-A") — or
+    // 503 if A didn't exist. With the fix, the trusted eval pin bypasses
+    // ONLY ownershipOk and lands on B.
+    expect(lastRequest).not.toBeNull();
+    expect(lastRequest!.headers["x-api-key"]).toBe("cred-B");
+    await app.close();
+  });
+
   it("normal key forging the pin header is ignored (no crash, routes normally)", async () => {
     const orgId = await seedOrg();
     const userId = await seedUser(orgId);

@@ -11,6 +11,7 @@ import {
   type LlmResponse,
   type BodyRow,
 } from "@caliber/evaluator";
+import { EVAL_PIN_HEADER } from "../../runtime/evalAccountPin.js";
 
 export const LLM_KEY_REDIS_PREFIX = "caliber:gw:llm-eval-key:";
 export const LLM_COST_LOOKUP_MAX_ATTEMPTS = 3;
@@ -116,7 +117,7 @@ export async function runLlmDeepAnalysis(
     const headers: Record<string, string> = orgRow.llmEvalAccountId
       ? {
           ...baseHeaders,
-          "x-caliber-eval-account-id": orgRow.llmEvalAccountId,
+          [EVAL_PIN_HEADER]: orgRow.llmEvalAccountId,
         }
       : baseHeaders;
 

@@ -207,6 +207,60 @@ describe("Task 12 — forced path ownership re-validation", () => {
   });
 });
 
+describe("Task 13 — eval-pin bypasses ownership, org boundary still enforced", () => {
+  it("pinBypassOwnership lets a pool request land on a user-owned account in the SAME org", async () => {
+    const ownedByA = await seedAccount({ name: "a-owned", userId: userAId });
+
+    const req: ScheduleRequest = {
+      orgId,
+      teamId: null,
+      routingPolicy: "pool",
+      userId: null,
+      groupPlatform: "openai",
+      stickyAccountId: ownedByA.id,
+      pinBypassOwnership: true,
+    };
+
+    const account = await loadSchedulableAccount(db as never, ownedByA.id, req);
+    expect(account?.id).toBe(ownedByA.id);
+  });
+
+  it("pinBypassOwnership does NOT let a pool request land on an account in a DIFFERENT org", async () => {
+    const [otherOrg] = await db
+      .insert(organizations)
+      .values({ slug: `pin-bypass-cross-${Date.now()}`, name: "Cross Org" })
+      .returning();
+
+    // A user-owned account, but in a DIFFERENT org than the request's orgId.
+    const [foreign] = await db
+      .insert(upstreamAccounts)
+      .values({
+        ...baseAccount,
+        orgId: otherOrg!.id,
+        name: "foreign-owned",
+        priority: 50,
+        userId: userAId,
+      })
+      .returning();
+
+    const req: ScheduleRequest = {
+      orgId, // request scoped to the ORIGINAL org, not otherOrg
+      teamId: null,
+      routingPolicy: "pool",
+      userId: null,
+      groupPlatform: "openai",
+      stickyAccountId: foreign!.id,
+      pinBypassOwnership: true,
+    };
+
+    // Even with the trusted bypass flag set, the SQL `orgId` condition in
+    // loadSchedulableAccount rejects the cross-org row — the bypass touches
+    // ONLY ownershipOk, never org isolation.
+    const account = await loadSchedulableAccount(db as never, foreign!.id, req);
+    expect(account).toBeNull();
+  });
+});
+
 describe("Task 12 — sticky path ownership re-validation", () => {
   it("stale Layer 1 sticky pointing at a now-user-owned account is dropped on a `pool` request", async () => {
     const redis = newRedis();
