@@ -86,7 +86,7 @@ describe("loginCommand end-to-end wiring", () => {
 
     // 2. Binary download: GitHub release URL + sha256 sidecar, exact literals.
     expect(fetchedUrls[2]).toBe(
-      "https://github.com/hanfour/caliber/releases/download/agent/v0.2.0/caliber-agent-agent_v0.2.0-darwin-arm64.tar.gz",
+      "https://github.com/hanfour/caliber/releases/download/agent/v0.2.1/caliber-agent-agent_v0.2.1-darwin-arm64.tar.gz",
     );
     expect(fetchedUrls[3]).toBe(`${fetchedUrls[2]}.sha256`);
 
@@ -119,7 +119,7 @@ describe("loginCommand end-to-end wiring", () => {
     const state = JSON.parse(readFileSync(join(home, ".caliber", "cli.json"), "utf-8"));
     expect(state).toEqual({
       serverUrl: "https://caliber.example",
-      agentVersion: "agent/v0.2.0",
+      agentVersion: "agent/v0.2.1",
       binaryPath: binPath,
     });
   });

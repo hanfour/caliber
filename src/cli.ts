@@ -56,7 +56,7 @@ program
       "Analyze Claude Code & Codex usage for technical performance review\n" +
       "以技術績效審核者角色，分析 AI 工具使用狀況並產出評核報告",
   )
-  .version("0.2.0");
+  .version("0.3.0");
 
 // ── Config command ──
 
@@ -227,7 +227,11 @@ program
   .command("login")
   .description("Log in and start recording Claude Code / Codex usage on this machine")
   .option("--server <url>", "Caliber server URL")
-  .action(async (opts: { server?: string }) => {
+  .option(
+    "--gateway",
+    "Also route Claude Code through the Caliber gateway (auto-configures ~/.claude/settings.json)",
+  )
+  .action(async (opts: { server?: string; gateway?: boolean }) => {
     try {
       await loginCommand(opts);
     } catch (err) {

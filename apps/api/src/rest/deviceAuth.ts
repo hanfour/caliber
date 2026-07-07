@@ -21,6 +21,9 @@ const startBodySchema = z.object({
   os: z.string().min(1).max(255),
   agentVersion: z.string().max(64).optional(),
   cliVersion: z.string().max(64).optional(),
+  // #256: `caliber login --gateway` opts into auto-provisioning an own_then_pool
+  // gateway key at approval time so the CLI can configure Claude Code routing.
+  provision_gateway: z.boolean().optional(),
 });
 const pollBodySchema = z.object({ device_code: z.string().min(16).max(128) });
 
@@ -33,6 +36,10 @@ export const deviceAuthFlowSchema = z.object({
   cliVersion: z.string().optional(),
   createdAt: z.string(),
   enrollmentToken: z.string().optional(),
+  // #256: gateway provisioning — requested at start, fulfilled at approve.
+  provisionGateway: z.boolean().optional(),
+  apiKey: z.string().optional(),
+  gatewayUrl: z.string().optional(),
 });
 export type DeviceAuthFlow = z.infer<typeof deviceAuthFlowSchema>;
 
@@ -102,10 +109,12 @@ export function deviceAuthRoutes(env: ServerEnv, redis: Redis): FastifyPluginAsy
         reply.code(500);
         return { error: "user_code_unavailable" };
       }
+      const { provision_gateway, ...meta } = parsed.data;
       const flow: DeviceAuthFlow = {
         status: "pending",
         userCode,
-        ...parsed.data,
+        ...meta,
+        provisionGateway: provision_gateway,
         createdAt: new Date().toISOString(),
       };
       await redis.set(flowKey(codeHash), JSON.stringify(flow), "EX", FLOW_TTL_SEC);
@@ -153,7 +162,12 @@ export function deviceAuthRoutes(env: ServerEnv, redis: Redis): FastifyPluginAsy
       if (flow.status === "approved" && flow.enrollmentToken) {
         await redis.del(flowKey(codeHash), userCodeKey(flow.userCode)).catch(() => {});
         reply.code(200);
-        return { enrollment_token: flow.enrollmentToken };
+        return {
+          enrollment_token: flow.enrollmentToken,
+          // #256: present only when --gateway provisioning was requested and
+          // a key was freshly minted at approve.
+          ...(flow.apiKey ? { api_key: flow.apiKey, gateway_url: flow.gatewayUrl } : {}),
+        };
       }
       reply.code(400);
       return { error: "authorization_pending" };
