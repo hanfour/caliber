@@ -11,13 +11,28 @@ import { ReportDetail } from "@/components/evaluator/ReportDetail";
 
 export default function MemberDetailPage() {
   const params = useParams();
-  const orgId = params?.id as string;
+  const identifier = params?.id as string;
   const uid = params?.uid as string;
+  // Resolve slug-or-UUID → canonical org UUID (the report queries + RBAC checks
+  // require a UUID; a raw slug 400s).
+  const { data: org } = trpc.organizations.resolveIdentifier.useQuery(
+    { identifier },
+    { enabled: !!identifier },
+  );
+  const orgId = org?.id;
+
+  if (!orgId) {
+    return (
+      <div className="mx-auto max-w-4xl p-6 text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <Link
-        href={`/dashboard/organizations/${orgId}/members`}
+        href={`/dashboard/organizations/${identifier}/members`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" />

@@ -19,12 +19,31 @@ function fmtDate(iso: string | null): string {
 
 export default function OrgSessionsPage() {
   const params = useParams();
-  const orgId = params?.id as string;
+  const identifier = params?.id as string;
   const [range, setRange] = useState<RangePreset>("30d");
   const { from, to } = useMemo(() => rangeToDates(range), [range]);
   const t = useTranslations("sessions");
 
-  const summary = trpc.sessions.orgSummary.useQuery({ orgId, from, to });
+  // The URL segment can be the org slug or UUID; resolve to the canonical UUID
+  // before the sessions query (its input is z.string().uuid()).
+  const { data: org } = trpc.organizations.resolveIdentifier.useQuery(
+    { identifier },
+    { enabled: !!identifier },
+  );
+  const orgId = org?.id;
+
+  const summary = trpc.sessions.orgSummary.useQuery(
+    { orgId: orgId!, from, to },
+    { enabled: !!orgId },
+  );
+
+  if (!orgId) {
+    return (
+      <Card className="shadow-card p-6 text-sm text-muted-foreground">
+        {t("loading")}
+      </Card>
+    );
+  }
 
   return (
     <RequirePerm
