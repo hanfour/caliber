@@ -71,6 +71,7 @@ export async function runLlmDeepAnalysis(
       .select({
         llmEvalModel: organizations.llmEvalModel,
         llmEvalEnabled: organizations.llmEvalEnabled,
+        llmEvalAccountId: organizations.llmEvalAccountId,
       })
       .from(organizations)
       .where(eq(organizations.id, input.orgId))
@@ -107,15 +108,23 @@ export async function runLlmDeepAnalysis(
       messages: prompt.messages,
     };
 
+    const baseHeaders: Record<string, string> = {
+      Authorization: `Bearer ${rawKey}`,
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+    };
+    const headers: Record<string, string> = orgRow.llmEvalAccountId
+      ? {
+          ...baseHeaders,
+          "x-caliber-eval-account-id": orgRow.llmEvalAccountId,
+        }
+      : baseHeaders;
+
     let res: Response;
     try {
       res = await fetchFn(url, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${rawKey}`,
-          "Content-Type": "application/json",
-          "anthropic-version": "2023-06-01",
-        },
+        headers,
         body: JSON.stringify(body),
       });
     } catch {
