@@ -27,6 +27,9 @@ import { createRequire } from "node:module";
 import { eq, sql } from "drizzle-orm";
 import {
   apiKeys,
+  clientEvents,
+  clientSessions,
+  devices,
   evaluationReports,
   organizations,
   requestBodies,
@@ -151,6 +154,9 @@ beforeEach(async () => {
   );
   await db.execute(sql`TRUNCATE TABLE request_bodies RESTART IDENTITY CASCADE`);
   await db.execute(sql`TRUNCATE TABLE usage_logs RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE TABLE client_events RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE TABLE client_sessions RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE TABLE devices RESTART IDENTITY CASCADE`);
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -260,6 +266,71 @@ async function seedRequestBody(requestId: string): Promise<void> {
   });
 }
 
+// Seed a transcript session with one user→assistant turn (#257). The
+// assistant event's content carries a tool_use so tool_diversity has data.
+async function seedTranscriptTurn(opts?: {
+  sessionId?: string;
+  timestamp?: Date;
+  outputTokens?: number;
+}): Promise<void> {
+  const sessionId = opts?.sessionId ?? `tx-sess-${Math.random().toString(36).slice(2)}`;
+  const ts = opts?.timestamp ?? new Date("2024-01-01T10:00:00.000Z");
+
+  const [device] = await db
+    .insert(devices)
+    .values({
+      userId,
+      orgId,
+      hostname: "steve.local",
+      os: "darwin",
+      agentVersion: "0.2.0",
+      status: "active",
+    })
+    .returning({ id: devices.id });
+
+  await db.insert(clientSessions).values({
+    id: sessionId,
+    deviceId: device!.id,
+    userId,
+    orgId,
+    sourceClient: "claude-code",
+    startedAt: ts,
+    lastEventAt: ts,
+  });
+
+  await db.insert(clientEvents).values([
+    {
+      orgId,
+      deviceId: device!.id,
+      sessionId,
+      eventId: `${sessionId}-u1`,
+      role: "user",
+      eventType: "user_message",
+      timestamp: ts,
+      content: [{ type: "text", text: "please read the file" }],
+      source: "transcript",
+    },
+    {
+      orgId,
+      deviceId: device!.id,
+      sessionId,
+      eventId: `${sessionId}-a1`,
+      role: "assistant",
+      eventType: "assistant_message",
+      timestamp: new Date(ts.getTime() + 1000),
+      content: [
+        { type: "text", text: "Reading it now." },
+        { type: "tool_use", name: "Read", input: { file: "x.ts" } },
+      ],
+      inputTokens: 10,
+      outputTokens: opts?.outputTokens ?? 200,
+      cacheReadTokens: 50,
+      cacheCreationTokens: 0,
+      source: "transcript",
+    },
+  ]);
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("runRuleBased — integration", () => {
@@ -276,6 +347,56 @@ describe("runRuleBased — integration", () => {
     // Confirm nothing was inserted (no upsert called when skipped)
     const rows = await db.select().from(evaluationReports);
     expect(rows).toHaveLength(0);
+  });
+
+  it("#257: transcript-only user (zero usage_logs) is scored, not skipped, with source_breakdown", async () => {
+    await seedTranscriptTurn();
+
+    const result = await runRuleBased(makeRuleBasedInput());
+
+    // Not skipped despite zero gateway usage rows.
+    expect(result.skipped).toBe(false);
+    expect(result.sourceBreakdown).toEqual({
+      gatewayEvents: 0,
+      transcriptEvents: 1,
+    });
+    // The assistant event became a BodyRow whose responseBody drives signals.
+    expect(result.bodies).toHaveLength(1);
+    expect(result.bodies[0]!.clientUserAgent).toBe("claude-code");
+    expect(typeof result.report.totalScore).toBe("number");
+    // tool_diversity saw the tool_use in the transcript content.
+    expect(result.report.signalsSummary.tool_diversity).toBeGreaterThanOrEqual(1);
+
+    // source_breakdown is persisted.
+    const reportId = await upsertEvaluationReport(
+      makeUpsertInput(result.report, { sourceBreakdown: result.sourceBreakdown }),
+    );
+    expect(reportId).toBeTruthy();
+    const [row] = await db
+      .select()
+      .from(evaluationReports)
+      .where(eq(evaluationReports.id, reportId!));
+    expect(row!.sourceBreakdown).toEqual({
+      gateway_events: 0,
+      transcript_events: 1,
+    });
+  });
+
+  it("#257: gateway + transcript data merge into one report", async () => {
+    const requestId = "req-merge-001";
+    await seedUsageLog(requestId);
+    await seedRequestBody(requestId);
+    await seedTranscriptTurn();
+
+    const result = await runRuleBased(makeRuleBasedInput());
+
+    expect(result.skipped).toBe(false);
+    expect(result.sourceBreakdown).toEqual({
+      gatewayEvents: 1,
+      transcriptEvents: 1,
+    });
+    // One gateway body + one transcript body scored together.
+    expect(result.bodies).toHaveLength(2);
   });
 
   it("2. happy path → seeds usage+bodies → scores → upserts evaluation_reports row via upsertEvaluationReport", async () => {

@@ -301,6 +301,7 @@ export async function runEvaluation(
       triggeredByUser: input.triggeredByUser,
       report: rb.report,
       llm: sharedLlmArg,
+      sourceBreakdown: rb.sourceBreakdown,
     };
     reportId = await upsertEvaluationReport(upsertInput);
   }
