@@ -12,17 +12,28 @@ import { MemberScoreCell } from "@/components/evaluator";
 
 export default function MembersTab() {
   const params = useParams();
-  const orgId = params?.id as string;
+  const identifier = params?.id as string;
+  // The URL segment can be the org slug (e.g. "onead") OR its UUID; resolve it
+  // to the canonical UUID before any query whose input is z.string().uuid(),
+  // otherwise a slug 400s ("UUID 格式不正確").
+  const { data: org } = trpc.organizations.resolveIdentifier.useQuery(
+    { identifier },
+    { enabled: !!identifier },
+  );
+  const orgId = org?.id;
   const {
     data: members,
     isLoading,
     error,
-  } = trpc.users.list.useQuery({ orgId });
+  } = trpc.users.list.useQuery(
+    { orgId: orgId! },
+    { enabled: !!orgId },
+  );
   const t = useTranslations("members");
   const tPage = useTranslations("membersPage");
   const tCommon = useTranslations("common");
 
-  if (isLoading) {
+  if (!orgId || isLoading) {
     return (
       <Card className="shadow-card p-6 text-sm text-muted-foreground">
         {tCommon("loading")}
@@ -109,7 +120,7 @@ export default function MembersTab() {
                     }}
                   >
                     <Link
-                      href={`/dashboard/organizations/${orgId}/members/${m.id}/api-keys`}
+                      href={`/dashboard/organizations/${identifier}/members/${m.id}/api-keys`}
                       className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                     >
                       <KeyRound className="h-3.5 w-3.5" />
