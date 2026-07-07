@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { EvidenceRow } from "./EvidenceRow";
-import type { SignalHitDisplay } from "./EvidenceRow";
+import { SignalBreakdown, type BreakdownSignal } from "./SignalBreakdown";
+import type { RubricSignal } from "./rubricThreshold";
 
 // ─── Types (mirrors evaluator/engine/types.ts stored in jsonb) ────────────────
 
@@ -53,17 +53,24 @@ export function scoreBadgeClass(score: number): string {
 
 interface SectionRowProps {
   section: SectionResult;
+  rubricSection?: { signals: RubricSignal[] };
 }
 
-export function SectionRow({ section }: SectionRowProps) {
+export function SectionRow({ section, rubricSection }: SectionRowProps) {
   const [expanded, setExpanded] = useState(false);
   const t = useTranslations("evaluator.report");
 
-  const signals: SignalHitDisplay[] = section.signals.map((s) => ({
+  const signals: BreakdownSignal[] = section.signals.map((s) => ({
     id: s.id,
+    type: s.type,
     hit: s.hit,
+    value: s.value,
     evidence: s.evidence,
   }));
+
+  const rubricSignals: Record<string, RubricSignal> | undefined = rubricSection
+    ? Object.fromEntries(rubricSection.signals.map((rs) => [rs.id, rs]))
+    : undefined;
 
   const isSuperior =
     section.score === section.superiorScore &&
@@ -113,7 +120,7 @@ export function SectionRow({ section }: SectionRowProps) {
       {expanded && (
         <tr className="border-b border-border bg-muted/20">
           <td colSpan={4} className="p-0">
-            <EvidenceRow signals={signals} />
+            <SignalBreakdown signals={signals} rubricSignals={rubricSignals} />
           </td>
         </tr>
       )}
