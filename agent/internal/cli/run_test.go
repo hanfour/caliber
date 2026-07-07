@@ -164,6 +164,27 @@ func TestRun_NotEnrolled_ReturnsExit1(t *testing.T) {
 	}
 }
 
+// #253: the daemon must emit a startup line to its log/stderr BEFORE any
+// branch that can exit early. During the first live smoke the launchd job
+// exited 0 with ZERO log lines (the RFC logger is only constructed after
+// several early-exit checks + a SIGTERM-sensitive setup), so "installed but
+// silently never ran" was indistinguishable from "ran fine". A guaranteed
+// startup marker makes any early exit self-diagnosing.
+func TestRun_EmitsStartupLineBeforeEarlyExit(t *testing.T) {
+	t.Setenv("CALIBER_AGENT_HOME", t.TempDir()) // not enrolled → earliest exit
+
+	cmd := New()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"run", "--once"})
+	_ = cmd.ExecuteContext(context.Background())
+
+	if !strings.Contains(buf.String(), "[start]") {
+		t.Errorf("run must emit a [start] line even on the earliest exit; got: %q", buf.String())
+	}
+}
+
 func TestRun_KeychainMissing_ReturnsExit1(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "ca")
 	t.Setenv("CALIBER_AGENT_HOME", home)

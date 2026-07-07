@@ -123,6 +123,16 @@ func fatalExitFor(err error) *ExitError {
 }
 
 func runRun(cmd *cobra.Command, once bool, interval time.Duration, keychainPath string) error {
+	// Emit a startup marker to stderr as the VERY first action, before any
+	// branch that can exit early (#253). Under launchd, stderr is redirected
+	// to agent.log, and the RFC logger below is only constructed after the
+	// pre-flight checks + a SIGTERM-sensitive setup — so an early exit (or a
+	// SIGTERM racing bootstrap) used to leave the log completely empty,
+	// making "installed but silently never ran" indistinguishable from a
+	// healthy start. This line guarantees every run is self-diagnosing.
+	fmt.Fprintf(cmd.ErrOrStderr(), "%s [start] caliber-agent %s pid=%d\n",
+		time.Now().UTC().Format(time.RFC3339), version.Version, os.Getpid())
+
 	// STEP 1: pre-flight read-only checks. Spec §3.7 / R8-F1 / R9-F1 / R16-F1.
 	// Order is reverse-aligned with ordered_delete (root → sentinel → config)
 	// so the most-recently-occurred uninstall state is detected first. NO write

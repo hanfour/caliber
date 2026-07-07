@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestWriteLaunchAgentPlist exercises the pure plist-writing path (no
@@ -96,7 +97,15 @@ func TestInstallServiceCmd_WritesPlistAndLoads(t *testing.T) {
 		loadedPath = path
 		return nil
 	}
-	t.Cleanup(func() { launchAgentLoader = origLoader })
+	// Inject a running PID so the #253 post-bootstrap verification passes
+	// deterministically instead of shelling out to the real launchctl
+	// (whose result depends on whatever job the dev machine has loaded).
+	origPID := launchAgentPID
+	launchAgentPID = func(string) (int, bool) { return 1234, true }
+	t.Cleanup(func() {
+		launchAgentLoader = origLoader
+		launchAgentPID = origPID
+	})
 
 	cmd := newInstallServiceCmd()
 	var buf bytes.Buffer
@@ -114,6 +123,70 @@ func TestInstallServiceCmd_WritesPlistAndLoads(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "installed") {
 		t.Errorf("expected confirmation output, got %q", buf.String())
+	}
+}
+
+// TestInstallServiceCmd_FailsWhenServiceNeverRuns is the #253 regression:
+// bootstrap can succeed while the job silently exits 0 without ever holding
+// a PID (KeepAlive{SuccessfulExit:false} then never retries). install-service
+// must detect the never-running state and fail LOUDLY with a kickstart
+// remediation, instead of printing "installed" over a dead service.
+func TestInstallServiceCmd_FailsWhenServiceNeverRuns(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	origLoader := launchAgentLoader
+	launchAgentLoader = func(string) error { return nil }
+	origPID := launchAgentPID
+	launchAgentPID = func(string) (int, bool) { return 0, false } // never running
+	origAtt := launchAgentPollAttempts
+	launchAgentPollAttempts = 2
+	origDelay := launchAgentPollDelay
+	launchAgentPollDelay = time.Millisecond
+	t.Cleanup(func() {
+		launchAgentLoader = origLoader
+		launchAgentPID = origPID
+		launchAgentPollAttempts = origAtt
+		launchAgentPollDelay = origDelay
+	})
+
+	cmd := newInstallServiceCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	err := cmd.RunE(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when the launchd job never reaches a running state")
+	}
+	if !strings.Contains(err.Error(), "kickstart") {
+		t.Errorf("error must carry a kickstart remediation, got: %v", err)
+	}
+}
+
+// TestInstallServiceCmd_ConfirmsPIDWhenRunning verifies the happy path
+// reports the live PID once the job is confirmed running.
+func TestInstallServiceCmd_ConfirmsPIDWhenRunning(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	origLoader := launchAgentLoader
+	launchAgentLoader = func(string) error { return nil }
+	origPID := launchAgentPID
+	launchAgentPID = func(string) (int, bool) { return 4321, true }
+	t.Cleanup(func() {
+		launchAgentLoader = origLoader
+		launchAgentPID = origPID
+	})
+
+	cmd := newInstallServiceCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(buf.String(), "installed") || !strings.Contains(buf.String(), "4321") {
+		t.Errorf("expected running confirmation with pid, got %q", buf.String())
 	}
 }
 
