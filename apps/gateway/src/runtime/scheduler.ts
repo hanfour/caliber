@@ -338,9 +338,11 @@ async function runLayers(
       onStickyError,
     );
     if (cachedAccountId && !excluded.has(cachedAccountId)) {
+      // Sticky layers never bypass ownership — the pin flag applies to the forced path only.
       const account = await loadSchedulableAccount(db, cachedAccountId, {
         ...req,
         groupId: req.groupId,
+        pinBypassOwnership: false,
       });
       if (account) {
         // Refresh both keys on hit so a request stream that occasionally
@@ -384,6 +386,7 @@ async function runLayers(
       const account = await loadSchedulableAccount(db, cachedAccountId, {
         ...req,
         groupId: req.groupId,
+        pinBypassOwnership: false,
       });
       if (account) {
         await bindStickyKeys(redis, req, account.id);
