@@ -179,7 +179,8 @@
       "accountGroups": "帳號群組",
       "usage": "用量",
       "evaluator": "評估器",
-      "audit": "稽核"
+      "audit": "稽核",
+      "sessions": "工作階段"
     }
   },
   "org": {
@@ -1212,5 +1213,20 @@
     "notFound": "代碼無效或已過期。請重新執行 `caliber login`。",
     "signInPrompt": "請先登入以授權此裝置。",
     "signInCta": "登入"
+  },
+  "sessions": {
+    "title": "工作階段",
+    "subtitle": "從成員裝置擷取的 Claude Code / Codex 工作階段記錄。",
+    "perMember": "各成員活動",
+    "loading": "載入中…",
+    "loadError": "載入工作階段失敗。",
+    "empty": "此區間內沒有工作階段記錄。",
+    "noPermission": "你沒有檢視工作階段的權限。",
+    "colMember": "成員",
+    "colSessions": "工作階段",
+    "colEvents": "事件",
+    "colSources": "來源",
+    "colFirst": "首次活動",
+    "colLast": "最近活動"
   }
 }

@@ -179,7 +179,8 @@
       "accountGroups": "Account groups",
       "usage": "Usage",
       "evaluator": "Evaluator",
-      "audit": "Audit"
+      "audit": "Audit",
+      "sessions": "Sessions"
     }
   },
   "org": {
@@ -1212,5 +1213,20 @@
     "notFound": "That code is invalid or has expired. Run `caliber login` again.",
     "signInPrompt": "Please sign in to authorize this device.",
     "signInCta": "Sign in"
+  },
+  "sessions": {
+    "title": "Sessions",
+    "subtitle": "Recorded Claude Code / Codex sessions ingested from members' devices.",
+    "perMember": "Per-member activity",
+    "loading": "Loading…",
+    "loadError": "Failed to load sessions.",
+    "empty": "No sessions recorded in this range.",
+    "noPermission": "You don't have permission to view sessions.",
+    "colMember": "Member",
+    "colSessions": "Sessions",
+    "colEvents": "Events",
+    "colSources": "Sources",
+    "colFirst": "First activity",
+    "colLast": "Last activity"
   }
 }

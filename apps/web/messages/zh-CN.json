@@ -179,7 +179,8 @@
       "accountGroups": "账号分组",
       "usage": "用量",
       "evaluator": "评估器",
-      "audit": "审计"
+      "audit": "审计",
+      "sessions": "会话"
     }
   },
   "org": {
@@ -1212,5 +1213,20 @@
     "notFound": "代码无效或已过期。请重新运行 `caliber login`。",
     "signInPrompt": "请先登录以授权此设备。",
     "signInCta": "登录"
+  },
+  "sessions": {
+    "title": "会话",
+    "subtitle": "从成员设备采集的 Claude Code / Codex 会话记录。",
+    "perMember": "各成员活动",
+    "loading": "加载中…",
+    "loadError": "加载会话失败。",
+    "empty": "此区间内没有会话记录。",
+    "noPermission": "你没有查看会话的权限。",
+    "colMember": "成员",
+    "colSessions": "会话",
+    "colEvents": "事件",
+    "colSources": "来源",
+    "colFirst": "首次活动",
+    "colLast": "最近活动"
   }
 }
