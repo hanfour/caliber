@@ -26,6 +26,7 @@ import {
   type Rubric,
   type UsageRow,
 } from "@caliber/evaluator";
+import { fetchTranscriptRows } from "./transcriptRows.js";
 
 // ── RunRuleBased input / output ───────────────────────────────────────────────
 
@@ -47,12 +48,19 @@ export interface RunRuleBasedInput {
   truncatedRequestIds?: Set<string>;
 }
 
+export interface SourceBreakdown {
+  gatewayEvents: number;
+  transcriptEvents: number;
+}
+
 export interface RunRuleBasedResult {
   report: Report;
-  /** true when the evaluation window contained no usage rows. */
+  /** true when the evaluation window contained no gateway AND no transcript rows. */
   skipped: boolean;
   /** Decrypted body rows — needed by runLlmDeepAnalysis. */
   bodies: BodyRow[];
+  /** Per-source event counts for evaluation_reports.source_breakdown (#257). */
+  sourceBreakdown: SourceBreakdown;
 }
 
 // ── UpsertEvaluationReport input ─────────────────────────────────────────────
@@ -78,6 +86,8 @@ export interface UpsertEvaluationReportInput {
     costUsd: number;
     upstreamAccountId: string | null;
   } | null;
+  /** Per-source event counts (#257) → evaluation_reports.source_breakdown. */
+  sourceBreakdown?: SourceBreakdown | null;
 }
 
 // ── runRuleBased ─────────────────────────────────────────────────────────────
@@ -94,7 +104,7 @@ export interface UpsertEvaluationReportInput {
 export async function runRuleBased(
   input: RunRuleBasedInput,
 ): Promise<RunRuleBasedResult> {
-  const { db, masterKeyHex, userId, periodStart, periodEnd } = input;
+  const { db, masterKeyHex, orgId, userId, periodStart, periodEnd } = input;
 
   // 1. Fetch usage_logs in window.
   // When apiKeyId is provided (per-key grain), append an extra eq() predicate so
@@ -115,8 +125,24 @@ export async function runRuleBased(
       ),
     );
 
-  if (usageRowsRaw.length === 0) {
+  // 1b. Fetch transcript (telemetry) rows for the same window and MERGE them
+  // with the gateway rows into a single scoring pass (#257). Per-key grain is
+  // gateway-only (devices own sessions, not api_keys), so transcripts are
+  // included only on the per-person path.
+  const transcript = input.apiKeyId
+    ? { usageRows: [], bodyRows: [], transcriptEventCount: 0 }
+    : await fetchTranscriptRows({ db, orgId, userId, periodStart, periodEnd });
+
+  const sourceBreakdown: SourceBreakdown = {
+    gatewayEvents: usageRowsRaw.length,
+    transcriptEvents: transcript.transcriptEventCount,
+  };
+
+  // Skip only when BOTH sources are empty — a transcript-only user (zero
+  // gateway usage) must still be scored.
+  if (usageRowsRaw.length === 0 && transcript.usageRows.length === 0) {
     return {
+      sourceBreakdown,
       report: {
         totalScore: 0,
         sectionScores: [],
@@ -163,7 +189,7 @@ export async function runRuleBased(
           .where(inArray(requestBodies.requestId, requestIds));
 
   // 3. Decrypt body blobs — failures treated as empty body (graceful degradation)
-  const bodyRows: BodyRow[] = bodyRowsRaw.map((b) => {
+  const gatewayBodyRows: BodyRow[] = bodyRowsRaw.map((b) => {
     const requestBodyStr = safeDecrypt(
       masterKeyHex,
       b.requestId,
@@ -185,9 +211,12 @@ export async function runRuleBased(
       requestBody: tryParse(requestBodyStr),
     };
   });
+  // Merge gateway + transcript body rows into one scoring pass (#257).
+  const bodyRows: BodyRow[] = gatewayBodyRows.concat(transcript.bodyRows);
 
-  // 4. Normalize usage rows to the shape scoreWithRules expects
-  const usageRows: UsageRow[] = usageRowsRaw.map((u) => ({
+  // 4. Normalize usage rows to the shape scoreWithRules expects, then append
+  //    the transcript-derived usage rows (#257).
+  const gatewayUsageRows: UsageRow[] = usageRowsRaw.map((u) => ({
     requestId: u.requestId,
     requestedModel: u.requestedModel,
     inputTokens: u.inputTokens,
@@ -196,6 +225,7 @@ export async function runRuleBased(
     cacheCreationTokens: u.cacheCreationTokens,
     totalCost: u.totalCost,
   }));
+  const usageRows: UsageRow[] = gatewayUsageRows.concat(transcript.usageRows);
 
   const truncatedRequestIds =
     input.truncatedRequestIds ??
@@ -229,7 +259,7 @@ export async function runRuleBased(
     facetRows: facetRowsRaw,
   });
 
-  return { report, skipped: false, bodies: bodyRows };
+  return { report, skipped: false, bodies: bodyRows, sourceBreakdown };
 }
 
 // ── upsertEvaluationReport ───────────────────────────────────────────────────
@@ -262,6 +292,12 @@ export async function upsertEvaluationReport(
     dataQuality: input.report.dataQuality as unknown,
     triggeredBy: input.triggeredBy,
     triggeredByUser: input.triggeredByUser,
+    sourceBreakdown: input.sourceBreakdown
+      ? {
+          gateway_events: input.sourceBreakdown.gatewayEvents,
+          transcript_events: input.sourceBreakdown.transcriptEvents,
+        }
+      : undefined,
   };
 
   const withLlm = input.llm
