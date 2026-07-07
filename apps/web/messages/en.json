@@ -1002,6 +1002,18 @@
       "sessionTypeExploration": "Exploration",
       "sessionTypeOther": "Other"
     },
+    "provenance": {
+      "title": "Data provenance & coverage",
+      "description": "What data this score was computed from.",
+      "gatewayEvents": "Gateway events",
+      "telemetryEvents": "Telemetry events",
+      "coverage": "Body coverage",
+      "captured": "Captured requests",
+      "missingBodies": "Missing bodies",
+      "truncatedBodies": "Truncated bodies",
+      "requests": "Requests",
+      "bodies": "Bodies"
+    },
     "trendChart": {
       "noData": "No data for this period.",
       "ariaLabel": "30-day score trend"

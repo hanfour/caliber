@@ -1002,6 +1002,18 @@
       "sessionTypeExploration": "探索",
       "sessionTypeOther": "其他"
     },
+    "provenance": {
+      "title": "資料來源與涵蓋率",
+      "description": "此評分所依據的資料。",
+      "gatewayEvents": "閘道事件數",
+      "telemetryEvents": "遙測事件數",
+      "coverage": "請求內容涵蓋率",
+      "captured": "已擷取請求數",
+      "missingBodies": "缺漏請求內容數",
+      "truncatedBodies": "截斷請求內容數",
+      "requests": "請求數",
+      "bodies": "請求內容數"
+    },
     "trendChart": {
       "noData": "本期間無資料。",
       "ariaLabel": "30 天分數趨勢"

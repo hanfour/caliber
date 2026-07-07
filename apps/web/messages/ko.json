@@ -1002,6 +1002,18 @@
       "sessionTypeExploration": "탐색",
       "sessionTypeOther": "기타"
     },
+    "provenance": {
+      "title": "데이터 출처 및 커버리지",
+      "description": "이 점수를 산출한 데이터입니다.",
+      "gatewayEvents": "게이트웨이 이벤트",
+      "telemetryEvents": "텔레메트리 이벤트",
+      "coverage": "본문 커버리지",
+      "captured": "수집된 요청 수",
+      "missingBodies": "누락된 본문",
+      "truncatedBodies": "잘린 본문",
+      "requests": "요청 수",
+      "bodies": "본문 수"
+    },
     "trendChart": {
       "noData": "이 기간에 대한 데이터가 없습니다.",
       "ariaLabel": "30일 점수 추세"

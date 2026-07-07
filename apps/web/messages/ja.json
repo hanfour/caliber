@@ -1002,6 +1002,18 @@
       "sessionTypeExploration": "探索",
       "sessionTypeOther": "その他"
     },
+    "provenance": {
+      "title": "データ出所とカバレッジ",
+      "description": "このスコアの算出元となったデータ。",
+      "gatewayEvents": "ゲートウェイイベント",
+      "telemetryEvents": "テレメトリイベント",
+      "coverage": "本文カバレッジ",
+      "captured": "取得済みリクエスト数",
+      "missingBodies": "欠落した本文",
+      "truncatedBodies": "切り詰められた本文",
+      "requests": "リクエスト数",
+      "bodies": "本文数"
+    },
     "trendChart": {
       "noData": "この期間のデータがありません。",
       "ariaLabel": "30 日間スコアトレンド"

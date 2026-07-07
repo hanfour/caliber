@@ -1002,6 +1002,18 @@
       "sessionTypeExploration": "探索",
       "sessionTypeOther": "其他"
     },
+    "provenance": {
+      "title": "数据来源与覆盖率",
+      "description": "此评分所依据的数据。",
+      "gatewayEvents": "网关事件数",
+      "telemetryEvents": "遥测事件数",
+      "coverage": "请求体覆盖率",
+      "captured": "已捕获请求数",
+      "missingBodies": "缺失请求体数",
+      "truncatedBodies": "截断请求体数",
+      "requests": "请求数",
+      "bodies": "请求体数"
+    },
     "trendChart": {
       "noData": "本期间无数据。",
       "ariaLabel": "30 天分数趋势"
