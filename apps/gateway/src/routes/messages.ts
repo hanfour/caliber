@@ -25,6 +25,7 @@ import {
 } from "../runtime/noOwnUpstream.js";
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { sessionHashFromHeaders } from "../runtime/stickyKeys.js";
+import { evalAccountPin } from "../runtime/evalAccountPin.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
@@ -368,6 +369,7 @@ async function runNonStreamFailover(
     // Layer 2 sticky (Plan 5A §8.2 / design §4.4) — Claude Code sends a stable
     // X-Claude-Session-Id per conversation; pin it to one account when present.
     sessionHash: sessionHashFromHeaders(req.headers),
+    stickyAccountId: evalAccountPin(req),
     attempt: async (account: SelectedAccount) => {
       const acquired = await acquireSlot(
         app.redis,
@@ -1182,6 +1184,7 @@ export function makeMessagesOpenaiHandler(
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         sessionHash: sessionHashFromHeaders(req.headers),
+        stickyAccountId: evalAccountPin(req),
         attempt: async (account) =>
           withSlotAndCredential(
             app,
@@ -1383,6 +1386,7 @@ async function runMessagesOpenaiStreamingFailover(
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       sessionHash: sessionHashFromHeaders(req.headers),
+      stickyAccountId: evalAccountPin(req),
       attempt: async (account) =>
         withSlotAndCredential(
           app,

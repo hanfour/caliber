@@ -25,6 +25,10 @@ declare module "fastify" {
       quotaUsd: string;
       quotaUsedUsd: string;
       routingPolicy: "pool" | "own" | "own_then_pool";
+      // First 12 chars of the raw key (see llmEvalKeyProvisioning.ts). Used by
+      // evalAccountPin.ts as a trust gate: only an eval key ("caliber-eval")
+      // may pin the loopback call to a specific upstream account.
+      keyPrefix: string;
     } | null;
     gwUser: { id: string; email: string } | null;
     gwOrg: {
@@ -194,6 +198,7 @@ async function pluginBody(
       quotaUsd: row.apiKey.quotaUsd,
       quotaUsedUsd: row.apiKey.quotaUsedUsd,
       routingPolicy: row.apiKey.routingPolicy as "pool" | "own" | "own_then_pool",
+      keyPrefix: row.apiKey.keyPrefix,
     };
     req.gwUser = row.user;
     req.gwOrg = {
