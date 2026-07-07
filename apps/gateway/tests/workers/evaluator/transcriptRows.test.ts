@@ -80,6 +80,22 @@ describe("mapEventsToRows — turn-grain (#261)", () => {
     expect(msgs2).toHaveLength(2);
   });
 
+  it("skips orphan assistant work whose human turn is outside the window (no turn inflation)", () => {
+    // A session slice that starts on assistant events (the human message was
+    // before the window) must NOT produce an empty-user orphan turn.
+    const events: EventRow[] = [
+      ev({ eventId: "a0", role: "assistant", content: [{ type: "text", text: "continuing" }] }),
+      ev({ eventId: "tr0", role: "user", content: [{ type: "tool_result", content: "x" }] }),
+      ev({ eventId: "u1", role: "user", content: [{ type: "text", text: "now compare options" }] }),
+      ev({ eventId: "a1", role: "assistant", content: [{ type: "text", text: "ok" }] }),
+    ];
+    const { bodyRows, transcriptEventCount } = mapEventsToRows([session], events);
+    // Only the genuine in-window human turn is emitted.
+    expect(transcriptEventCount).toBe(1);
+    expect(bodyRows).toHaveLength(1);
+    expect(JSON.stringify(bodyRows[0]!.requestBody)).toContain("compare options");
+  });
+
   it("a request_body keyword ratio is over turns, not events — sparse term stays sparse", () => {
     // 1 of 3 human turns mentions the term; each turn has many assistant events.
     const events: EventRow[] = [

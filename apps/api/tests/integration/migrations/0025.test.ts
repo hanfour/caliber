@@ -24,17 +24,19 @@ describe("migration 0025", () => {
     expect(rows.length).toBeGreaterThan(0);
 
     for (const r of rows) {
-      expect(r.version).toBe("1.2.0");
+      // Head-of-chain version (0026 bumps to 1.3.0); this test asserts 0025's
+      // durable effect: every keyword signal carries a minRatio.
+      expect(r.version).toBe("1.3.0");
       const sections = r.definition.sections as Array<{
-        signals: Array<{ type: string; minRatio?: number }>;
+        signals: Array<{ type: string; id: string; minRatio?: number }>;
       }>;
       const keywordSignals = sections.flatMap((s) =>
         s.signals.filter((sig) => sig.type === "keyword"),
       );
-      // The platform rubric has keyword signals; every one must now carry minRatio.
       expect(keywordSignals.length).toBeGreaterThan(0);
       for (const sig of keywordSignals) {
-        expect(sig.minRatio).toBe(0.4);
+        // 0025 set all to 0.4; 0026 raised interaction_keywords to 0.5.
+        expect(sig.minRatio).toBeGreaterThanOrEqual(0.4);
       }
     }
   });
