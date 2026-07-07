@@ -963,7 +963,10 @@
       "superior": "优异",
       "evidenceTitle": "信号:{id}",
       "noEvidence": "此分段无可用引用证据。",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "此分段没有记录任何信号。",
+      "actualValue": "实测值: {value}",
+      "thresholdLabel": "阈值:"
     },
     "profileEval": {
       "loading": "加载你的评估数据中…",

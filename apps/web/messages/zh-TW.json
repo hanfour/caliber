@@ -963,7 +963,10 @@
       "superior": "優異",
       "evidenceTitle": "訊號:{id}",
       "noEvidence": "此區段無可用引用證據。",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "此區段沒有記錄任何訊號。",
+      "actualValue": "實測值: {value}",
+      "thresholdLabel": "門檻值:"
     },
     "profileEval": {
       "loading": "載入你的評估資料中…",

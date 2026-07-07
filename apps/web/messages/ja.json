@@ -963,7 +963,10 @@
       "superior": "優秀",
       "evidenceTitle": "シグナル: {id}",
       "noEvidence": "このセクションの証拠引用はありません。",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "このセクションに記録されたシグナルはありません。",
+      "actualValue": "測定値: {value}",
+      "thresholdLabel": "閾値:"
     },
     "profileEval": {
       "loading": "あなたの評価データを読み込み中…",

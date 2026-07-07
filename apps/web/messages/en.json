@@ -963,7 +963,10 @@
       "superior": "Superior",
       "evidenceTitle": "Signal: {id}",
       "noEvidence": "No evidence quotes available for this section.",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "No signals recorded for this section.",
+      "actualValue": "measured: {value}",
+      "thresholdLabel": "threshold:"
     },
     "profileEval": {
       "loading": "Loading your evaluation data…",
