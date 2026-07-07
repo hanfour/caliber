@@ -218,6 +218,75 @@ describe("scoreWithRules", () => {
     ).toBeGreaterThan(0);
   });
 
+  // #261: a keyword signal with minRatio requires that at least that FRACTION
+  // of bodies contain a term, so high-volume telemetry (1000s of bodies where
+  // a term appears a handful of times) no longer auto-hits and saturates to
+  // superior. Absent minRatio, the legacy any-hit behavior is preserved.
+  describe("keyword minRatio (#261)", () => {
+    function kwRubric(minRatio?: number) {
+      return mkRubric([
+        {
+          id: "interaction",
+          name: "I",
+          weight: "100%",
+          standard: { score: 100, label: "S", criteria: [] },
+          superior: { score: 120, label: "Sup", criteria: [] },
+          signals: [
+            {
+              type: "keyword",
+              id: "kw",
+              in: "request_body",
+              terms: ["refactor"],
+              caseSensitive: false,
+              ...(minRatio !== undefined ? { minRatio } : {}),
+            },
+          ],
+        },
+      ]);
+    }
+
+    function bodies(hitCount: number, total: number): BodyRow[] {
+      return Array.from({ length: total }, (_, i) => ({
+        requestId: `r${i}`,
+        stopReason: null,
+        clientUserAgent: null,
+        clientSessionId: null,
+        requestParams: null,
+        responseBody: null,
+        requestBody: { text: i < hitCount ? "please refactor this" : "hello" },
+      }));
+    }
+
+    it("high-volume, sparse term → below minRatio → NOT superior", () => {
+      // 2 of 100 bodies mention the term (0.02) — a busy telemetry day.
+      const report = scoreWithRules({
+        rubric: kwRubric(0.15),
+        usageRows: [],
+        bodyRows: bodies(2, 100),
+      });
+      expect(report.totalScore).toBe(100); // standard, not saturated to 120
+    });
+
+    it("dense term above minRatio → superior", () => {
+      // 30 of 100 bodies (0.30) genuinely show the language.
+      const report = scoreWithRules({
+        rubric: kwRubric(0.15),
+        usageRows: [],
+        bodyRows: bodies(30, 100),
+      });
+      expect(report.totalScore).toBe(120);
+    });
+
+    it("without minRatio, a single hit still wins (legacy any-hit preserved)", () => {
+      const report = scoreWithRules({
+        rubric: kwRubric(undefined),
+        usageRows: [],
+        bodyRows: bodies(1, 100),
+      });
+      expect(report.totalScore).toBe(120);
+    });
+  });
+
   // ── Plan 4C facet-based signals ────────────────────────────────────────
   describe("facet signals", () => {
     function mkFacetSection(
