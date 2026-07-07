@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { eq } from "drizzle-orm";
-import { clientSessions, clientEvents } from "@caliber/db";
+import { and, eq } from "drizzle-orm";
+import { clientSessions, clientEvents, apiKeys } from "@caliber/db";
 import {
   setupTestDb,
   makeOrg,
@@ -182,5 +182,51 @@ describe("device login -> ingest E2E (Tasks 1-4 as one flow)", () => {
     });
     expect(configRes.statusCode).toBe(200);
     expect(configRes.json()).toMatchObject({ poll_interval_seconds: 60 });
+  });
+
+  it("#256: start(provision_gateway) -> approve mints an own_then_pool key -> poll returns api_key + gateway_url", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/v1/device-auth/start",
+      payload: { hostname: "gw-host", os: "darwin", provision_gateway: true },
+    });
+    expect(startRes.statusCode).toBe(201);
+    const { device_code, user_code } = startRes.json() as {
+      device_code: string;
+      user_code: string;
+    };
+
+    const caller = await callerFor(
+      testDb.db,
+      userId,
+      "member@e2e.test",
+      defaultTestEnv,
+      redis,
+    );
+    await caller.devices.deviceAuth.approve({ userCode: user_code });
+
+    const pollRes = await app.inject({
+      method: "POST",
+      url: "/v1/device-auth/poll",
+      payload: { device_code },
+    });
+    expect(pollRes.statusCode).toBe(200);
+    const body = pollRes.json() as {
+      enrollment_token: string;
+      api_key?: string;
+      gateway_url?: string;
+    };
+    expect(body.enrollment_token).toBeTruthy();
+    expect(body.api_key).toMatch(/^ak_/);
+    expect(body.gateway_url).toBe(defaultTestEnv.GATEWAY_BASE_URL);
+
+    // The minted key is own_then_pool, named for the device, owned by the user.
+    const [key] = await testDb.db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.userId, userId), eq(apiKeys.name, "gw-host (caliber login)")));
+    expect(key).toBeDefined();
+    expect(key!.routingPolicy).toBe("own_then_pool");
+    expect(key!.status).toBe("active");
   });
 });

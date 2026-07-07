@@ -6,11 +6,12 @@ import chalk from "chalk";
 import { startDeviceAuth, pollUntilApproved } from "./device-auth.js";
 import { assetName, assetUrl, downloadAndVerify, extractBinary, resolvePlatform } from "./download.js";
 import { agentBinaryPath, cliStateDir, clearCliState, loadCliState, saveCliState } from "./state.js";
+import { writeClaudeGatewayConfig } from "./claude-config.js";
 import { AGENT_REPO, AGENT_TAG, DEFAULT_SERVER_URL } from "./constants.js";
 
 // Keep in sync with the `program.version(...)` declared in cli.ts, and both
 // with package.json's `version` field.
-const CLI_VERSION = "0.2.0";
+const CLI_VERSION = "0.3.0";
 
 const log = (msg: string) => process.stderr.write(msg + "\n");
 
@@ -21,6 +22,7 @@ function openBrowser(url: string): void {
 
 export interface LoginOptions {
   server?: string;
+  gateway?: boolean;
 }
 
 // The `--server` value (and DEFAULT_SERVER_URL) is the Caliber WEB origin —
@@ -79,19 +81,24 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
 
   // 1. Device-code authorization
   log(chalk.dim("Requesting device authorization…"));
-  const start = await startDeviceAuth(apiBase, {
-    hostname: hostname(),
-    os: `${platform}-${arch}`,
-    agentVersion: AGENT_TAG,
-    cliVersion: CLI_VERSION,
-  });
+  const start = await startDeviceAuth(
+    apiBase,
+    {
+      hostname: hostname(),
+      os: `${platform}-${arch}`,
+      agentVersion: AGENT_TAG,
+      cliVersion: CLI_VERSION,
+    },
+    { provisionGateway: opts.gateway },
+  );
   log("");
   log(`  ${chalk.bold("Open:")} ${start.verification_uri}`);
   log(`  ${chalk.bold("Code:")} ${chalk.cyan(start.user_code)}`);
   log("");
   openBrowser(start.verification_uri_complete);
   log(chalk.dim("Waiting for approval in the browser…"));
-  const enrollmentToken = await pollUntilApproved(apiBase, start);
+  const approved = await pollUntilApproved(apiBase, start);
+  const enrollmentToken = approved.enrollmentToken;
   log(chalk.green("✓ Authorized"));
 
   // 2. Download the agent binary (skip if already the pinned version)
@@ -128,6 +135,31 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
   }
 
   saveCliState({ serverUrl, agentVersion: AGENT_TAG, binaryPath: binPath });
+
+  // 5. Optional (#256): route Claude Code through the gateway. The key was
+  //    minted at approval; write it into ~/.claude/settings.json so the next
+  //    Claude Code launch proxies through Caliber.
+  if (opts.gateway) {
+    if (approved.apiKey && approved.gatewayUrl) {
+      const { existedBefore } = writeClaudeGatewayConfig(approved.apiKey, approved.gatewayUrl);
+      log("");
+      log(chalk.green(`✓ Claude Code now routes through the gateway (${approved.gatewayUrl}).`));
+      log(chalk.dim("  Wrote ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN to ~/.claude/settings.json."));
+      if (existedBefore) log(chalk.dim("  (replaced a previous gateway config)"));
+      log(
+        chalk.dim(
+          `  Connect your own Claude subscription at ${serverUrl}/dashboard/upstreams so requests route to it (own_then_pool).`,
+        ),
+      );
+    } else {
+      // Server already had an active key of this name (idempotent re-login), or
+      // gateway provisioning is unavailable server-side.
+      log("");
+      log(chalk.yellow("Gateway not auto-configured: a key for this device already exists (or the server has gateway provisioning off)."));
+      log(chalk.dim(`  Issue/copy a key at ${serverUrl}/dashboard and set ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN in ~/.claude/settings.json manually.`));
+    }
+  }
+
   log("");
   log(chalk.green.bold("✓ caliber is now recording your Claude Code / Codex sessions."));
   log(chalk.dim(`  Backfilling the past 90 days. Dashboard: ${serverUrl}/dashboard/devices`));

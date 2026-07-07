@@ -56,8 +56,29 @@ describe("pollUntilApproved", () => {
       { status: 200, body: { enrollment_token: "tok_xyz" } },
     ]);
     const token = await pollUntilApproved("https://x", start, { sleep: async () => {} });
-    expect(token).toBe("tok_xyz");
+    expect(token.enrollmentToken).toBe("tok_xyz");
   });
+  it("returns the gateway api_key + url when --gateway provisioning was fulfilled (#256)", async () => {
+    stubFetchSequence([
+      { status: 200, body: { enrollment_token: "tok_gw", api_key: "ak_live", gateway_url: "https://gw.x" } },
+    ]);
+    const res = await pollUntilApproved("https://x", start, { sleep: async () => {} });
+    expect(res.enrollmentToken).toBe("tok_gw");
+    expect(res.apiKey).toBe("ak_live");
+    expect(res.gatewayUrl).toBe("https://gw.x");
+  });
+
+  it("sends provision_gateway only when requested", async () => {
+    const mock = stubFetchSteps([
+      { status: 201, body: { device_code: "d", user_code: "U", verification_uri: "u", verification_uri_complete: "u", interval: 5, expires_in: 900 } },
+    ]);
+    await startDeviceAuth("https://x", { hostname: "h", os: "d", agentVersion: "0", cliVersion: "0" }, { provisionGateway: true });
+    expect(JSON.parse((mock.mock.calls[0]![1] as RequestInit).body as string).provision_gateway).toBe(true);
+    mock.mockClear();
+    await startDeviceAuth("https://x", { hostname: "h", os: "d", agentVersion: "0", cliVersion: "0" });
+    expect(JSON.parse((mock.mock.calls[0]![1] as RequestInit).body as string).provision_gateway).toBeUndefined();
+  });
+
   it("throws on access_denied", async () => {
     stubFetchSequence([{ status: 400, body: { error: "access_denied" } }]);
     await expect(pollUntilApproved("https://x", start, { sleep: async () => {} })).rejects.toThrow(/denied/i);
@@ -76,7 +97,7 @@ describe("pollUntilApproved", () => {
       { status: 200, body: { enrollment_token: "tok_net" } },
     ]);
     const token = await pollUntilApproved("https://x", start, { sleep: async () => {} });
-    expect(token).toBe("tok_net");
+    expect(token.enrollmentToken).toBe("tok_net");
   });
 
   it("retries when the poll response body is not JSON (e.g. proxy 502 page)", async () => {
@@ -85,7 +106,7 @@ describe("pollUntilApproved", () => {
       { status: 200, body: { enrollment_token: "tok_html" } },
     ]);
     const token = await pollUntilApproved("https://x", start, { sleep: async () => {} });
-    expect(token).toBe("tok_html");
+    expect(token.enrollmentToken).toBe("tok_html");
   });
 
   it("still enforces the deadline when every poll attempt fails", async () => {

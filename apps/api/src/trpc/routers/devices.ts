@@ -10,6 +10,7 @@ import {
   router,
 } from "../procedures.js";
 import { writeAudit } from "../../services/audit.js";
+import { issueOwnGatewayKey } from "../../services/gatewayKeys.js";
 import { resolveUserPrimaryOrgId } from "./_shared.js";
 import { AUDIT_ACTIONS } from "../../services/auditActions.js";
 import {
@@ -329,10 +330,31 @@ export const devicesRouter = router({
           });
         }
 
+        // #256: when the CLI requested --gateway, mint an own_then_pool key
+        // now (approval IS the user's consent) so poll can hand it back and the
+        // CLI can configure Claude Code. Idempotent by name; failure is
+        // non-fatal — enrollment still succeeds, the CLI just can't auto-config.
+        let apiKey: string | undefined;
+        let gatewayUrl: string | undefined;
+        if (flow.provisionGateway && ctx.env.GATEWAY_BASE_URL) {
+          const keyName = `${flow.hostname} (caliber login)`;
+          const issued = await issueOwnGatewayKey(ctx.db, {
+            userId: ctx.user.id,
+            orgId,
+            name: keyName,
+            pepper,
+          }).catch(() => null);
+          if (issued?.created) {
+            apiKey = issued.rawKey;
+            gatewayUrl = ctx.env.GATEWAY_BASE_URL;
+          }
+        }
+
         const approved: DeviceAuthFlow = {
           ...flow,
           status: "approved",
           enrollmentToken: token,
+          ...(apiKey ? { apiKey, gatewayUrl } : {}),
         };
         // XX + KEEPTTL: only overwrite an existing flow, preserving its
         // remaining TTL. If the flow expired between the read and here, XX

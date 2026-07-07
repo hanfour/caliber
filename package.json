@@ -1,17 +1,33 @@
 {
   "name": "@hanfour.huang/caliber",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Caliber — AI Development Performance Evaluator. Analyze Claude Code & Codex usage for technical performance review.",
   "type": "module",
   "private": false,
-  "bin": { "caliber": "dist/cli.js" },
-  "files": ["dist", "templates", "README.md"],
-  "repository": { "type": "git", "url": "git+https://github.com/hanfour/caliber.git" },
+  "bin": {
+    "caliber": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanfour/caliber.git"
+  },
   "homepage": "https://hanfour.github.io/caliber/",
-  "bugs": { "url": "https://github.com/hanfour/caliber/issues" },
-  "engines": { "node": ">=20", "pnpm": ">=9" },
+  "bugs": {
+    "url": "https://github.com/hanfour/caliber/issues"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
   "packageManager": "pnpm@9.15.0",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
@@ -29,7 +45,13 @@
     "ws:dev": "turbo run dev --parallel",
     "perf:gateway": "tsx scripts/perf-gateway.ts"
   },
-  "keywords": ["claude-code", "codex", "ai", "evaluation", "performance"],
+  "keywords": [
+    "claude-code",
+    "codex",
+    "ai",
+    "evaluation",
+    "performance"
+  ],
   "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^11.7.0",
