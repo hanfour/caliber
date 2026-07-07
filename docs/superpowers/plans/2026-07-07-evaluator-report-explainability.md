@@ -14,7 +14,7 @@
 - Immutability: never mutate props/state/objects in place; return new copies (spread).
 - i18n: every new UI string goes into all 5 locales `messages/{en,ja,ko,zh-CN,zh-TW}.json`; `en.json` is source of truth; `apps/web/tests/lib/i18n/messagesParity.test.ts` must stay green.
 - No `console.log` in production code.
-- eval key raw format is `caliber-eval-<64hex>`; its `apiKeys.keyPrefix` is `caliber-` (first 8 chars). This prefix is the trust signal for the gateway account-pin (§Phase 4).
+- eval key raw format is `caliber-eval-<64hex>`; its `apiKeys.keyPrefix` is `caliber-eval` (first 12 chars, per `llmEvalKeyProvisioning.ts:165` `rawKey.slice(0,12)` — NOT `caliber-`). This exact prefix is the trust signal for the gateway account-pin (§Phase 4).
 - Web tests: mock `@/lib/trpc/client` BEFORE importing the component; `tests/setup.ts` globally mocks `next-intl` against the real `en.json`, so assert against actual English strings.
 - Test commands: web `pnpm --filter @caliber/web test <path>`; api integration `pnpm --filter @caliber/api test:integration <nameFilter>`; gateway integration `pnpm --filter @caliber/gateway exec vitest run <path>`.
 
@@ -42,7 +42,7 @@
 
 **Phase 4 — Account-pin (D-backend, gateway)**
 - Modify `apps/gateway/src/runtime/failoverLoop.ts` — add `stickyAccountId?` to `RunFailoverInput`, forward into `scheduleReq`.
-- Create `apps/gateway/src/runtime/evalAccountPin.ts` — reads `x-caliber-eval-account-id` ONLY when the request's api key is an eval key (`keyPrefix === "caliber-"`).
+- Create `apps/gateway/src/runtime/evalAccountPin.ts` — reads `x-caliber-eval-account-id` ONLY when the request's api key is an eval key (`keyPrefix === "caliber-eval"`).
 - Modify the messages route (`apps/gateway/src/routes/messages.ts`) — thread the pin into `buildFailoverInput`.
 - Modify `apps/gateway/src/workers/evaluator/runLlm.ts` — select `llmEvalAccountId`; when set, send `x-caliber-eval-account-id` header.
 - Extend `apps/gateway/tests/routes/messages.integration.test.ts` (or a new sibling) — pin hits the chosen account; forged header without eval key is ignored.
@@ -1117,7 +1117,7 @@ describe("setSettings provisions the eval key", () => {
     expect(raw).toMatch(/^caliber-eval-[0-9a-f]{64}$/);
 
     const keyRows = await t.db.select().from(apiKeys).where(eq(apiKeys.orgId, org.id));
-    const evalKey = keyRows.find((k) => k.status === "active" && k.keyPrefix === "caliber-");
+    const evalKey = keyRows.find((k) => k.status === "active" && k.keyPrefix === "caliber-eval");
     expect(evalKey).toBeDefined();
 
     // Re-enable (true→true, not a transition) must NOT rotate the key.
@@ -1273,7 +1273,7 @@ git commit -m "feat(gateway): forward stickyAccountId through failover loop"
 
 ### Task 10: Eval pin header reader (trust-gated) + route wiring
 
-Read `x-caliber-eval-account-id` ONLY when the request's api key is an eval key (`req.apiKey.keyPrefix === "caliber-"`). Eval keys' raw values live only in Redis (gateway-internal), so an external client cannot both hold an eval key AND forge the header — the prefix check is a sufficient trust gate. A non-eval key that forges the header is ignored.
+Read `x-caliber-eval-account-id` ONLY when the request's api key is an eval key (`req.apiKey.keyPrefix === "caliber-eval"`). Eval keys' raw values live only in Redis (gateway-internal), so an external client cannot both hold an eval key AND forge the header — the prefix check is a sufficient trust gate. A non-eval key that forges the header is ignored.
 
 **Files:**
 - Create: `apps/gateway/src/runtime/evalAccountPin.ts`
@@ -1294,7 +1294,7 @@ const acct = "11111111-1111-1111-1111-111111111111";
 
 it("returns the pin when the caller holds an eval key", () => {
   expect(
-    evalAccountPin({ apiKey: { keyPrefix: "caliber-" }, headers: { "x-caliber-eval-account-id": acct } }),
+    evalAccountPin({ apiKey: { keyPrefix: "caliber-eval" }, headers: { "x-caliber-eval-account-id": acct } }),
   ).toBe(acct);
 });
 
@@ -1305,12 +1305,12 @@ it("ignores the header for a normal (non-eval) key — anti-forgery", () => {
 });
 
 it("returns undefined when the header is absent", () => {
-  expect(evalAccountPin({ apiKey: { keyPrefix: "caliber-" }, headers: {} })).toBeUndefined();
+  expect(evalAccountPin({ apiKey: { keyPrefix: "caliber-eval" }, headers: {} })).toBeUndefined();
 });
 
 it("handles array-valued headers (takes the first)", () => {
   expect(
-    evalAccountPin({ apiKey: { keyPrefix: "caliber-" }, headers: { "x-caliber-eval-account-id": [acct, "x"] } }),
+    evalAccountPin({ apiKey: { keyPrefix: "caliber-eval" }, headers: { "x-caliber-eval-account-id": [acct, "x"] } }),
   ).toBe(acct);
 });
 ```
@@ -1325,12 +1325,12 @@ Expected: FAIL — module not found.
 ```ts
 // apps/gateway/src/runtime/evalAccountPin.ts
 // Reads the internal eval account-pin header, but ONLY trusts it when the
-// request authenticated with an eval key (keyPrefix "caliber-"). Eval keys'
+// request authenticated with an eval key (keyPrefix "caliber-eval"). Eval keys'
 // raw values exist only in gateway-internal Redis, so an external client
 // cannot hold one — making the prefix a sufficient anti-forgery gate.
 
 const EVAL_PIN_HEADER = "x-caliber-eval-account-id";
-const EVAL_KEY_PREFIX = "caliber-";
+const EVAL_KEY_PREFIX = "caliber-eval";
 
 export function evalAccountPin(req: {
   apiKey?: { keyPrefix?: string };
@@ -1459,7 +1459,7 @@ Prove the whole chain: an eval-key request with the pin header lands on the chos
 
 - [ ] **Step 1: Write the failing tests**
 
-Use the file's existing helpers. Seed two anthropic api_key accounts A and B with DISTINCT plaintext credentials, and an eval-shaped key (raw `caliber-eval-<hex>`, so `keyPrefix` = `caliber-`). The fake upstream's `lastRequest` records the inbound auth header — assert it corresponds to account B's credential when pinned to B. (Confirm the exact header the upstream receives by copying an existing assertion in this file that inspects `lastRequest`.)
+Use the file's existing helpers for accounts. ⚠️ CRITICAL for the eval key: the trust gate (Task 10) checks `keyPrefix === "caliber-eval"` (the 12-char prefix real provisioning produces via `rawKey.slice(0,12)`). The file's `seedApiKey` sets `keyPrefix = rawKey.slice(0,8)` = `"caliber-"` for a `caliber-eval-...` raw — which would FAIL the gate and make the pin silently not apply. So seed the eval key with an EXPLICIT `keyPrefix: "caliber-eval"` (insert directly into `apiKeys`, mirroring seedApiKey's columns), not via `seedApiKey`'s default slice. The fake upstream's `lastRequest` records the inbound auth header — assert it corresponds to account B's credential when pinned to B. (Confirm the exact header the upstream receives by copying an existing assertion in this file that inspects `lastRequest`; find the pepper the file already uses for `hashApiKey`.)
 
 ```ts
 it("eval key + pin header routes to the pinned account", async () => {
@@ -1468,7 +1468,12 @@ it("eval key + pin header routes to the pinned account", async () => {
   const acctA = await seedAccount(orgId, "cred-A", { name: "A" });
   const acctB = await seedAccount(orgId, "cred-B", { name: "B" });
   const rawEvalKey = `caliber-eval-${"a".repeat(64)}`;
-  await seedApiKey(orgId, userId, rawEvalKey); // keyPrefix becomes "caliber-"
+  // Gate checks keyPrefix === "caliber-eval" (12-char). seedApiKey's default
+  // slice(0,8) gives "caliber-" and fails the gate → insert with explicit prefix.
+  await db.insert(apiKeys).values({
+    orgId, userId, keyHash: hashApiKey(pepper, rawEvalKey),
+    keyPrefix: "caliber-eval", name: "eval-key",
+  });
 
   const res = await app.inject({
     method: "POST",
