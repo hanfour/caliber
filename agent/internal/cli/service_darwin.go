@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -37,7 +40,21 @@ func newInstallServiceCmd() *cobra.Command {
 			if err := launchAgentLoader(path); err != nil {
 				return &ExitError{Code: 1, Err: err}
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "caliber-agent installed as a launchd service")
+			// #253: bootstrap succeeding is NOT proof the daemon runs. The
+			// job can silently exit 0 (KeepAlive{SuccessfulExit:false} then
+			// never retries), leaving "installed but not running" — a
+			// telemetry blind spot where a member believes they're recording
+			// when they aren't. Confirm a live PID and fail loudly with a
+			// kickstart remediation if it never appears.
+			pid, ok := waitForLaunchAgent(service.LaunchAgentLabel)
+			if !ok {
+				uid := os.Getuid()
+				return &ExitError{Code: 1, Err: fmt.Errorf(
+					"launchd service installed but not running — start it with:\n"+
+						"  launchctl kickstart -k gui/%d/%s",
+					uid, service.LaunchAgentLabel)}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "caliber-agent installed as a launchd service (pid %d)\n", pid)
 			return nil
 		},
 	}
@@ -99,7 +116,54 @@ func removeLaunchAgentPlist(path string) error {
 var (
 	launchAgentLoader   = loadLaunchAgent
 	launchAgentUnloader = unloadLaunchAgent
+	// launchAgentPID reports the running job's PID (and whether it is
+	// running at all) so install-service can verify the daemon actually
+	// started. Indirected for tests (real launchctl would need a live job).
+	launchAgentPID = launchdJobPID
+	// Poll budget for waitForLaunchAgent: RunAtLoad can take a moment to
+	// materialise a PID. ~5s total (10 × 500ms). Overridable in tests so
+	// the never-running path doesn't wait the full budget.
+	launchAgentPollAttempts = 10
+	launchAgentPollDelay    = 500 * time.Millisecond
 )
+
+// waitForLaunchAgent polls launchAgentPID until the job reports a live PID or
+// the attempt budget is exhausted. Returns (pid, true) once running, or
+// (0, false) if it never came up.
+func waitForLaunchAgent(label string) (int, bool) {
+	for i := 0; i < launchAgentPollAttempts; i++ {
+		if pid, ok := launchAgentPID(label); ok {
+			return pid, true
+		}
+		if i < launchAgentPollAttempts-1 {
+			time.Sleep(launchAgentPollDelay)
+		}
+	}
+	return 0, false
+}
+
+// launchdJobPidRe extracts the numeric PID from `launchctl list <label>`
+// output, whose running form contains a line like `	"PID" = 12345;`.
+var launchdJobPidRe = regexp.MustCompile(`"PID"\s*=\s*(\d+)`)
+
+// launchdJobPID queries `launchctl list <label>` and parses the job's PID.
+// A job that is loaded-but-not-running has no PID key → (0, false); an
+// unloaded job makes launchctl exit non-zero → (0, false).
+func launchdJobPID(label string) (int, bool) {
+	out, err := exec.Command("launchctl", "list", label).CombinedOutput()
+	if err != nil {
+		return 0, false
+	}
+	m := launchdJobPidRe.FindSubmatch(out)
+	if m == nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(string(m[1]))
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, true
+}
 
 // loadLaunchAgent bootstraps path into the caller's gui/<uid> launchd
 // domain. A preceding bootout is best-effort: the job may not be loaded yet
