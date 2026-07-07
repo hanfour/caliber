@@ -983,6 +983,10 @@
       "captureEnabledBodyDays": "與你的 API 金鑰關聯的請求內容會保留最多 {days} 天(組織可能設定更短的保留期)。每晚的排程任務會自動依組織的評核標準產生評估。",
       "captureEnabledFooter": "如有資料保留問題或要求刪除,請聯絡組織管理員。你也可以使用本頁底部的匯出與刪除選項。"
     },
+    "llmEvidence": {
+      "title": "AI 佐證",
+      "requestId": "請求:"
+    },
     "facetSummary": {
       "loading": "載入 Facet 細項中…",
       "loadFail": "載入 Facet 摘要失敗:{message}",

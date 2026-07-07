@@ -19,6 +19,7 @@ import { DeleteRequestDialog } from "./DeleteRequestDialog";
 import { FacetSummaryCard } from "./FacetSummaryCard";
 import { DataProvenanceCard } from "./DataProvenanceCard";
 import { ProjectScoreSection } from "./ProjectScoreSection";
+import { LlmEvidenceList } from "./LlmEvidenceList";
 import {
   scoreBadgeClass,
   SectionRow,
@@ -212,6 +213,8 @@ export function ProfileEvaluation() {
           </CardContent>
         </Card>
       )}
+
+      <LlmEvidenceList evidence={latestReport.llmEvidence} />
 
       {/* Section scores table */}
       {sectionScores.length > 0 && (

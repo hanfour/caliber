@@ -19,6 +19,7 @@ import type { ScorePoint } from "./TrendChart";
 import { SectionRow, scoreBadgeClass, type SectionResult } from "./reportDetailShared";
 import { DataProvenanceCard } from "./DataProvenanceCard";
 import { FacetSummaryCard } from "./FacetSummaryCard";
+import { LlmEvidenceList } from "./LlmEvidenceList";
 import type { RubricSignal } from "./rubricThreshold";
 
 // ─── Main ReportDetail component ───────────────────────────────────────────────
@@ -202,6 +203,8 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
           </CardContent>
         </Card>
       )}
+
+      <LlmEvidenceList evidence={latest.llmEvidence} />
 
       {/* Section scores table */}
       {sectionScores.length > 0 && (

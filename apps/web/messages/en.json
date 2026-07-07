@@ -983,6 +983,10 @@
       "captureEnabledBodyDays": "Request content associated with your API key is retained for up to {days} days (your organization may configure a shorter retention window). Evaluations are generated automatically by a nightly process using your organization's rubric.",
       "captureEnabledFooter": "For questions about data retention or to request deletion, contact your organization administrator. You can also use the export and deletion options at the bottom of this page."
     },
+    "llmEvidence": {
+      "title": "AI evidence",
+      "requestId": "Request:"
+    },
     "facetSummary": {
       "loading": "Loading facet drill-down…",
       "loadFail": "Failed to load facet summary: {message}",
