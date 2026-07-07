@@ -24,6 +24,10 @@ export const signalSchema = z.discriminatedUnion("type", [
     in: z.enum(["request_body", "response_body", "both"]),
     terms: z.array(z.string()).min(1),
     caseSensitive: z.boolean().default(false),
+    // #261: when set, the signal hits only if at least this FRACTION of bodies
+    // contain a term (not just "any body"), so high-volume telemetry doesn't
+    // auto-saturate. Absent → legacy any-hit behavior.
+    minRatio: z.number().min(0).max(1).optional(),
   }),
   z.object({
     type: z.literal("threshold"),

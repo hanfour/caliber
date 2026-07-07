@@ -70,7 +70,7 @@ function dispatchSignal(
               }));
 
       const allEvidence: NonNullable<SignalHit["evidence"]> = [];
-      let anyHit = false;
+      let bodiesWithHit = 0;
 
       for (const { text, id } of texts) {
         const result = collectKeyword({
@@ -79,14 +79,23 @@ function dispatchSignal(
           caseSensitive: signal.caseSensitive,
           requestId: id,
         });
-        if (result.hit) anyHit = true;
+        if (result.hit) bodiesWithHit += 1;
         allEvidence.push(...result.evidence);
       }
+
+      // #261: with minRatio, require a fraction of bodies to contain a term so
+      // high-volume telemetry (a term appearing in a handful of 1000s of
+      // bodies) no longer auto-hits. Without it, legacy any-hit is preserved.
+      const hit =
+        signal.minRatio !== undefined
+          ? texts.length > 0 &&
+            bodiesWithHit / texts.length >= signal.minRatio
+          : bodiesWithHit > 0;
 
       return {
         id: signal.id,
         type: signal.type,
-        hit: anyHit,
+        hit,
         value: allEvidence.length,
         evidence: allEvidence,
       };

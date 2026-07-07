@@ -176,6 +176,13 @@
       "when": 1783051316574,
       "tag": "0024_famous_romulus",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1783395069207,
+      "tag": "0025_platform_rubric_keyword_minratio",
+      "breakpoints": true
     }
   ]
 }

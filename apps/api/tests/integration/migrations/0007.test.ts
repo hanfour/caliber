@@ -27,7 +27,11 @@ describe("migration 0007 platform rubric v2 facets", () => {
     await testDb.stop();
   });
 
-  it("bumps all 3 platform-default rubrics to version 1.1.0", async () => {
+  // NB: this reads the FINAL DB state after the whole chain. Migration 0025
+  // (#261) later bumps the platform rubrics to 1.2.0 and adds keyword minRatio,
+  // so the current head-of-chain version is 1.2.0 (0007's other effects below
+  // — facet signals, superiorRules — are untouched by 0025).
+  it("keeps all 3 platform-default rubrics at the current version (1.2.0 post-0025)", async () => {
     const rows = await testDb.db.execute<{ version: string; locale: string }>(sql`
       SELECT version, definition->>'locale' AS locale
       FROM rubrics
@@ -36,7 +40,7 @@ describe("migration 0007 platform rubric v2 facets", () => {
     `);
     expect(rows.rows.length).toBe(3);
     for (const r of rows.rows) {
-      expect(r.version).toBe("1.1.0");
+      expect(r.version).toBe("1.2.0");
     }
     expect(rows.rows.map((r) => r.locale).sort()).toEqual([
       "en",
@@ -58,7 +62,7 @@ describe("migration 0007 platform rubric v2 facets", () => {
           `rubric did not parse: ${JSON.stringify(result.error.issues)}`,
         );
       }
-      expect(result.data.version).toBe("1.1.0");
+      expect(result.data.version).toBe("1.2.0");
     }
   });
 

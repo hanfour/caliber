@@ -1,17 +1,20 @@
 /**
- * Telemetry-source adapter for the evaluator (#257).
+ * Telemetry-source adapter for the evaluator (#257, turn-grain per #261).
  *
  * Maps ingested device transcripts (`client_sessions` / `client_events`) into
- * the exact `UsageRow[]` / `BodyRow[]` shapes the pure rule engine
- * (`scoreWithRules`) already consumes, so a member who never routes through the
- * gateway still gets scored from their `caliber login` telemetry alone.
+ * the `UsageRow[]` / `BodyRow[]` shapes the pure rule engine consumes, at
+ * HUMAN-TURN grain rather than per-event.
  *
- * `client_events.content` stores the raw Anthropic `message.content[]` array
- * (thinking / text / tool_use for assistant events; text / tool_result for
- * user events), so reconstructing a wire-shaped `responseBody` is just wrapping
- * that array as `{ content, stop_reason }`. This drives tool_diversity,
- * keyword, extended_thinking, iteration, and client_mix signals directly; the
- * token columns drive threshold / cache_read_ratio / model_diversity.
+ * Transcript shape (verified against live data): a session interleaves
+ *   - human turns   — user events whose content has a `text`/`image` block
+ *   - assistant work — assistant events (thinking / text / tool_use)
+ *   - tool results   — user events whose content is only `tool_result`
+ * There is no turn_id, so a turn is reconstructed as "a human message plus all
+ * assistant work and tool results until the next human message". Emitting one
+ * BodyRow per human turn (not per assistant event) makes request_body keyword
+ * signals measure the fraction of TURNS that show a pattern — volume-robust —
+ * instead of being guaranteed to hit across thousands of per-event bodies
+ * (the #261 saturation).
  */
 
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
@@ -30,32 +33,166 @@ export interface FetchTranscriptRowsInput {
 export interface TranscriptRows {
   usageRows: UsageRow[];
   bodyRows: BodyRow[];
-  /** Count of assistant (usage-bearing) events mapped — for source_breakdown. */
+  /** Count of human turns mapped — for source_breakdown. */
   transcriptEventCount: number;
 }
 
-// Synthetic request id for a transcript-derived row. Prefixed so it can never
-// collide with a gateway request id (which are opaque UUIDs / provider ids).
-function transcriptRequestId(sessionId: string, eventId: string): string {
-  return `tx-${sessionId}-${eventId}`;
+export interface SessionMeta {
+  id: string;
+  sourceClient: string | null;
+  modelProvider: string | null;
+}
+
+export interface EventRow {
+  sessionId: string;
+  eventId: string;
+  role: string | null;
+  content: unknown;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+}
+
+// A user event is a HUMAN turn boundary only if its content carries a text or
+// image block. tool_result-only user events are intra-turn (they feed the
+// assistant) and must NOT start a new turn.
+function isHumanTurn(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  return content.some((b) => {
+    if (b === null || typeof b !== "object") return false;
+    const t = (b as Record<string, unknown>).type;
+    return t === "text" || t === "image";
+  });
+}
+
+function contentBlocks(content: unknown): unknown[] {
+  return Array.isArray(content) ? content : [];
+}
+
+interface Turn {
+  firstEventId: string;
+  userContent: unknown[];
+  assistantContent: unknown[];
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  depth: number; // conversation depth within the session (for iteration_count)
 }
 
 /**
- * Fetch and shape a user's transcript events in the window into evaluator rows.
- *
- * One `UsageRow` + `BodyRow` is emitted per assistant event (the usage-bearing,
- * content-producing side of a turn). Each assistant event's `requestBody` is
- * paired with the most recent preceding user event's content in the same
- * session, walked by timestamp — enough for request-body keyword signals
- * without a full turn-tree reconstruction (deferred; see the plan doc).
+ * Pure mapping: group ordered events into human turns and emit one
+ * UsageRow + BodyRow per turn. Exported for unit testing without a DB.
+ * `events` MUST be ordered by (sessionId, timestamp).
+ */
+export function mapEventsToRows(
+  sessions: SessionMeta[],
+  events: EventRow[],
+): TranscriptRows {
+  const meta = new Map(sessions.map((s) => [s.id, s]));
+  const usageRows: UsageRow[] = [];
+  const bodyRows: BodyRow[] = [];
+
+  let curSession: string | null = null;
+  let cur: Turn | null = null;
+  let depthInSession = 0;
+
+  const flush = () => {
+    if (!cur || curSession === null) return;
+    const m = meta.get(curSession);
+    const model = m?.modelProvider ?? "unknown";
+    const requestId = `tx-${curSession}-${cur.firstEventId}`;
+    usageRows.push({
+      requestId,
+      requestedModel: model,
+      inputTokens: cur.inputTokens,
+      outputTokens: cur.outputTokens,
+      cacheReadTokens: cur.cacheReadTokens,
+      cacheCreationTokens: cur.cacheCreationTokens,
+      totalCost: 0,
+    });
+    // messages length = conversation depth so iteration_count reflects how
+    // deep the human drove the session; the last message carries the human
+    // text so request_body keyword signals can find it, and padding entries
+    // are empty so they add no keyword noise.
+    const messages = [
+      ...Array.from({ length: Math.max(0, cur.depth - 1) }, () => ({
+        role: "user",
+        content: "",
+      })),
+      { role: "user", content: cur.userContent },
+    ];
+    bodyRows.push({
+      requestId,
+      stopReason: null,
+      clientUserAgent: m?.sourceClient ?? null,
+      clientSessionId: curSession,
+      requestParams: null,
+      responseBody: { content: cur.assistantContent, stop_reason: null },
+      requestBody: { model, messages },
+    });
+    cur = null;
+  };
+
+  for (const ev of events) {
+    if (ev.sessionId !== curSession) {
+      flush();
+      curSession = ev.sessionId;
+      depthInSession = 0;
+    }
+
+    if (ev.role === "user" && isHumanTurn(ev.content)) {
+      flush();
+      depthInSession += 1;
+      cur = {
+        firstEventId: ev.eventId,
+        userContent: contentBlocks(ev.content),
+        assistantContent: [],
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        depth: depthInSession,
+      };
+    } else if (ev.role === "assistant") {
+      if (!cur) {
+        // Assistant work before any human message (rare) — open a turn with
+        // no user content so its tokens/tools are still counted.
+        depthInSession += 1;
+        cur = {
+          firstEventId: ev.eventId,
+          userContent: [],
+          assistantContent: [],
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          depth: depthInSession,
+        };
+      }
+      cur.assistantContent.push(...contentBlocks(ev.content));
+      cur.inputTokens += ev.inputTokens ?? 0;
+      cur.outputTokens += ev.outputTokens ?? 0;
+      cur.cacheReadTokens += ev.cacheReadTokens ?? 0;
+      cur.cacheCreationTokens += ev.cacheCreationTokens ?? 0;
+    }
+    // else: user tool_result → belongs to the current turn, no boundary.
+  }
+  flush();
+
+  return { usageRows, bodyRows, transcriptEventCount: bodyRows.length };
+}
+
+/**
+ * Fetch a user's transcript events in the window and map them to evaluator
+ * rows at human-turn grain.
  */
 export async function fetchTranscriptRows(
   input: FetchTranscriptRowsInput,
 ): Promise<TranscriptRows> {
   const { db, orgId, userId, periodStart, periodEnd } = input;
 
-  // 1. Sessions owned by this user in this org (userId lives on the session,
-  //    not the event). Carry sourceClient for the client_mix signal.
   const sessions = await db
     .select({
       id: clientSessions.id,
@@ -69,11 +206,8 @@ export async function fetchTranscriptRows(
     return { usageRows: [], bodyRows: [], transcriptEventCount: 0 };
   }
 
-  const sessionMeta = new Map(sessions.map((s) => [s.id, s]));
   const sessionIds = sessions.map((s) => s.id);
 
-  // 2. Events for those sessions inside the window, ordered so the
-  //    preceding-user-event pairing below is a single forward pass.
   const events = await db
     .select({
       sessionId: clientEvents.sessionId,
@@ -95,47 +229,5 @@ export async function fetchTranscriptRows(
     )
     .orderBy(asc(clientEvents.sessionId), asc(clientEvents.timestamp));
 
-  const usageRows: UsageRow[] = [];
-  const bodyRows: BodyRow[] = [];
-  const lastUserContent = new Map<string, unknown>();
-
-  for (const ev of events) {
-    if (ev.role === "user") {
-      lastUserContent.set(ev.sessionId, ev.content);
-      continue;
-    }
-    if (ev.role !== "assistant") continue;
-
-    const meta = sessionMeta.get(ev.sessionId);
-    const requestId = transcriptRequestId(ev.sessionId, ev.eventId);
-    const model = meta?.modelProvider ?? "unknown";
-
-    usageRows.push({
-      requestId,
-      requestedModel: model,
-      inputTokens: ev.inputTokens ?? 0,
-      outputTokens: ev.outputTokens ?? 0,
-      cacheReadTokens: ev.cacheReadTokens ?? 0,
-      cacheCreationTokens: ev.cacheCreationTokens ?? 0,
-      // client_events carries no per-event cost; cost signals degrade
-      // gracefully (token-based signals still score). Tracked as a follow-up
-      // to compute via model_pricing.
-      totalCost: 0,
-    });
-
-    bodyRows.push({
-      requestId,
-      stopReason: null,
-      clientUserAgent: meta?.sourceClient ?? null,
-      clientSessionId: ev.sessionId,
-      requestParams: null,
-      responseBody: { content: ev.content, stop_reason: null },
-      requestBody: {
-        model,
-        messages: [{ role: "user", content: lastUserContent.get(ev.sessionId) ?? [] }],
-      },
-    });
-  }
-
-  return { usageRows, bodyRows, transcriptEventCount: usageRows.length };
+  return mapEventsToRows(sessions, events);
 }
