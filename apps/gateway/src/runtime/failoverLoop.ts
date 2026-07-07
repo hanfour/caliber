@@ -160,6 +160,9 @@ export interface RunFailoverInput<T> {
    * the scheduler reads/binds `sticky:session:{groupId}:*`.
    */
   sessionHash?: string;
+  /** Forces a specific account (bypasses the 3 sticky/EWMA layers). Used by
+   *  the evaluator loopback to pin its calls to the org's eval account. */
+  stickyAccountId?: string;
   /** Inject for tests so we can fast-forward backoffs. Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
   /**
@@ -225,6 +228,7 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
       userId: input.userId,
       previousResponseId: input.previousResponseId,
       sessionHash: input.sessionHash,
+      stickyAccountId: input.stickyAccountId,
       excludedAccountIds: failedSet,
     };
     let scheduled;
