@@ -63,7 +63,11 @@ let nextUpstreamResponse: {
   /** When set, respond as SSE: write these chunks then end. */
   sseChunks?: string[];
 };
-let lastRequest: { url: string | undefined; method: string | undefined } | null;
+let lastRequest: {
+  url: string | undefined;
+  method: string | undefined;
+  headers: import("node:http").IncomingHttpHeaders;
+} | null;
 
 beforeAll(async () => {
   nextUpstreamResponse = {
@@ -72,7 +76,7 @@ beforeAll(async () => {
   };
   lastRequest = null;
   fakeServer = createServer((req, res) => {
-    lastRequest = { url: req.url, method: req.method };
+    lastRequest = { url: req.url, method: req.method, headers: req.headers };
     if (nextUpstreamResponse.closeSocket) {
       req.socket.destroy();
       return;
@@ -1397,6 +1401,96 @@ describe("POST /v1/messages", () => {
     expect(second.json().content[0]).toMatchObject({ text: "hello from openai" });
     expect(second.headers["x-idempotent-replay"]).toBe("true");
     expect(lastRequest).toBeNull();
+    await app.close();
+  });
+
+  // ── Task 12: end-to-end eval account-pin + anti-forgery ───────────────────
+  // Proves the chain built across Tasks 9-11: the failover loop forwards
+  // `stickyAccountId` (T9) → the messages route's trust-gated pin header
+  // reader `evalAccountPin` (T10) → the scheduler's `forced` layer selects the
+  // pinned account outright, bypassing the normal sticky/EWMA layers (T11).
+
+  it("eval key + pin header routes to the pinned account", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "cred-A" }),
+      { name: "A" },
+    );
+    const acctB = await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "cred-B" }),
+      { name: "B" },
+    );
+
+    const rawEvalKey = `caliber-eval-${"a".repeat(64)}`;
+    // Gate checks keyPrefix === "caliber-eval" (12-char, mirrors real
+    // provisioning's rawKey.slice(0,12) — see llmEvalKeyProvisioning.ts:165).
+    // seedApiKey's default slice(0,8) would yield "caliber-" and FAIL the
+    // gate, silently defeating the pin — so this key is inserted directly
+    // with an explicit 12-char prefix instead of going through seedApiKey.
+    await db.insert(apiKeys).values({
+      orgId,
+      userId,
+      keyHash: hashApiKey(pepper, rawEvalKey),
+      keyPrefix: "caliber-eval",
+      name: "eval-key",
+    });
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: {
+        authorization: `Bearer ${rawEvalKey}`,
+        "x-caliber-eval-account-id": acctB,
+      },
+      payload: { model: "claude-3-haiku-20240307", max_tokens: 10 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Real end-to-end proof the pin landed on account B: the fake upstream
+    // received account B's plaintext credential ("cred-B") as x-api-key, not
+    // account A's ("cred-A"). If the scheduler's forced layer (T11) or the
+    // pin plumbing (T9/T10) were broken, this would either 503 (account not
+    // found) or carry A's credential (normal — non-forced — selection).
+    expect(lastRequest).not.toBeNull();
+    expect(lastRequest!.headers["x-api-key"]).toBe("cred-B");
+    await app.close();
+  });
+
+  it("normal key forging the pin header is ignored (no crash, routes normally)", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser(orgId);
+    await seedAccount(
+      orgId,
+      JSON.stringify({ type: "api_key", api_key: "cred-A" }),
+      { name: "A" },
+    );
+    const rawKey = `ak_forge_${Math.random().toString(36).slice(2)}`;
+    await seedApiKey(orgId, userId, rawKey); // keyPrefix "ak_forge" != "caliber-eval"
+
+    const redis = makeRedisMock();
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: {
+        authorization: `Bearer ${rawKey}`,
+        "x-caliber-eval-account-id": "99999999-9999-9999-9999-999999999999",
+      },
+      payload: { model: "claude-3-haiku-20240307", max_tokens: 10 },
+    });
+
+    // Forged pin ignored: routes normally to the only real account (A)
+    // rather than erroring out on the bogus/nonexistent forged account id.
+    expect(res.statusCode).toBe(200);
+    expect(lastRequest).not.toBeNull();
+    expect(lastRequest!.headers["x-api-key"]).toBe("cred-A");
     await app.close();
   });
 });
