@@ -160,6 +160,18 @@ export interface RunFailoverInput<T> {
    * the scheduler reads/binds `sticky:session:{groupId}:*`.
    */
   sessionHash?: string;
+  /** Forces a specific account (bypasses the 3 sticky/EWMA layers). Used by
+   *  the evaluator loopback to pin its calls to the org's eval account. */
+  stickyAccountId?: string;
+  /**
+   * Trusted eval-pin only (Task 13) — forwarded to `scheduler.select` so the
+   * forced path skips ONLY the pool/own ownership re-check; org/team/group
+   * isolation stays fully enforced. Set by `buildFailoverInput` callers ONLY
+   * when `evalAccountPin(req)` returned a value (i.e. only for a request
+   * authenticated with an eval key). Never set for `probeAccount` or a
+   * normal sticky request — their ownership enforcement is unchanged.
+   */
+  pinBypassOwnership?: boolean;
   /** Inject for tests so we can fast-forward backoffs. Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
   /**
@@ -225,6 +237,8 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
       userId: input.userId,
       previousResponseId: input.previousResponseId,
       sessionHash: input.sessionHash,
+      stickyAccountId: input.stickyAccountId,
+      pinBypassOwnership: input.pinBypassOwnership,
       excludedAccountIds: failedSet,
     };
     let scheduled;

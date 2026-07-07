@@ -25,6 +25,7 @@ import {
 } from "../runtime/noOwnUpstream.js";
 import { resolveCredential } from "../runtime/resolveCredential.js";
 import { sessionHashFromHeaders } from "../runtime/stickyKeys.js";
+import { evalAccountPin } from "../runtime/evalAccountPin.js";
 import { maybeRefreshOAuth } from "../runtime/oauthRefresh.js";
 import { callUpstreamMessages } from "../runtime/upstreamCall.js";
 import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
@@ -362,12 +363,17 @@ async function runNonStreamFailover(
   const requestedModel =
     resolution?.requestedModel ?? (req.body as { model: string }).model;
 
+  const evalPin = evalAccountPin(req);
   const result = await runFailover(buildFailoverInput(req, app.db, {
     maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
     scheduler: app.gwScheduler,
     // Layer 2 sticky (Plan 5A §8.2 / design §4.4) — Claude Code sends a stable
     // X-Claude-Session-Id per conversation; pin it to one account when present.
     sessionHash: sessionHashFromHeaders(req.headers),
+    stickyAccountId: evalPin,
+    // Trusted eval-pin only (Task 13) — bypasses ONLY the ownership check,
+    // and only when an eval pin is actually present.
+    pinBypassOwnership: evalPin !== undefined,
     attempt: async (account: SelectedAccount) => {
       const acquired = await acquireSlot(
         app.redis,
@@ -1178,10 +1184,15 @@ export function makeMessagesOpenaiHandler(
     req.raw.once("close", onClose);
 
     try {
+      const evalPin = evalAccountPin(req);
       const anthropicResp = await runFailover(buildFailoverInput(req, app.db, {
         maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
         scheduler: app.gwScheduler,
         sessionHash: sessionHashFromHeaders(req.headers),
+        stickyAccountId: evalPin,
+        // Trusted eval-pin only (Task 13) — bypasses ONLY the ownership
+        // check, and only when an eval pin is actually present.
+        pinBypassOwnership: evalPin !== undefined,
         attempt: async (account) =>
           withSlotAndCredential(
             app,
@@ -1379,10 +1390,15 @@ async function runMessagesOpenaiStreamingFailover(
   req.raw.once("close", onClose);
 
   try {
+    const evalPin = evalAccountPin(req);
     await runFailover(buildFailoverInput(req, app.db, {
       maxSwitches: opts.env.GATEWAY_MAX_ACCOUNT_SWITCHES,
       scheduler: app.gwScheduler,
       sessionHash: sessionHashFromHeaders(req.headers),
+      stickyAccountId: evalPin,
+      // Trusted eval-pin only (Task 13) — bypasses ONLY the ownership check,
+      // and only when an eval pin is actually present.
+      pinBypassOwnership: evalPin !== undefined,
       attempt: async (account) =>
         withSlotAndCredential(
           app,

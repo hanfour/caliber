@@ -11,9 +11,11 @@
  *   4. Fetch 500 — returns null
  *   5. Malformed LLM JSON response — returns null
  *   6. Cost lookup doesn't materialize — returns result with costUsd=0
+ *   7. org llm_eval_account_id set → loopback fetch carries x-caliber-eval-account-id header
+ *   8. org llm_eval_account_id null → loopback fetch omits the header
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
@@ -54,9 +56,12 @@ let db: Database;
 
 let orgId: string;
 let disabledOrgId: string;
+let pinnedOrgId: string;
 let userId: string;
 let accountId: string;
 let apiKeyId: string;
+
+const STUB_EVAL_ACCOUNT_ID = "11111111-2222-4333-8444-555555555555";
 
 // Shared ioredis-mock instance — flushed between tests to prevent key leakage.
 const redis = new RedisMock() as unknown as Redis;
@@ -196,6 +201,24 @@ function makeFetchError(status: number): typeof fetch {
     });
 }
 
+/**
+ * Like makeFetchOk, but wraps the fetch impl in a vi.fn() so the test can
+ * inspect the captured `init` (headers) passed to the loopback call.
+ */
+function makeCapturingFetchOk(
+  requestId: string,
+  responseBody: unknown = VALID_ANTHROPIC_RESPONSE,
+) {
+  const fetchSpy = vi.fn(
+    async (_url: string | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: makeFakeHeaders(requestId),
+      }),
+  );
+  return fetchSpy;
+}
+
 /** Instant sleep for tests — avoids real 250ms delays. */
 const noopSleep = async (_ms: number): Promise<void> => {};
 
@@ -269,6 +292,19 @@ beforeAll(async () => {
     })
     .returning();
   disabledOrgId = disabledOrg!.id;
+
+  // Seed an org with llmEvalAccountId set, for the pin-header tests
+  const [pinnedOrg] = await db
+    .insert(organizations)
+    .values({
+      slug: "pinned-llm-org",
+      name: "Pinned LLM Org",
+      llmEvalEnabled: true,
+      llmEvalModel: STUB_LLM_MODEL,
+      llmEvalAccountId: STUB_EVAL_ACCOUNT_ID,
+    })
+    .returning();
+  pinnedOrgId = pinnedOrg!.id;
 
   // Seed user
   const [user] = await db
@@ -428,5 +464,41 @@ describe("runLlmDeepAnalysis — integration", () => {
     expect(result!.requestId).toBe(reqId);
     expect(result!.costUsd).toBe(0);
     expect(result!.upstreamAccountId).toBeNull();
+  });
+
+  it("7. org llm_eval_account_id set → loopback fetch carries x-caliber-eval-account-id header", async () => {
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${pinnedOrgId}`, STUB_RAW_KEY);
+    const reqId = "req-llm-pinned-001";
+    const fetchSpy = makeCapturingFetchOk(reqId);
+
+    const result = await runLlmDeepAnalysis({
+      ...makeBaseInput({ orgId: pinnedOrgId }),
+      fetchImpl: fetchSpy as unknown as typeof fetch,
+    });
+
+    expect(result).not.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0]!;
+    expect((init!.headers as Record<string, string>)["x-caliber-eval-account-id"]).toBe(
+      STUB_EVAL_ACCOUNT_ID,
+    );
+  });
+
+  it("8. org llm_eval_account_id null → loopback fetch omits the header", async () => {
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${orgId}`, STUB_RAW_KEY);
+    const reqId = "req-llm-unpinned-001";
+    const fetchSpy = makeCapturingFetchOk(reqId);
+
+    const result = await runLlmDeepAnalysis({
+      ...makeBaseInput(),
+      fetchImpl: fetchSpy as unknown as typeof fetch,
+    });
+
+    expect(result).not.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0]!;
+    expect(
+      (init!.headers as Record<string, string>)["x-caliber-eval-account-id"],
+    ).toBeUndefined();
   });
 });

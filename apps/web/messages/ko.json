@@ -963,7 +963,10 @@
       "superior": "탁월함",
       "evidenceTitle": "신호: {id}",
       "noEvidence": "이 섹션의 증거 인용을 사용할 수 없습니다.",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "이 섹션에 기록된 신호가 없습니다.",
+      "actualValue": "측정값: {value}",
+      "thresholdLabel": "기준값:"
     },
     "profileEval": {
       "loading": "평가 데이터 로딩 중…",
@@ -979,6 +982,10 @@
       "captureEnabledTitle": "계정에 콘텐츠 캡처가 활성화되어 있습니다.",
       "captureEnabledBodyDays": "API 키와 관련된 요청 콘텐츠는 최대 {days}일 동안 보관됩니다(조직이 더 짧은 보관 기간을 구성할 수 있음). 평가는 조직의 루브릭을 사용하여 야간 프로세스에 의해 자동으로 생성됩니다.",
       "captureEnabledFooter": "데이터 보관 또는 삭제 요청에 관한 질문은 조직 관리자에게 문의하세요. 이 페이지 하단의 내보내기 및 삭제 옵션을 사용할 수도 있습니다."
+    },
+    "llmEvidence": {
+      "title": "AI 근거",
+      "requestId": "요청:"
     },
     "facetSummary": {
       "loading": "패싯 분석 로딩 중…",
@@ -998,6 +1005,18 @@
       "sessionTypeRefactor": "리팩토링",
       "sessionTypeExploration": "탐색",
       "sessionTypeOther": "기타"
+    },
+    "provenance": {
+      "title": "데이터 출처 및 커버리지",
+      "description": "이 점수를 산출한 데이터입니다.",
+      "gatewayEvents": "게이트웨이 이벤트",
+      "telemetryEvents": "텔레메트리 이벤트",
+      "coverage": "본문 커버리지",
+      "captured": "수집된 요청 수",
+      "missingBodies": "누락된 본문",
+      "truncatedBodies": "잘린 본문",
+      "requests": "요청 수",
+      "bodies": "본문 수"
     },
     "trendChart": {
       "noData": "이 기간에 대한 데이터가 없습니다.",

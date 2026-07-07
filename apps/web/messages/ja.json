@@ -963,7 +963,10 @@
       "superior": "優秀",
       "evidenceTitle": "シグナル: {id}",
       "noEvidence": "このセクションの証拠引用はありません。",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "このセクションに記録されたシグナルはありません。",
+      "actualValue": "測定値: {value}",
+      "thresholdLabel": "閾値:"
     },
     "profileEval": {
       "loading": "あなたの評価データを読み込み中…",
@@ -979,6 +982,10 @@
       "captureEnabledTitle": "あなたのアカウントでコンテンツキャプチャが有効になっています。",
       "captureEnabledBodyDays": "あなたの API キーに関連するリクエストコンテンツは最大 {days} 日間保持されます (組織がより短い保持期間を設定する場合があります)。組織のルーブリックを使用して夜間プロセスにより評価が自動生成されます。",
       "captureEnabledFooter": "データ保持や削除のリクエストについては、組織管理者にご連絡ください。このページ下部のエクスポート/削除オプションもご利用いただけます。"
+    },
+    "llmEvidence": {
+      "title": "AI エビデンス",
+      "requestId": "リクエスト:"
     },
     "facetSummary": {
       "loading": "ファセットドリルダウンを読み込み中…",
@@ -998,6 +1005,18 @@
       "sessionTypeRefactor": "リファクタリング",
       "sessionTypeExploration": "探索",
       "sessionTypeOther": "その他"
+    },
+    "provenance": {
+      "title": "データ出所とカバレッジ",
+      "description": "このスコアの算出元となったデータ。",
+      "gatewayEvents": "ゲートウェイイベント",
+      "telemetryEvents": "テレメトリイベント",
+      "coverage": "本文カバレッジ",
+      "captured": "取得済みリクエスト数",
+      "missingBodies": "欠落した本文",
+      "truncatedBodies": "切り詰められた本文",
+      "requests": "リクエスト数",
+      "bodies": "本文数"
     },
     "trendChart": {
       "noData": "この期間のデータがありません。",

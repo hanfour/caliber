@@ -963,7 +963,10 @@
       "superior": "Superior",
       "evidenceTitle": "Signal: {id}",
       "noEvidence": "No evidence quotes available for this section.",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "No signals recorded for this section.",
+      "actualValue": "measured: {value}",
+      "thresholdLabel": "threshold:"
     },
     "profileEval": {
       "loading": "Loading your evaluation data…",
@@ -979,6 +982,10 @@
       "captureEnabledTitle": "Content capture is enabled for your account.",
       "captureEnabledBodyDays": "Request content associated with your API key is retained for up to {days} days (your organization may configure a shorter retention window). Evaluations are generated automatically by a nightly process using your organization's rubric.",
       "captureEnabledFooter": "For questions about data retention or to request deletion, contact your organization administrator. You can also use the export and deletion options at the bottom of this page."
+    },
+    "llmEvidence": {
+      "title": "AI evidence",
+      "requestId": "Request:"
     },
     "facetSummary": {
       "loading": "Loading facet drill-down…",
@@ -998,6 +1005,18 @@
       "sessionTypeRefactor": "Refactor",
       "sessionTypeExploration": "Exploration",
       "sessionTypeOther": "Other"
+    },
+    "provenance": {
+      "title": "Data provenance & coverage",
+      "description": "What data this score was computed from.",
+      "gatewayEvents": "Gateway events",
+      "telemetryEvents": "Telemetry events",
+      "coverage": "Body coverage",
+      "captured": "Captured requests",
+      "missingBodies": "Missing bodies",
+      "truncatedBodies": "Truncated bodies",
+      "requests": "Requests",
+      "bodies": "Bodies"
     },
     "trendChart": {
       "noData": "No data for this period.",

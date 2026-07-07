@@ -11,6 +11,7 @@ import {
   type LlmResponse,
   type BodyRow,
 } from "@caliber/evaluator";
+import { EVAL_PIN_HEADER } from "../../runtime/evalAccountPin.js";
 
 export const LLM_KEY_REDIS_PREFIX = "caliber:gw:llm-eval-key:";
 export const LLM_COST_LOOKUP_MAX_ATTEMPTS = 3;
@@ -71,6 +72,7 @@ export async function runLlmDeepAnalysis(
       .select({
         llmEvalModel: organizations.llmEvalModel,
         llmEvalEnabled: organizations.llmEvalEnabled,
+        llmEvalAccountId: organizations.llmEvalAccountId,
       })
       .from(organizations)
       .where(eq(organizations.id, input.orgId))
@@ -107,15 +109,23 @@ export async function runLlmDeepAnalysis(
       messages: prompt.messages,
     };
 
+    const baseHeaders: Record<string, string> = {
+      Authorization: `Bearer ${rawKey}`,
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+    };
+    const headers: Record<string, string> = orgRow.llmEvalAccountId
+      ? {
+          ...baseHeaders,
+          [EVAL_PIN_HEADER]: orgRow.llmEvalAccountId,
+        }
+      : baseHeaders;
+
     let res: Response;
     try {
       res = await fetchFn(url, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${rawKey}`,
-          "Content-Type": "application/json",
-          "anthropic-version": "2023-06-01",
-        },
+        headers,
         body: JSON.stringify(body),
       });
     } catch {

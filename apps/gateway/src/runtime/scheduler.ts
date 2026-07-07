@@ -92,6 +92,15 @@ export interface ScheduleRequest {
    * which account to hit (e.g. probeAccount).
    */
   stickyAccountId?: string;
+  /**
+   * Trusted eval-pin only — skips the pool/own ownership check in the
+   * forced path; all other predicates (org, team/group, schedulable,
+   * platform) still enforced. Set ONLY when `evalAccountPin(req)` returned a
+   * value (i.e. only for a request authenticated with an eval key), so an
+   * external client can never set it. See scheduler.ts's `ownershipOk`
+   * re-checks in `loadSchedulableAccount`.
+   */
+  pinBypassOwnership?: boolean;
   /** Accounts to filter out (failover already tried them). */
   excludedAccountIds?: ReadonlySet<string>;
 }
@@ -329,9 +338,11 @@ async function runLayers(
       onStickyError,
     );
     if (cachedAccountId && !excluded.has(cachedAccountId)) {
+      // Sticky layers never bypass ownership — the pin flag applies to the forced path only.
       const account = await loadSchedulableAccount(db, cachedAccountId, {
         ...req,
         groupId: req.groupId,
+        pinBypassOwnership: false,
       });
       if (account) {
         // Refresh both keys on hit so a request stream that occasionally
@@ -375,6 +386,7 @@ async function runLayers(
       const account = await loadSchedulableAccount(db, cachedAccountId, {
         ...req,
         groupId: req.groupId,
+        pinBypassOwnership: false,
       });
       if (account) {
         await bindStickyKeys(redis, req, account.id);
@@ -808,7 +820,9 @@ export async function loadSchedulableAccount(
     // was still pooled, then the account became user-owned. The forced path
     // likewise names an arbitrary account id. Either could now violate the
     // request's policy, so reject it here and let the caller fall through.
-    if (!ownershipOk(row, req)) return null;
+    // `pinBypassOwnership` (trusted eval-pin only, Task 13) skips ONLY this
+    // check — org/team/group/schedulable conditions above are unaffected.
+    if (!req.pinBypassOwnership && !ownershipOk(row, req)) return null;
     return {
       id: row.id,
       concurrency: row.concurrency,
@@ -838,7 +852,9 @@ export async function loadSchedulableAccount(
   // Re-validate ownership (invariant §1.3.3) — see the group branch above.
   // Guards the forced/probe path (`stickyAccountId`) for legacy/no-group
   // requests against a user-owned account leaking across the pool/own boundary.
-  if (!ownershipOk(row, req)) return null;
+  // `pinBypassOwnership` (trusted eval-pin only, Task 13) skips ONLY this
+  // check — org/team/schedulable conditions above are unaffected.
+  if (!req.pinBypassOwnership && !ownershipOk(row, req)) return null;
   return {
     id: row.id,
     concurrency: row.concurrency,

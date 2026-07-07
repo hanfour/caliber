@@ -963,7 +963,10 @@
       "superior": "優異",
       "evidenceTitle": "訊號:{id}",
       "noEvidence": "此區段無可用引用證據。",
-      "requestId": "request_id:"
+      "requestId": "request_id:",
+      "noSignals": "此區段沒有記錄任何訊號。",
+      "actualValue": "實測值: {value}",
+      "thresholdLabel": "門檻值:"
     },
     "profileEval": {
       "loading": "載入你的評估資料中…",
@@ -979,6 +982,10 @@
       "captureEnabledTitle": "你的帳戶已啟用內容擷取。",
       "captureEnabledBodyDays": "與你的 API 金鑰關聯的請求內容會保留最多 {days} 天(組織可能設定更短的保留期)。每晚的排程任務會自動依組織的評核標準產生評估。",
       "captureEnabledFooter": "如有資料保留問題或要求刪除,請聯絡組織管理員。你也可以使用本頁底部的匯出與刪除選項。"
+    },
+    "llmEvidence": {
+      "title": "AI 佐證",
+      "requestId": "請求:"
     },
     "facetSummary": {
       "loading": "載入 Facet 細項中…",
@@ -998,6 +1005,18 @@
       "sessionTypeRefactor": "重構",
       "sessionTypeExploration": "探索",
       "sessionTypeOther": "其他"
+    },
+    "provenance": {
+      "title": "資料來源與涵蓋率",
+      "description": "此評分所依據的資料。",
+      "gatewayEvents": "閘道事件數",
+      "telemetryEvents": "遙測事件數",
+      "coverage": "請求內容涵蓋率",
+      "captured": "已擷取請求數",
+      "missingBodies": "缺漏請求內容數",
+      "truncatedBodies": "截斷請求內容數",
+      "requests": "請求數",
+      "bodies": "請求內容數"
     },
     "trendChart": {
       "noData": "本期間無資料。",
