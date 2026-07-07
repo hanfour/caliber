@@ -1,8 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useParams } from "next/navigation";
+import { usePathname, useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
@@ -37,6 +37,25 @@ export default function OrganizationLayout({
     { enabled: !!identifier },
   );
   const orgId = org?.id;
+  const router = useRouter();
+
+  // Normalize slug URLs to the canonical UUID once resolved. Child pages read
+  // `params.id` straight into z.string().uuid() query inputs, so a slug segment
+  // (e.g. /organizations/onead/usage) 400s them. Redirecting here fixes EVERY
+  // sub-tab at once, and we hold back child rendering until the URL is
+  // canonical so no page ever fires a query with a slug.
+  useEffect(() => {
+    if (orgId && identifier && identifier !== orgId) {
+      router.replace(
+        pathname.replace(
+          `/organizations/${identifier}`,
+          `/organizations/${orgId}`,
+        ),
+      );
+    }
+  }, [orgId, identifier, pathname, router]);
+  const canonical = !!orgId && identifier === orgId;
+
   const { data: session } = trpc.me.session.useQuery();
 
   const isSuperAdmin =
@@ -150,7 +169,13 @@ export default function OrganizationLayout({
         </nav>
       </div>
 
-      <div>{children}</div>
+      <div>
+        {canonical ? (
+          children
+        ) : (
+          <div className="p-6 text-sm text-muted-foreground">…</div>
+        )}
+      </div>
     </div>
   );
 }

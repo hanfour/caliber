@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -71,14 +72,19 @@ interface Props {
 
 export function TeamLeaderboard({ orgId, teamId, members }: Props) {
   const t = useTranslations("evaluator.leaderboard");
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-
-  const rangeFrom = thirtyDaysAgo.toISOString();
-  const rangeTo = now.toISOString();
-  const prevFrom = sixtyDaysAgo.toISOString();
-  const prevTo = thirtyDaysAgo.toISOString();
+  // Memoize: bare `new Date()` in render → query keys churn every render →
+  // infinite refetch loop across all the leaderboard queries below.
+  const { rangeFrom, rangeTo, prevFrom, prevTo } = useMemo(() => {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    return {
+      rangeFrom: thirtyDaysAgo.toISOString(),
+      rangeTo: now.toISOString(),
+      prevFrom: sixtyDaysAgo.toISOString(),
+      prevTo: thirtyDaysAgo.toISOString(),
+    };
+  }, []);
 
   const { data: settings, isLoading: settingsLoading } =
     trpc.contentCapture.getSettings.useQuery({ orgId });

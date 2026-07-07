@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { RequirePerm } from "@/components/RequirePerm";
 
@@ -15,11 +16,14 @@ function scoreColorClass(score: number): string {
 }
 
 function ScoreCellContent({ orgId, userId }: MemberScoreCellProps) {
-  const now = new Date();
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  const rangeFrom = sevenDaysAgo.toISOString();
-  const rangeTo = now.toISOString();
+  // Memoize the range: a bare `new Date()` in render produces a new ISO string
+  // every render → the tRPC query key changes every render → infinite refetch
+  // loop (the score stays stuck at "…" and the API is hammered).
+  const { rangeFrom, rangeTo } = useMemo(() => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    return { rangeFrom: sevenDaysAgo.toISOString(), rangeTo: now.toISOString() };
+  }, []);
 
   const { data: reports, isLoading } = trpc.reports.getUser.useQuery({
     orgId,

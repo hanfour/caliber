@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -40,11 +41,13 @@ interface Props {
 
 export function TeamAggregate({ orgId, teamId, teamName }: Props) {
   const t = useTranslations("evaluator.leaderboard");
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-  const rangeFrom = thirtyDaysAgo.toISOString();
-  const rangeTo = now.toISOString();
+  // Memoize: bare `new Date()` in render → query key churns every render →
+  // infinite refetch loop.
+  const { rangeFrom, rangeTo } = useMemo(() => {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return { rangeFrom: thirtyDaysAgo.toISOString(), rangeTo: now.toISOString() };
+  }, []);
 
   const { data: reports, isLoading, error } = trpc.reports.getTeam.useQuery({
     orgId,

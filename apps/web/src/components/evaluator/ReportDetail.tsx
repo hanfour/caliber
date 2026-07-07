@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -136,11 +136,13 @@ interface Props {
 
 export function ReportDetail({ orgId, userId, userName }: Props) {
   const t = useTranslations("evaluator.report");
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-  const rangeFrom = thirtyDaysAgo.toISOString();
-  const rangeTo = now.toISOString();
+  // Memoize: a bare `new Date()` in render changes the query key every render →
+  // infinite refetch loop (report never settles, API hammered).
+  const { rangeFrom, rangeTo } = useMemo(() => {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return { rangeFrom: thirtyDaysAgo.toISOString(), rangeTo: now.toISOString() };
+  }, []);
 
   const { data: reports, isLoading, error } = trpc.reports.getUser.useQuery({
     orgId,
