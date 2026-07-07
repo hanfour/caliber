@@ -48,10 +48,10 @@ describe("setSettings provisions the eval key", () => {
     );
     expect(evalKey).toBeDefined();
 
-    // Re-enable (true→true, not a transition) must NOT rotate the key.
+    // Explicit true→true re-affirmation must NOT rotate the key (idempotent).
     await caller.contentCapture.setSettings({
       orgId: org.id,
-      patch: { llmEvalModel: "claude-sonnet-5" },
+      patch: { llmEvalEnabled: true, llmEvalModel: "claude-sonnet-5" },
     });
     const rawAfter = await redis.get(`llm-eval-key:${org.id}`);
     expect(rawAfter).toBe(raw);
