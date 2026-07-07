@@ -5,8 +5,24 @@ import { organizations, auditLogs, requestBodies, rubrics } from "@caliber/db";
 import { can } from "@caliber/auth";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
+import { provisionLlmEvalKey } from "../../services/llmEvalKeyProvisioning.js";
 
 const orgIdInput = z.object({ orgId: z.string().uuid() });
+
+// Centralizes the API_KEY_HASH_PEPPER presence check (mirrors apiKeys.ts /
+// devices.ts). The env schema requires this when the gateway is enabled, so
+// reaching the throw branch indicates a misconfiguration upstream — guard so
+// we never call provisionLlmEvalKey with undefined.
+function requirePepper(env: { API_KEY_HASH_PEPPER?: string }): string {
+  const pepper = env.API_KEY_HASH_PEPPER;
+  if (!pepper) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "API_KEY_HASH_PEPPER not configured",
+    });
+  }
+  return pepper;
+}
 
 const settingsPatch = z.object({
   contentCaptureEnabled: z.boolean().optional(),
@@ -138,6 +154,9 @@ export const contentCaptureRouter = router({
         input.patch.contentCaptureEnabled === true &&
         prev.contentCaptureEnabled === false;
 
+      const turningOnEval =
+        input.patch.llmEvalEnabled === true && prev.llmEvalEnabled === false;
+
       const now = new Date();
       const updates: Record<string, unknown> = { ...input.patch };
       // Drizzle's `decimal` column expects a string at the type level. The Zod
@@ -154,6 +173,15 @@ export const contentCaptureRouter = router({
         .update(organizations)
         .set(updates)
         .where(eq(organizations.id, input.orgId));
+
+      if (turningOnEval) {
+        await provisionLlmEvalKey({
+          db: ctx.db,
+          redis: ctx.redis,
+          orgId: input.orgId,
+          apiKeyHashPepper: requirePepper(ctx.env),
+        });
+      }
 
       if (turningOn) {
         await ctx.db.insert(auditLogs).values({
