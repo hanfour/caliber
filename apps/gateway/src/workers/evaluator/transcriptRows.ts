@@ -156,21 +156,13 @@ export function mapEventsToRows(
         depth: depthInSession,
       };
     } else if (ev.role === "assistant") {
-      if (!cur) {
-        // Assistant work before any human message (rare) — open a turn with
-        // no user content so its tokens/tools are still counted.
-        depthInSession += 1;
-        cur = {
-          firstEventId: ev.eventId,
-          userContent: [],
-          assistantContent: [],
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheCreationTokens: 0,
-          depth: depthInSession,
-        };
-      }
+      // Assistant work with no active human turn = a session whose human
+      // message fell OUTSIDE this window (a continuation). Skip it rather
+      // than opening an empty-user "orphan" turn: those inflate the turn
+      // denominator (a member with 181 sessions but 24 in-window human
+      // turns produced 203 turns), diluting request_body keyword ratios so
+      // they never hit. We score turns whose human intent is in-window.
+      if (!cur) continue;
       cur.assistantContent.push(...contentBlocks(ev.content));
       cur.inputTokens += ev.inputTokens ?? 0;
       cur.outputTokens += ev.outputTokens ?? 0;

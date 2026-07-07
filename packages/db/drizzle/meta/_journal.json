@@ -183,6 +183,13 @@
       "when": 1783395069207,
       "tag": "0025_platform_rubric_keyword_minratio",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1783402615696,
+      "tag": "0026_interaction_keyword_minratio_050",
+      "breakpoints": true
     }
   ]
 }
