@@ -179,7 +179,8 @@
       "accountGroups": "アカウントグループ",
       "usage": "使用量",
       "evaluator": "Evaluator",
-      "audit": "監査"
+      "audit": "監査",
+      "sessions": "セッション"
     }
   },
   "org": {
@@ -1212,5 +1213,20 @@
     "notFound": "コードが無効か期限切れです。もう一度 `caliber login` を実行してください。",
     "signInPrompt": "このデバイスを承認するにはサインインしてください。",
     "signInCta": "サインイン"
+  },
+  "sessions": {
+    "title": "セッション",
+    "subtitle": "メンバーのデバイスから取り込んだ Claude Code / Codex のセッション記録。",
+    "perMember": "メンバー別のアクティビティ",
+    "loading": "読み込み中…",
+    "loadError": "セッションの読み込みに失敗しました。",
+    "empty": "この期間のセッション記録はありません。",
+    "noPermission": "セッションを表示する権限がありません。",
+    "colMember": "メンバー",
+    "colSessions": "セッション",
+    "colEvents": "イベント",
+    "colSources": "ソース",
+    "colFirst": "初回アクティビティ",
+    "colLast": "最終アクティビティ"
   }
 }

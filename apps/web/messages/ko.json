@@ -179,7 +179,8 @@
       "accountGroups": "계정 그룹",
       "usage": "사용량",
       "evaluator": "Evaluator",
-      "audit": "감사"
+      "audit": "감사",
+      "sessions": "세션"
     }
   },
   "org": {
@@ -1212,5 +1213,20 @@
     "notFound": "코드가 유효하지 않거나 만료되었습니다. `caliber login`을 다시 실행하세요.",
     "signInPrompt": "이 기기를 승인하려면 로그인하세요.",
     "signInCta": "로그인"
+  },
+  "sessions": {
+    "title": "세션",
+    "subtitle": "멤버 기기에서 수집한 Claude Code / Codex 세션 기록.",
+    "perMember": "멤버별 활동",
+    "loading": "불러오는 중…",
+    "loadError": "세션을 불러오지 못했습니다.",
+    "empty": "이 기간에 기록된 세션이 없습니다.",
+    "noPermission": "세션을 볼 권한이 없습니다.",
+    "colMember": "멤버",
+    "colSessions": "세션",
+    "colEvents": "이벤트",
+    "colSources": "소스",
+    "colFirst": "첫 활동",
+    "colLast": "마지막 활동"
   }
 }
