@@ -17,6 +17,7 @@ import { TrendChart } from "./TrendChart";
 import { ExportDialog } from "./ExportDialog";
 import { DeleteRequestDialog } from "./DeleteRequestDialog";
 import { FacetSummaryCard } from "./FacetSummaryCard";
+import { DataProvenanceCard } from "./DataProvenanceCard";
 import { ProjectScoreSection } from "./ProjectScoreSection";
 import {
   scoreBadgeClass,
@@ -24,6 +25,7 @@ import {
 } from "./reportDetailShared";
 import type { SectionResult } from "./reportDetailShared";
 import type { ScorePoint } from "./TrendChart";
+import type { RubricSignal } from "./rubricThreshold";
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -56,6 +58,12 @@ export function ProfileEvaluation() {
     isLoading: rangeLoading,
     error: rangeError,
   } = trpc.reports.getOwnRange.useQuery({ from: rangeFrom, to: rangeTo });
+
+  const latestRubricId = latestReport?.rubricId ?? null;
+  const { data: rubric } = trpc.rubrics.get.useQuery(
+    { rubricId: latestRubricId ?? "" },
+    { enabled: !!latestRubricId },
+  );
 
   const isLoading = latestLoading || rangeLoading;
   const error = latestError ?? rangeError;
@@ -121,6 +129,18 @@ export function ProfileEvaluation() {
   const hasLlmNarrative =
     typeof latestReport.llmNarrative === "string" &&
     latestReport.llmNarrative.length > 0;
+
+  const rubricSectionsById: Record<string, { signals: RubricSignal[] }> = {};
+  const rubricDef = rubric?.definition as
+    | { sections?: Array<{ id: string; signals: RubricSignal[] }> }
+    | undefined;
+  for (const s of rubricDef?.sections ?? []) {
+    rubricSectionsById[s.id] = { signals: s.signals };
+  }
+  const period =
+    (latestReport.signalsSummary as
+      | { period?: { requestCount?: number; bodyCount?: number } }
+      | null)?.period ?? null;
 
   return (
     <div className="space-y-6">
@@ -216,13 +236,23 @@ export function ProfileEvaluation() {
               </thead>
               <tbody>
                 {sectionScores.map((section) => (
-                  <SectionRow key={section.sectionId} section={section} />
+                  <SectionRow
+                    key={section.sectionId}
+                    section={section}
+                    rubricSection={rubricSectionsById[section.sectionId]}
+                  />
                 ))}
               </tbody>
             </table>
           </CardContent>
         </Card>
       )}
+
+      <DataProvenanceCard
+        sourceBreakdown={latestReport.sourceBreakdown as never}
+        dataQuality={latestReport.dataQuality as never}
+        period={period}
+      />
 
       {/* Per-project (per-key) scores for keys opted into project evaluation */}
       <ProjectScoreSection />
