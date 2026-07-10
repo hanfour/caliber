@@ -235,7 +235,7 @@ async function metricsPluginBody(
   });
 
   // Hourly billing audit (Plan 4A Part 7, Task 7.4) samples 1% of api_keys
-  // and compares SUM(usage_logs.total_cost) against api_keys.quota_used_usd.
+  // and compares SUM(usage_logs.actual_cost_usd) against api_keys.quota_used_usd.
   // Drift > 0.01 USD (in either direction) bumps the drift counter; the
   // sub-case where quota_used_usd > sum-of-logs (i.e., quota was charged
   // for a row that no longer exists in usage_logs) is a monotonicity
@@ -243,13 +243,13 @@ async function metricsPluginBody(
   // steady-state; any non-zero rate is a billing-integrity signal.
   const billingDriftTotal = new Counter({
     name: "gw_billing_drift_total",
-    help: "API keys whose |SUM(usage_logs.total_cost) - quota_used_usd| > $0.01",
+    help: "API keys whose |SUM(usage_logs.actual_cost_usd) - quota_used_usd| > $0.01",
     registers: [register],
   });
 
   const billingMonotonicityViolationTotal = new Counter({
     name: "gw_billing_monotonicity_violation_total",
-    help: "API keys where SUM(usage_logs.total_cost) < quota_used_usd (monotonicity violation)",
+    help: "API keys where SUM(usage_logs.actual_cost_usd) < quota_used_usd (monotonicity violation)",
     registers: [register],
   });
 

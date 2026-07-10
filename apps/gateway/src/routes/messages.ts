@@ -36,10 +36,13 @@ import {
   type StreamUsageSnapshot,
 } from "../runtime/streamUsageExtractor.js";
 import type { SelectedAccount } from "../runtime/selectAccount.js";
-import { emitUsageLog } from "../runtime/usageLogging.js";
+import {
+  emitUsageLog,
+  usageAccountTypeFromUpstreamType,
+  usageLogInboundPlatformForSurface,
+} from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
 import { withSlotAndCredential } from "../runtime/withSlotAndCredential.js";
-import { usageLogInboundPlatformForSurface } from "../runtime/usageLogging.js";
 import { buildSyntheticAnthropicUsage } from "../runtime/syntheticUsageShapes.js";
 import {
   parseRetryAfterHeader,
@@ -517,6 +520,8 @@ async function runNonStreamFailover(
           req,
           requestedModel,
           accountId: account.id,
+          accountRateMultiplier: account.rateMultiplier,
+          accountType: usageAccountTypeFromUpstreamType(account.type),
           upstreamResponse: parsedUpstream,
           platform: "anthropic",
           surface: "messages",
@@ -823,6 +828,8 @@ async function runStreamingFailover(
               req,
               requestedModel,
               accountId: account.id,
+              accountRateMultiplier: account.rateMultiplier,
+              accountType: usageAccountTypeFromUpstreamType(account.type),
               upstreamResponse: buildUpstreamShape(extractor.snapshot()),
               platform: "anthropic",
               surface: "messages",
@@ -877,6 +884,8 @@ async function runStreamingFailover(
           req,
           requestedModel,
           accountId: account.id,
+          accountRateMultiplier: account.rateMultiplier,
+          accountType: usageAccountTypeFromUpstreamType(account.type),
           upstreamResponse: buildUpstreamShape(extractor.snapshot()),
           platform: "anthropic",
           surface: "messages",
@@ -940,6 +949,8 @@ async function runStreamingFailover(
           req,
           requestedModel,
           accountId: account.id,
+          accountRateMultiplier: account.rateMultiplier,
+          accountType: usageAccountTypeFromUpstreamType(account.type),
           upstreamResponse: buildUpstreamShape(extractor.snapshot()),
           platform: "anthropic",
           surface: "messages",
@@ -1250,6 +1261,8 @@ export function makeMessagesOpenaiHandler(
                 req,
                 requestedModel,
                 accountId: account.id,
+                accountRateMultiplier: account.rateMultiplier,
+                accountType: usageAccountTypeFromUpstreamType(account.type),
                 upstreamResponse: translated,
                 // `platform` is the inbound URL space (anthropic for
                 // /v1/messages), NOT the upstream provider. The
@@ -1519,6 +1532,8 @@ async function runMessagesOpenaiStreamingFailover(
               req,
               requestedModel,
               accountId: account.id,
+              accountRateMultiplier: account.rateMultiplier,
+              accountType: usageAccountTypeFromUpstreamType(account.type),
               upstreamResponse: upstreamForLog,
               platform: usageLogInboundPlatformForSurface("messages"),
               surface: "messages",

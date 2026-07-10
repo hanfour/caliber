@@ -161,6 +161,28 @@ describe("gateway server", () => {
     await app.close();
   });
 
+  it("ignores client-supplied request-id headers and generates UUID request ids", async () => {
+    const app = await buildServer({ env: makeEnv() });
+    app.get("/req-id", async (req) => ({ id: req.id }));
+
+    const first = await app.inject({
+      method: "GET",
+      url: "/req-id",
+      headers: { "x-request-id": "client-controlled" },
+    });
+    const second = await app.inject({ method: "GET", url: "/req-id" });
+
+    expect(first.json().id).not.toBe("client-controlled");
+    expect(first.json().id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(second.json().id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(second.json().id).not.toBe(first.json().id);
+    await app.close();
+  });
+
   it("ModelRegistry honors GATEWAY_MODEL_REGISTRY_FALLBACK_* overrides from the parsed opts.env (not process.env)", async () => {
     // Finding 2: buildServer must source the two fallback knobs from the parsed
     // opts.env. With the old `env: process.env` wiring this override (set only

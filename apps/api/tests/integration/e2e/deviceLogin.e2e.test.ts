@@ -215,10 +215,20 @@ describe("device login -> ingest E2E (Tasks 1-4 as one flow)", () => {
       enrollment_token: string;
       api_key?: string;
       gateway_url?: string;
+      gateway?: {
+        requested: boolean;
+        status: string;
+        gateway_url?: string;
+      };
     };
     expect(body.enrollment_token).toBeTruthy();
     expect(body.api_key).toMatch(/^ak_/);
     expect(body.gateway_url).toBe(defaultTestEnv.GATEWAY_BASE_URL);
+    expect(body.gateway).toMatchObject({
+      requested: true,
+      status: "provisioned",
+      gateway_url: defaultTestEnv.GATEWAY_BASE_URL,
+    });
 
     // The minted key is own_then_pool, named for the device, owned by the user.
     const [key] = await testDb.db

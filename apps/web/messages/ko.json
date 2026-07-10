@@ -610,6 +610,7 @@
     },
     "editDialog": {
       "title": "업스트림 자격증명 편집",
+      "description": "\"{name}\"의 라우팅 설정을 업데이트합니다.",
       "nameLabel": "이름",
       "schedulableLabel": "활성화（라우팅에 사용 가능）",
       "priorityLabel": "우선순위（낮을수록 우선）",

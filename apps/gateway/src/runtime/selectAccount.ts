@@ -6,4 +6,9 @@
 export interface SelectedAccount {
   id: string;
   concurrency: number;
+  platform: string;
+  type: string;
+  rateMultiplier: string;
+  priority: number;
+  groupId: string | null;
 }

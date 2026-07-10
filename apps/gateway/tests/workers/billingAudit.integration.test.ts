@@ -171,6 +171,7 @@ async function seedUsageLog(
   apiKeyId: string,
   totalCost: string,
   reqIdx: number,
+  actualCostUsd = totalCost,
 ): Promise<void> {
   await db.insert(usageLogs).values({
     requestId: `req-${apiKeyId.slice(0, 8)}-${reqIdx}-${Math.random().toString(36).slice(2, 6)}`,
@@ -193,6 +194,7 @@ async function seedUsageLog(
     cacheCreationCost: "0",
     cacheReadCost: "0",
     totalCost,
+    actualCostUsd,
     rateMultiplier: "1.0000",
     accountRateMultiplier: "1.0000",
     statusCode: 200,
@@ -279,6 +281,28 @@ describe("BillingAudit.runOnce", () => {
       apiKeyId: key.id,
     });
     expect(logger.errors).toHaveLength(0);
+  });
+
+  it("2b. drift compares quota against actual_cost_usd, not raw total_cost", async () => {
+    const key = await seedApiKey({ quotaUsedUsd: "1.00000000" });
+    await seedUsageLog(key.id, "1.0000000000", 0, "2.5000000000");
+
+    const drift = recordingCounter();
+    const mono = recordingCounter();
+    const logger = recordingLogger();
+    const audit = makeAudit({ metrics: { drift, mono }, logger });
+
+    const result = await audit.runOnce();
+
+    expect(result.sampled).toBe(1);
+    expect(result.drifted).toBe(1);
+    expect(result.monotonicityViolations).toBe(0);
+    expect(drift.value).toBe(1);
+    expect(mono.value).toBe(0);
+    expect(logger.warns[0]?.obj).toMatchObject({
+      expected: "1.00000000",
+      actual: "2.5000000000",
+    });
   });
 
   it("3. monotonicity violation (actual < expected): bumps both counters", async () => {

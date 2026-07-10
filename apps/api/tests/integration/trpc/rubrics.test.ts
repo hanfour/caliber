@@ -135,7 +135,14 @@ async function seedOrgRubric(
 
 async function seedUsageLog(
   db: Database,
-  opts: { userId: string; orgId: string; apiKeyId: string; accountId: string },
+  opts: {
+    userId: string;
+    orgId: string;
+    apiKeyId: string;
+    accountId: string;
+    totalCost?: string;
+    createdAt?: Date;
+  },
 ) {
   seedCounter += 1;
   const requestId = `req-rubric-test-${Date.now()}-${seedCounter}`;
@@ -158,13 +165,15 @@ async function seedUsageLog(
     outputCost: "0.0002",
     cacheCreationCost: "0",
     cacheReadCost: "0",
-    totalCost: "0.0003",
+    totalCost: opts.totalCost ?? "0.0003",
     rateMultiplier: "1.0000",
     accountRateMultiplier: "1.0000",
+    actualCostUsd: opts.totalCost ?? "0.0003",
     stream: false,
     statusCode: 200,
     durationMs: 100,
     upstreamRetries: 0,
+    createdAt: opts.createdAt,
   });
   return requestId;
 }
@@ -584,6 +593,50 @@ describe("rubrics router", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("dryRun: rejects another org's rubric", async () => {
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgA.id,
+      orgId: orgA.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+    const otherRubric = await seedOrgRubric(t.db, orgB.id, admin.id);
+
+    await expect(
+      caller.rubrics.dryRun({
+        orgId: orgA.id,
+        rubricId: otherRubric.id,
+        userId: admin.id,
+        days: 7,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("dryRun: rejects target users outside the org", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const outsider = await makeUser(t.db);
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+    const rubric = await seedOrgRubric(t.db, org.id, admin.id);
+
+    await expect(
+      caller.rubrics.dryRun({
+        orgId: org.id,
+        rubricId: rubric.id,
+        userId: outsider.id,
+        days: 7,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("setActive: rejects pinning a key-scoped rubric as org-active", async () => {
     const org = await makeOrg(t.db);
     const admin = await makeUser(t.db, {
@@ -667,6 +720,70 @@ describe("rubrics router", () => {
 
     // Since bodyRows = [], coverage is 0
     expect(preview.dataQuality.capturedRequests).toBe(0);
+  });
+
+  it("dryRun: scores only usage from the requested org before periodEnd", async () => {
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgA.id,
+      orgId: orgA.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const { id: rubricId } = await caller.rubrics.create({
+      orgId: orgA.id,
+      name: "DryRun Tenant Boundary Rubric",
+      version: "1.0.0",
+      definition: minimalDefinition(),
+    });
+
+    const apiKeyA = await seedApiKey(t.db, {
+      userId: admin.id,
+      orgId: orgA.id,
+    });
+    const accountA = await seedAccount(t.db, orgA.id);
+    await seedUsageLog(t.db, {
+      userId: admin.id,
+      orgId: orgA.id,
+      apiKeyId: apiKeyA,
+      accountId: accountA,
+      totalCost: "1.0000",
+    });
+
+    const apiKeyB = await seedApiKey(t.db, {
+      userId: admin.id,
+      orgId: orgB.id,
+    });
+    const accountB = await seedAccount(t.db, orgB.id);
+    await seedUsageLog(t.db, {
+      userId: admin.id,
+      orgId: orgB.id,
+      apiKeyId: apiKeyB,
+      accountId: accountB,
+      totalCost: "20.0000",
+    });
+    await seedUsageLog(t.db, {
+      userId: admin.id,
+      orgId: orgA.id,
+      apiKeyId: apiKeyA,
+      accountId: accountA,
+      totalCost: "20.0000",
+      createdAt: new Date(Date.now() + 60_000),
+    });
+
+    const result = await caller.rubrics.dryRun({
+      orgId: orgA.id,
+      rubricId,
+      userId: admin.id,
+      days: 7,
+    });
+
+    expect(result.preview.signalsSummary.total_cost).toBeCloseTo(1, 10);
+    expect(result.preview.dataQuality.totalRequests).toBe(1);
+    expect(result.preview.totalScore).toBe(100);
   });
 });
 

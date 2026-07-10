@@ -12,6 +12,9 @@ export interface SessionPayload {
   coveredOrgs: string[];
   coveredDepts: string[];
   coveredTeams: string[];
+  deptOrgById?: Array<readonly [string, string]>;
+  teamOrgById?: Array<readonly [string, string]>;
+  teamDeptById?: Array<readonly [string, string | null]>;
 }
 
 export function buildPermissionsFromSession(
@@ -48,5 +51,8 @@ export function buildPermissionsFromSession(
     coveredOrgs: new Set(session.coveredOrgs),
     coveredDepts: new Set(session.coveredDepts),
     coveredTeams: new Set(session.coveredTeams),
+    deptOrgById: new Map(session.deptOrgById ?? []),
+    teamOrgById: new Map(session.teamOrgById ?? []),
+    teamDeptById: new Map(session.teamDeptById ?? []),
   };
 }

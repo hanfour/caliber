@@ -21,8 +21,7 @@ const listRow = {
   id: "u1", requestId: "r1", userId: "me", apiKeyId: "k1", accountId: "ac1",
   orgId: "o1", teamId: null, requestedModel: "claude-sonnet-4-5", upstreamModel: "x",
   platform: "anthropic", surface: "messages", inputTokens: 10, outputTokens: 20,
-  cacheCreationTokens: 0, cacheReadTokens: 0, inputCost: "0", outputCost: "0",
-  cacheCreationCost: "0", cacheReadCost: "0", totalCost: "0.0030000000", stream: false,
+  cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: "0.0030000000", stream: false,
   statusCode: 200, durationMs: 1400, firstTokenMs: null, bufferReleasedAtMs: null,
   upstreamRetries: 0, createdAt: "2026-06-08T14:02:00Z", notionalCost: "0.1500000000",
 };

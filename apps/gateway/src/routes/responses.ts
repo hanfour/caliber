@@ -63,7 +63,10 @@ import {
 } from "../runtime/responseCache.js";
 import { storeIdempotent } from "../runtime/idempotencyCache.js";
 import { checkRequestIdempotency } from "./idempotencyEntry.js";
-import { emitUsageLog } from "../runtime/usageLogging.js";
+import {
+  emitUsageLog,
+  usageAccountTypeFromUpstreamType,
+} from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
 import { buildSyntheticAnthropicUsage } from "../runtime/syntheticUsageShapes.js";
 import { withSlotAndCredential } from "../runtime/withSlotAndCredential.js";
@@ -507,6 +510,8 @@ export function makeResponsesRouteHandler(
                 req,
                 requestedModel,
                 accountId: account.id,
+                accountRateMultiplier: account.rateMultiplier,
+                accountType: usageAccountTypeFromUpstreamType(account.type),
                 upstreamResponse: anthropicResp,
                 platform: "openai",
                 surface: "responses",
@@ -942,6 +947,8 @@ async function runResponsesStreamingFailover(
               req,
               requestedModel,
               accountId: account.id,
+              accountRateMultiplier: account.rateMultiplier,
+              accountType: usageAccountTypeFromUpstreamType(account.type),
               upstreamResponse,
               platform: "openai",
               surface: "responses",
@@ -1151,6 +1158,8 @@ async function runOpenaiResponsesPassthroughFailover(
               req,
               requestedModel,
               accountId: account.id,
+              accountRateMultiplier: account.rateMultiplier,
+              accountType: usageAccountTypeFromUpstreamType(account.type),
               upstreamResponse: upstreamForLog,
               platform: "openai",
               surface: "responses",
@@ -1462,6 +1471,8 @@ async function runOpenaiResponsesStreamingPassthrough(
               req,
               requestedModel,
               accountId: account.id,
+              accountRateMultiplier: account.rateMultiplier,
+              accountType: usageAccountTypeFromUpstreamType(account.type),
               upstreamResponse: upstreamForLog,
               platform: "openai",
               surface: "responses",

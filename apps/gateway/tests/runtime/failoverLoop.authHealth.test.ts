@@ -91,6 +91,7 @@ const apiKeyAccount = (id: string): ScheduledAccount => ({
   concurrency: 5,
   platform: "anthropic",
   type: "api_key",
+  rateMultiplier: "1.0000",
   priority: 0,
   groupId: null,
 });

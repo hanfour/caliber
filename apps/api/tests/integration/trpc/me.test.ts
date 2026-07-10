@@ -3,6 +3,8 @@ import { organizationMembers } from "@caliber/db";
 import {
   setupTestDb,
   makeOrg,
+  makeDept,
+  makeTeam,
   makeUser,
   callerFor,
   anonCaller,
@@ -27,6 +29,8 @@ describe("me router", () => {
 
   it("returns session for authenticated user", async () => {
     const org = await makeOrg(t.db);
+    const dept = await makeDept(t.db, org.id);
+    const team = await makeTeam(t.db, org.id, { departmentId: dept.id });
     const user = await makeUser(t.db, {
       role: "org_admin",
       scopeType: "organization",
@@ -37,6 +41,9 @@ describe("me router", () => {
     const s = await caller.me.session();
     expect(s.user.id).toBe(user.id);
     expect(s.coveredOrgs).toContain(org.id);
+    expect(s.deptOrgById).toContainEqual([dept.id, org.id]);
+    expect(s.teamOrgById).toContainEqual([team.id, org.id]);
+    expect(s.teamDeptById).toContainEqual([team.id, dept.id]);
   });
 
   it("updateProfile sets name", async () => {

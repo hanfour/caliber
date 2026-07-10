@@ -430,6 +430,46 @@ describe("rubricResolver", () => {
     expect(resolved.rubric.locale).toBe("en");
   });
 
+  it("should fall back to platform-default when org rubric_id points at another org's rubric", async () => {
+    const suffix = Date.now();
+    const [ownerOrg] = await db
+      .insert(organizations)
+      .values({
+        slug: `resolver-rubric-owner-${suffix}`,
+        name: "Resolver Rubric Owner",
+      })
+      .returning();
+    const [otherRubric] = await db
+      .insert(rubrics)
+      .values({
+        orgId: ownerOrg!.id,
+        name: "Other Org Custom",
+        version: CUSTOM_RUBRIC.version,
+        definition: CUSTOM_RUBRIC,
+        isDefault: false,
+      })
+      .returning();
+    const [pollutedOrg] = await db
+      .insert(organizations)
+      .values({
+        slug: `resolver-polluted-org-${suffix}`,
+        name: "Resolver Polluted Org",
+        rubricId: otherRubric!.id,
+      })
+      .returning();
+
+    const resolver = createRubricResolver();
+    const resolved = await resolver.resolve({
+      db,
+      orgId: pollutedOrg!.id,
+      locale: "en",
+    });
+
+    expect(resolved.fromOrgCustom).toBe(false);
+    expect(resolved.source).toBe("platform");
+    expect(resolved.rubricId).toBe(platformDefaultEnId);
+  });
+
   it("should cache result within TTL and avoid 2nd DB call", async () => {
     let callCount = 0;
     const originalSelect = db.select;

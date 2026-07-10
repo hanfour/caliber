@@ -1,7 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
-import { apiKeys, organizations, rubrics, usageLogs } from "@caliber/db";
+import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  apiKeys,
+  organizationMembers,
+  organizations,
+  rubrics,
+  usageLogs,
+} from "@caliber/db";
 import type { Database } from "@caliber/db";
 import { can } from "@caliber/auth";
 import type { UserPermissions } from "@caliber/auth";
@@ -76,6 +82,30 @@ async function resolveKeyForRubric(
   }
 
   return key;
+}
+
+async function assertUserIsOrgMember(
+  db: Database,
+  userId: string,
+  orgId: string,
+): Promise<void> {
+  const [membership] = await db
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(
+      and(
+        eq(organizationMembers.userId, userId),
+        eq(organizationMembers.orgId, orgId),
+      ),
+    )
+    .limit(1);
+
+  if (!membership) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Target user is not a member of this organization",
+    });
+  }
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -411,6 +441,8 @@ export const rubricsRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
+      await assertUserIsOrgMember(ctx.db, input.userId, input.orgId);
+
       const rubricRow = await ctx.db
         .select()
         .from(rubrics)
@@ -419,6 +451,7 @@ export const rubricsRouter = router({
             eq(rubrics.id, input.rubricId),
             isNull(rubrics.deletedAt),
             isNull(rubrics.apiKeyId),
+            or(isNull(rubrics.orgId), eq(rubrics.orgId, input.orgId)),
           ),
         )
         .limit(1)
@@ -446,8 +479,10 @@ export const rubricsRouter = router({
         .from(usageLogs)
         .where(
           and(
+            eq(usageLogs.orgId, input.orgId),
             eq(usageLogs.userId, input.userId),
             gte(usageLogs.createdAt, periodStart),
+            lt(usageLogs.createdAt, periodEnd),
           ),
         );
 

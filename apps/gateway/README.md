@@ -193,7 +193,7 @@ For ad-hoc dev:
 docker compose exec postgres psql -U caliber -d caliber
 # \dt — list tables
 # SELECT id, name, status, priority, concurrency FROM upstream_accounts WHERE deleted_at IS NULL;
-# SELECT SUM(total_cost) FROM usage_logs WHERE api_key_id = '<id>';
+# SELECT SUM(actual_cost_usd) FROM usage_logs WHERE api_key_id = '<id>';
 ```
 
 ---

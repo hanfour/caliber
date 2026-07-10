@@ -610,6 +610,7 @@
     },
     "editDialog": {
       "title": "編輯上游憑證",
+      "description": "更新「{name}」的路由設定。",
       "nameLabel": "名稱",
       "schedulableLabel": "啟用（可供路由）",
       "priorityLabel": "優先序（越小越優先）",

@@ -448,7 +448,13 @@ describe("reports router — mutation endpoints", () => {
     expect(mockAdd).toHaveBeenCalledOnce();
     // 4-part jobId via buildEvaluatorJobId (colon-free, BullMQ-safe)
     expect(mockAdd.mock.calls[0]![2]).toMatchObject({
-      jobId: buildEvaluatorJobId({ userId: member.id, apiKeyId, periodStart, periodType: "daily" }),
+      jobId: buildEvaluatorJobId({
+        orgId: org.id,
+        userId: member.id,
+        apiKeyId,
+        periodStart,
+        periodType: "daily",
+      }),
     });
     // payload carries apiKeyId + keyNameSnapshot for per-key grain
     expect(mockAdd.mock.calls[0]![1]).toMatchObject({

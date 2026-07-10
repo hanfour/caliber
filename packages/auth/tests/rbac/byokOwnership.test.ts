@@ -47,6 +47,9 @@ function makePerm(
     coveredOrgs: new Set(),
     coveredDepts: new Set(),
     coveredTeams: new Set(),
+    deptOrgById: new Map(),
+    teamOrgById: new Map(),
+    teamDeptById: new Map(),
   };
 }
 

@@ -14,7 +14,7 @@
  *   4. Poll `usage_logs` until the worker has committed the row (BullMQ job
  *      processing is async).
  *   5. Assert the row has the right fields + `api_keys.quota_used_usd` was
- *      bumped by `total_cost`.
+ *      bumped by `actual_cost_usd`.
  *   6. Pricing-miss case: unknown model → cost zero, no enqueue error,
  *      row still appears.
  *

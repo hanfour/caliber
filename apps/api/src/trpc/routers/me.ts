@@ -22,6 +22,18 @@ export const meRouter = router({
       coveredOrgs: [...ctx.perm.coveredOrgs],
       coveredDepts: [...ctx.perm.coveredDepts],
       coveredTeams: [...ctx.perm.coveredTeams],
+      deptOrgById: [...ctx.perm.coveredDepts].flatMap((deptId) => {
+        const orgId = ctx.perm.deptOrgById.get(deptId);
+        return orgId === undefined ? [] : [[deptId, orgId] as const];
+      }),
+      teamOrgById: [...ctx.perm.coveredTeams].flatMap((teamId) => {
+        const orgId = ctx.perm.teamOrgById.get(teamId);
+        return orgId === undefined ? [] : [[teamId, orgId] as const];
+      }),
+      teamDeptById: [...ctx.perm.coveredTeams].flatMap((teamId) => {
+        if (!ctx.perm.teamDeptById.has(teamId)) return [];
+        return [[teamId, ctx.perm.teamDeptById.get(teamId) ?? null] as const];
+      }),
     };
   }),
   updateProfile: protectedProcedure

@@ -8,8 +8,8 @@ import pg from "pg";
 import * as schema from "@caliber/db/schema";
 import { makeAdapter } from "../../src/drizzle-adapter";
 
-let container: StartedPostgreSqlContainer;
-let pool: pg.Pool;
+let container: StartedPostgreSqlContainer | undefined;
+let pool: pg.Pool | undefined;
 let db: ReturnType<typeof drizzle>;
 
 beforeAll(async () => {
@@ -20,8 +20,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.end();
-  await container.stop();
+  if (pool) await pool.end();
+  if (container) await container.stop();
 });
 
 describe("makeAdapter", () => {

@@ -27,17 +27,35 @@ const startBodySchema = z.object({
 });
 const pollBodySchema = z.object({ device_code: z.string().min(16).max(128) });
 
+export const deviceGatewayProvisioningSchema = z.object({
+  requested: z.boolean(),
+  status: z.enum([
+    "not_requested",
+    "provisioned",
+    "already_exists",
+    "unavailable",
+    "failed",
+  ]),
+  gatewayUrl: z.string().optional(),
+  errorCode: z.string().optional(),
+});
+export type DeviceGatewayProvisioning = z.infer<
+  typeof deviceGatewayProvisioningSchema
+>;
+
 export const deviceAuthFlowSchema = z.object({
-  status: z.enum(["pending", "approved", "denied"]),
+  status: z.enum(["pending", "approving", "approved", "denied"]),
   userCode: z.string(),
   hostname: z.string(),
   os: z.string(),
   agentVersion: z.string().optional(),
   cliVersion: z.string().optional(),
   createdAt: z.string(),
+  approvalNonce: z.string().optional(),
   enrollmentToken: z.string().optional(),
   // #256: gateway provisioning — requested at start, fulfilled at approve.
   provisionGateway: z.boolean().optional(),
+  gatewayProvisioning: deviceGatewayProvisioningSchema.optional(),
   apiKey: z.string().optional(),
   gatewayUrl: z.string().optional(),
 });
@@ -62,6 +80,21 @@ function generateUserCode(): string {
   let s = "";
   for (let i = 0; i < 8; i += 1) s += USER_CODE_ALPHABET[bytes[i]! % USER_CODE_ALPHABET.length];
   return `${s.slice(0, 4)}-${s.slice(4)}`;
+}
+
+function gatewayProvisioningPayload(flow: DeviceAuthFlow) {
+  const provisioning = flow.gatewayProvisioning;
+  if (!provisioning) return {};
+  return {
+    gateway: {
+      requested: provisioning.requested,
+      status: provisioning.status,
+      ...(provisioning.gatewayUrl
+        ? { gateway_url: provisioning.gatewayUrl }
+        : {}),
+      ...(provisioning.errorCode ? { error_code: provisioning.errorCode } : {}),
+    },
+  };
 }
 
 export function deviceAuthRoutes(env: ServerEnv, redis: Redis): FastifyPluginAsync {
@@ -164,6 +197,7 @@ export function deviceAuthRoutes(env: ServerEnv, redis: Redis): FastifyPluginAsy
         reply.code(200);
         return {
           enrollment_token: flow.enrollmentToken,
+          ...gatewayProvisioningPayload(flow),
           // #256: present only when --gateway provisioning was requested and
           // a key was freshly minted at approve.
           ...(flow.apiKey ? { api_key: flow.apiKey, gateway_url: flow.gatewayUrl } : {}),

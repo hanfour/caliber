@@ -21,6 +21,9 @@ export interface UserPermissions {
   coveredOrgs: Set<string>
   coveredDepts: Set<string>
   coveredTeams: Set<string>
+  deptOrgById: Map<string, string>
+  teamOrgById: Map<string, string>
+  teamDeptById: Map<string, string | null>
 }
 
 export async function resolvePermissions(
@@ -57,6 +60,8 @@ export async function resolvePermissions(
   for (const d of deptRows) deptOrgIndex.set(d.id, d.orgId)
   const teamOrgIndex = new Map<string, string>()
   for (const t of teamRows) teamOrgIndex.set(t.id, t.orgId)
+  const teamDeptIndex = new Map<string, string | null>()
+  for (const t of teamRows) teamDeptIndex.set(t.id, t.departmentId)
 
   const rolesAtGlobal = new Set<Role>()
   const rolesByOrg = new Map<string, Set<Role>>()
@@ -113,6 +118,9 @@ export async function resolvePermissions(
     rolesByTeam,
     coveredOrgs,
     coveredDepts,
-    coveredTeams
+    coveredTeams,
+    deptOrgById: deptOrgIndex,
+    teamOrgById: teamOrgIndex,
+    teamDeptById: teamDeptIndex
   }
 }

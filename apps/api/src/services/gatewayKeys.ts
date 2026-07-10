@@ -19,13 +19,14 @@ import { and, eq } from "drizzle-orm";
 export async function issueOwnGatewayKey(
   db: Database,
   input: { userId: string; orgId: string; name: string; pepper: string },
-): Promise<{ created: true; rawKey: string } | { created: false }> {
+): Promise<{ created: true; rawKey: string; id: string } | { created: false }> {
   const existing = await db
     .select({ id: apiKeys.id })
     .from(apiKeys)
     .where(
       and(
         eq(apiKeys.userId, input.userId),
+        eq(apiKeys.orgId, input.orgId),
         eq(apiKeys.name, input.name),
         eq(apiKeys.status, "active"),
       ),
@@ -35,17 +36,23 @@ export async function issueOwnGatewayKey(
 
   const { raw, prefix } = generateApiKey();
   const keyHash = hashApiKey(input.pepper, raw);
-  await db.insert(apiKeys).values({
-    userId: input.userId,
-    orgId: input.orgId,
-    teamId: null,
-    groupId: null,
-    keyHash,
-    keyPrefix: prefix,
-    name: input.name,
-    status: "active",
-    issuedByUserId: null,
-    routingPolicy: "own_then_pool",
-  });
-  return { created: true, rawKey: raw };
+  const [row] = await db
+    .insert(apiKeys)
+    .values({
+      userId: input.userId,
+      orgId: input.orgId,
+      teamId: null,
+      groupId: null,
+      keyHash,
+      keyPrefix: prefix,
+      name: input.name,
+      status: "active",
+      issuedByUserId: null,
+      routingPolicy: "own_then_pool",
+    })
+    .returning({ id: apiKeys.id });
+  if (!row) {
+    throw new Error("failed to insert gateway key");
+  }
+  return { created: true, rawKey: raw, id: row.id };
 }

@@ -1,8 +1,15 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
+import type { Redis } from "ioredis";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { devices, deviceEnrollmentTokens, organizations } from "@caliber/db";
+import {
+  apiKeys,
+  devices,
+  deviceEnrollmentTokens,
+  organizations,
+  type Database,
+} from "@caliber/db";
 import { can } from "@caliber/auth";
 import {
   protectedProcedure,
@@ -19,6 +26,7 @@ import {
   normalizeUserCode,
   USER_CODE_RE,
   deviceAuthFlowSchema,
+  type DeviceGatewayProvisioning,
   type DeviceAuthFlow,
 } from "../../rest/deviceAuth.js";
 import { clampInterval, AGENT_POLL_DEFAULT_SEC } from "../../rest/agentConfig.js";
@@ -64,6 +72,374 @@ function ensureGatewayEnabled(env: { ENABLE_GATEWAY: boolean }) {
   }
 }
 
+const CLAIM_APPROVAL_SCRIPT = `
+local raw = redis.call("GET", KEYS[1])
+if not raw then return 0 end
+local ok, flow = pcall(cjson.decode, raw)
+if not ok or type(flow) ~= "table" then return 0 end
+if flow.status ~= "pending" then return -1 end
+flow.status = "approving"
+flow.approvalNonce = ARGV[1]
+local ttl = redis.call("PTTL", KEYS[1])
+if ttl > 0 then
+  redis.call("PSETEX", KEYS[1], ttl, cjson.encode(flow))
+else
+  redis.call("SET", KEYS[1], cjson.encode(flow), "XX")
+end
+return 1
+`;
+
+const FINISH_APPROVAL_SCRIPT = `
+local raw = redis.call("GET", KEYS[1])
+if not raw then return 0 end
+local ok, flow = pcall(cjson.decode, raw)
+if not ok or type(flow) ~= "table" then return 0 end
+if flow.status ~= "approving" or flow.approvalNonce ~= ARGV[1] then return -1 end
+local ttl = redis.call("PTTL", KEYS[1])
+if ttl > 0 then
+  redis.call("PSETEX", KEYS[1], ttl, ARGV[2])
+else
+  redis.call("SET", KEYS[1], ARGV[2], "XX")
+end
+return 1
+`;
+
+const RESET_APPROVAL_SCRIPT = `
+local raw = redis.call("GET", KEYS[1])
+if not raw then return 0 end
+local ok, flow = pcall(cjson.decode, raw)
+if not ok or type(flow) ~= "table" then return 0 end
+if flow.status ~= "approving" or flow.approvalNonce ~= ARGV[1] then return -1 end
+flow.status = "pending"
+flow.approvalNonce = nil
+local ttl = redis.call("PTTL", KEYS[1])
+if ttl > 0 then
+  redis.call("PSETEX", KEYS[1], ttl, cjson.encode(flow))
+else
+  redis.call("SET", KEYS[1], cjson.encode(flow), "XX")
+end
+return 1
+`;
+
+const DENY_PENDING_SCRIPT = `
+local raw = redis.call("GET", KEYS[1])
+if not raw then return 0 end
+local ok, flow = pcall(cjson.decode, raw)
+if not ok or type(flow) ~= "table" then return 0 end
+if flow.status ~= "pending" then return -1 end
+local ttl = redis.call("PTTL", KEYS[1])
+if ttl > 0 then
+  redis.call("PSETEX", KEYS[1], ttl, ARGV[1])
+else
+  redis.call("SET", KEYS[1], ARGV[1], "XX")
+end
+return 1
+`;
+
+async function evalFlowScript(
+  redis: Redis,
+  script: string,
+  key: string,
+  ...args: string[]
+): Promise<number> {
+  const result = await redis.eval(script, 1, key, ...args);
+  const parsed = typeof result === "number" ? result : Number(result);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isMissingLuaJson(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("global 'cjson'");
+}
+
+function approvalLockKey(codeHash: string): string {
+  return `${flowKey(codeHash)}:approval-lock`;
+}
+
+async function setWithExistingTtl(
+  redis: Redis,
+  key: string,
+  value: string,
+): Promise<boolean> {
+  const pttl = await redis.pttl(key);
+  if (pttl === -2) return false;
+  if (pttl > 0) {
+    await redis.set(key, value, "PX", pttl);
+    return true;
+  }
+  const stored = await redis.set(key, value, "XX");
+  return Boolean(stored);
+}
+
+async function setLockWithFlowTtl(
+  redis: Redis,
+  codeHash: string,
+  lockValue: string,
+): Promise<boolean> {
+  const pttl = await redis.pttl(flowKey(codeHash));
+  if (pttl === -2) return false;
+  const stored =
+    pttl > 0
+      ? await redis.set(approvalLockKey(codeHash), lockValue, "PX", pttl, "NX")
+      : await redis.set(approvalLockKey(codeHash), lockValue, "NX");
+  return Boolean(stored);
+}
+
+function parseFlow(raw: string | null): DeviceAuthFlow | null {
+  if (!raw) return null;
+  try {
+    return deviceAuthFlowSchema.parse(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+async function claimApprovalFlowFallback(
+  redis: Redis,
+  codeHash: string,
+  nonce: string,
+): Promise<void> {
+  const key = flowKey(codeHash);
+  const flow = parseFlow(await redis.get(key));
+  if (!flow) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  }
+  if (flow.status !== "pending") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "already decided",
+    });
+  }
+  const locked = await setLockWithFlowTtl(redis, codeHash, nonce);
+  if (!locked) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "already decided",
+    });
+  }
+
+  const latest = parseFlow(await redis.get(key));
+  if (!latest) {
+    await redis.del(approvalLockKey(codeHash)).catch(() => {});
+    throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  }
+  if (latest.status !== "pending") {
+    await redis.del(approvalLockKey(codeHash)).catch(() => {});
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "already decided",
+    });
+  }
+
+  const stored = await setWithExistingTtl(
+    redis,
+    key,
+    JSON.stringify({ ...latest, status: "approving", approvalNonce: nonce }),
+  );
+  if (!stored) {
+    await redis.del(approvalLockKey(codeHash)).catch(() => {});
+    throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  }
+}
+
+async function finishApprovalFlowFallback(
+  redis: Redis,
+  codeHash: string,
+  nonce: string,
+  approved: DeviceAuthFlow,
+): Promise<boolean> {
+  const key = flowKey(codeHash);
+  if ((await redis.get(approvalLockKey(codeHash))) !== nonce) return false;
+  const flow = parseFlow(await redis.get(key));
+  if (
+    !flow ||
+    flow.status !== "approving" ||
+    flow.approvalNonce !== nonce
+  ) {
+    return false;
+  }
+  const stored = await setWithExistingTtl(redis, key, JSON.stringify(approved));
+  if (stored) await redis.del(approvalLockKey(codeHash)).catch(() => {});
+  return stored;
+}
+
+async function resetApprovalFlowFallback(
+  redis: Redis,
+  codeHash: string,
+  nonce: string,
+): Promise<void> {
+  const key = flowKey(codeHash);
+  if ((await redis.get(approvalLockKey(codeHash))) !== nonce) return;
+  const flow = parseFlow(await redis.get(key));
+  if (flow?.status === "approving" && flow.approvalNonce === nonce) {
+    const pending: DeviceAuthFlow = { ...flow, status: "pending" };
+    delete pending.approvalNonce;
+    await setWithExistingTtl(
+      redis,
+      key,
+      JSON.stringify(pending),
+    );
+  }
+  await redis.del(approvalLockKey(codeHash)).catch(() => {});
+}
+
+async function denyPendingFlowFallback(
+  redis: Redis,
+  codeHash: string,
+  denied: DeviceAuthFlow,
+): Promise<void> {
+  const key = flowKey(codeHash);
+  const flow = parseFlow(await redis.get(key));
+  if (!flow || flow.status !== "pending") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: !flow ? "flow expired" : "already decided",
+    });
+  }
+
+  const lockValue = `deny:${randomBytes(16).toString("hex")}`;
+  const locked = await setLockWithFlowTtl(redis, codeHash, lockValue);
+  if (!locked) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "already decided",
+    });
+  }
+  const latest = parseFlow(await redis.get(key));
+  if (!latest || latest.status !== "pending") {
+    await redis.del(approvalLockKey(codeHash)).catch(() => {});
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: !latest ? "flow expired" : "already decided",
+    });
+  }
+  const stored = await setWithExistingTtl(redis, key, JSON.stringify(denied));
+  await redis.del(approvalLockKey(codeHash)).catch(() => {});
+  if (!stored) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "flow expired",
+    });
+  }
+}
+
+async function claimApprovalFlow(
+  redis: Redis,
+  codeHash: string,
+  nonce: string,
+): Promise<void> {
+  let result: number;
+  try {
+    result = await evalFlowScript(
+      redis,
+      CLAIM_APPROVAL_SCRIPT,
+      flowKey(codeHash),
+      nonce,
+    );
+  } catch (err) {
+    if (isMissingLuaJson(err)) {
+      await claimApprovalFlowFallback(redis, codeHash, nonce);
+      return;
+    }
+    throw err;
+  }
+  if (result === 1) return;
+  if (result === 0) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "unknown code" });
+  }
+  throw new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: "already decided",
+  });
+}
+
+async function finishApprovalFlow(
+  redis: Redis,
+  codeHash: string,
+  nonce: string,
+  approved: DeviceAuthFlow,
+): Promise<boolean> {
+  let result: number;
+  try {
+    result = await evalFlowScript(
+      redis,
+      FINISH_APPROVAL_SCRIPT,
+      flowKey(codeHash),
+      nonce,
+      JSON.stringify(approved),
+    );
+  } catch (err) {
+    if (isMissingLuaJson(err)) {
+      return finishApprovalFlowFallback(redis, codeHash, nonce, approved);
+    }
+    throw err;
+  }
+  return result === 1;
+}
+
+async function resetApprovalFlow(
+  redis: Redis,
+  codeHash: string,
+  nonce: string,
+): Promise<void> {
+  try {
+    await evalFlowScript(redis, RESET_APPROVAL_SCRIPT, flowKey(codeHash), nonce);
+  } catch (err) {
+    if (isMissingLuaJson(err)) {
+      await resetApprovalFlowFallback(redis, codeHash, nonce);
+      return;
+    }
+    throw err;
+  }
+}
+
+async function denyPendingFlow(
+  redis: Redis,
+  codeHash: string,
+  denied: DeviceAuthFlow,
+): Promise<void> {
+  let result: number;
+  try {
+    result = await evalFlowScript(
+      redis,
+      DENY_PENDING_SCRIPT,
+      flowKey(codeHash),
+      JSON.stringify(denied),
+    );
+  } catch (err) {
+    if (isMissingLuaJson(err)) {
+      await denyPendingFlowFallback(redis, codeHash, denied);
+      return;
+    }
+    throw err;
+  }
+  if (result === 1) return;
+  throw new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: result === 0 ? "flow expired" : "already decided",
+  });
+}
+
+async function cleanupApprovalSideEffects(
+  db: Database,
+  input: { enrollmentTokenId: string; apiKeyId?: string },
+): Promise<void> {
+  await db
+    .delete(deviceEnrollmentTokens)
+    .where(
+      and(
+        eq(deviceEnrollmentTokens.id, input.enrollmentTokenId),
+        isNull(deviceEnrollmentTokens.usedAt),
+      ),
+    );
+
+  if (input.apiKeyId) {
+    await db
+      .update(apiKeys)
+      .set({ status: "revoked", revokedAt: sql`NOW()`, updatedAt: sql`NOW()` })
+      .where(and(eq(apiKeys.id, input.apiKeyId), isNull(apiKeys.revokedAt)));
+  }
+}
+
 // Resolve a user_code (as typed/pasted by the operator on the /device page)
 // to its pending Redis flow. Anti-enumeration: unknown, expired, or corrupt
 // codes all collapse to the same NOT_FOUND — never distinguish "doesn't
@@ -71,7 +447,7 @@ function ensureGatewayEnabled(env: { ENABLE_GATEWAY: boolean }) {
 // (approved/denied) is NOT retried here; approve/deny callers get
 // PRECONDITION_FAILED so a second click doesn't silently no-op.
 async function readPendingFlowWithHash(
-  redis: import("ioredis").Redis,
+  redis: Redis,
   rawUserCode: string,
 ): Promise<{ flow: DeviceAuthFlow; codeHash: string }> {
   const userCode = normalizeUserCode(rawUserCode);
@@ -95,7 +471,7 @@ async function readPendingFlowWithHash(
 }
 
 async function readPendingFlow(
-  redis: import("ioredis").Redis,
+  redis: Redis,
   rawUserCode: string,
 ): Promise<DeviceAuthFlow> {
   return (await readPendingFlowWithHash(redis, rawUserCode)).flow;
@@ -314,73 +690,139 @@ export const devicesRouter = router({
           ctx.redis,
           input.userCode,
         );
-        const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
+        const approvalNonce = randomBytes(16).toString("hex");
+        await claimApprovalFlow(ctx.redis, codeHash, approvalNonce);
+        try {
+          const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
 
-        const token = generateEnrollmentToken();
-        const tokenHash = hashEnrollmentToken(pepper, token);
-        const expiresAt = new Date(Date.now() + ENROLLMENT_TOKEN_TTL_SEC * 1000);
-        const [row] = await ctx.db
-          .insert(deviceEnrollmentTokens)
-          .values({ userId: ctx.user.id, orgId, tokenHash, expiresAt })
-          .returning({ id: deviceEnrollmentTokens.id });
-        if (!row) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "failed to insert enrollment token",
-          });
-        }
-
-        // #256: when the CLI requested --gateway, mint an own_then_pool key
-        // now (approval IS the user's consent) so poll can hand it back and the
-        // CLI can configure Claude Code. Idempotent by name; failure is
-        // non-fatal — enrollment still succeeds, the CLI just can't auto-config.
-        let apiKey: string | undefined;
-        let gatewayUrl: string | undefined;
-        if (flow.provisionGateway && ctx.env.GATEWAY_BASE_URL) {
-          const keyName = `${flow.hostname} (caliber login)`;
-          const issued = await issueOwnGatewayKey(ctx.db, {
-            userId: ctx.user.id,
-            orgId,
-            name: keyName,
-            pepper,
-          }).catch(() => null);
-          if (issued?.created) {
-            apiKey = issued.rawKey;
-            gatewayUrl = ctx.env.GATEWAY_BASE_URL;
+          const token = generateEnrollmentToken();
+          const tokenHash = hashEnrollmentToken(pepper, token);
+          const expiresAt = new Date(
+            Date.now() + ENROLLMENT_TOKEN_TTL_SEC * 1000,
+          );
+          const [row] = await ctx.db
+            .insert(deviceEnrollmentTokens)
+            .values({ userId: ctx.user.id, orgId, tokenHash, expiresAt })
+            .returning({ id: deviceEnrollmentTokens.id });
+          if (!row) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "failed to insert enrollment token",
+            });
           }
-        }
 
-        const approved: DeviceAuthFlow = {
-          ...flow,
-          status: "approved",
-          enrollmentToken: token,
-          ...(apiKey ? { apiKey, gatewayUrl } : {}),
-        };
-        // XX + KEEPTTL: only overwrite an existing flow, preserving its
-        // remaining TTL. If the flow expired between the read and here, XX
-        // returns null and we do NOT resurrect it (nor mint a usable token).
-        const stored = await ctx.redis.set(
-          flowKey(codeHash),
-          JSON.stringify(approved),
-          "KEEPTTL",
-          "XX",
-        );
-        if (!stored) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "flow expired",
+          // #256: when the CLI requested --gateway, mint an own_then_pool key
+          // now (approval IS the user's consent) so poll can hand it back and the
+          // CLI can configure Claude Code. Provisioning is non-fatal, but the
+          // non-secret outcome is persisted so the CLI/operator can distinguish
+          // "not requested" from "failed".
+          let apiKey: string | undefined;
+          let createdApiKeyId: string | undefined;
+          let gatewayUrl: string | undefined;
+          let gatewayProvisioning: DeviceGatewayProvisioning = {
+            requested: false,
+            status: "not_requested",
+          };
+          if (flow.provisionGateway) {
+            if (!ctx.env.GATEWAY_BASE_URL) {
+              gatewayProvisioning = {
+                requested: true,
+                status: "unavailable",
+                errorCode: "gateway_url_not_configured",
+              };
+            } else {
+              const keyName = `${flow.hostname} (caliber login)`;
+              try {
+                const issued = await issueOwnGatewayKey(ctx.db, {
+                  userId: ctx.user.id,
+                  orgId,
+                  name: keyName,
+                  pepper,
+                });
+                gatewayUrl = ctx.env.GATEWAY_BASE_URL;
+                if (issued.created) {
+                  apiKey = issued.rawKey;
+                  createdApiKeyId = issued.id;
+                  gatewayProvisioning = {
+                    requested: true,
+                    status: "provisioned",
+                    gatewayUrl,
+                  };
+                } else {
+                  gatewayProvisioning = {
+                    requested: true,
+                    status: "already_exists",
+                    gatewayUrl,
+                  };
+                }
+              } catch (err) {
+                ctx.logger.warn(
+                  {
+                    err: err instanceof Error ? err.message : String(err),
+                    hostname: flow.hostname,
+                    orgId,
+                    userId: ctx.user.id,
+                  },
+                  "device auth gateway key provisioning failed",
+                );
+                gatewayProvisioning = {
+                  requested: true,
+                  status: "failed",
+                  gatewayUrl: ctx.env.GATEWAY_BASE_URL,
+                  errorCode: "gateway_key_issue_failed",
+                };
+              }
+            }
+          }
+
+          const approved: DeviceAuthFlow = {
+            ...flow,
+            status: "approved",
+            enrollmentToken: token,
+            gatewayProvisioning,
+            ...(apiKey ? { apiKey, gatewayUrl } : {}),
+          };
+          const stored = await finishApprovalFlow(
+            ctx.redis,
+            codeHash,
+            approvalNonce,
+            approved,
+          );
+          if (!stored) {
+            await cleanupApprovalSideEffects(ctx.db, {
+              enrollmentTokenId: row.id,
+              apiKeyId: createdApiKeyId,
+            }).catch(() => {});
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "flow expired",
+            });
+          }
+
+          await writeAudit(ctx.db, {
+            actorUserId: ctx.user.id,
+            action: AUDIT_ACTIONS.DEVICE_AUTH_APPROVED,
+            targetType: "enrollment_token",
+            targetId: row.id,
+            orgId,
+            metadata: {
+              hostname: flow.hostname,
+              os: flow.os,
+              provisionGatewayRequested: gatewayProvisioning.requested,
+              gatewayProvisioningStatus: gatewayProvisioning.status,
+              ...(gatewayProvisioning.errorCode
+                ? { gatewayProvisioningErrorCode: gatewayProvisioning.errorCode }
+                : {}),
+              ...(createdApiKeyId ? { gatewayKeyId: createdApiKeyId } : {}),
+            },
           });
+          return { ok: true as const };
+        } catch (err) {
+          await resetApprovalFlow(ctx.redis, codeHash, approvalNonce).catch(
+            () => {},
+          );
+          throw err;
         }
-
-        await writeAudit(ctx.db, {
-          actorUserId: ctx.user.id,
-          action: AUDIT_ACTIONS.DEVICE_AUTH_APPROVED,
-          targetType: "enrollment_token",
-          targetId: row.id,
-          orgId,
-          metadata: { hostname: flow.hostname, os: flow.os },
-        });
-        return { ok: true as const };
       }),
 
     deny: protectedProcedure
@@ -393,14 +835,7 @@ export const devicesRouter = router({
         );
         const orgId = await resolveUserPrimaryOrgId(ctx.db, ctx.user.id);
         const denied: DeviceAuthFlow = { ...flow, status: "denied" };
-        // XX + KEEPTTL: don't resurrect a flow that expired between read and
-        // write (see approve). A vanished flow is already effectively denied.
-        await ctx.redis.set(
-          flowKey(codeHash),
-          JSON.stringify(denied),
-          "KEEPTTL",
-          "XX",
-        );
+        await denyPendingFlow(ctx.redis, codeHash, denied);
         await writeAudit(ctx.db, {
           actorUserId: ctx.user.id,
           action: AUDIT_ACTIONS.DEVICE_AUTH_DENIED,

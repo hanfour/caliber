@@ -19,6 +19,7 @@ function recordingScheduler(): {
     concurrency: 10,
     platform: "anthropic",
     type: "api_key",
+    rateMultiplier: "1.0000",
     priority: 50,
     groupId: null,
   };

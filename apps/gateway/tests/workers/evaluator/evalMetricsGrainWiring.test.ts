@@ -17,7 +17,7 @@
  * (PR2); the server.ts wiring fix ensures it reaches Prometheus in prod.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
 import { platformDefaultRubric } from "../../../src/workers/evaluator/fixtures/platformDefault.js";
@@ -131,6 +131,7 @@ class EvalMetricsSpy {
 
 describe("runEvaluation gwEvalLlmCalledTotal grain + skipped_budget emission", () => {
   let metricsSpy: EvalMetricsSpy;
+  let runEvaluation: typeof import("../../../src/workers/evaluator/runEvaluation.js").runEvaluation;
 
   // Minimal DB stub: only the `api_keys.teamId` lookup in the per-key
   // upsert path needs to resolve. Return an empty row so teamId defaults null.
@@ -166,17 +167,18 @@ describe("runEvaluation gwEvalLlmCalledTotal grain + skipped_budget emission", (
     llmEvalEnabled: true,
   };
 
+  beforeAll(async () => {
+    ({ runEvaluation } = await import(
+      "../../../src/workers/evaluator/runEvaluation.js"
+    ));
+  }, 15_000);
+
   beforeEach(() => {
     metricsSpy = new EvalMetricsSpy();
     metricsSpy.reset();
   });
 
   it("per-person grain: skipped_budget emits gwEvalLlmCalledTotal{grain:person,result:skipped_budget}", async () => {
-    // Import after mocks are set up
-    const { runEvaluation } = await import(
-      "../../../src/workers/evaluator/runEvaluation.js"
-    );
-
     await runEvaluation({
       ...baseInput,
       metrics: metricsSpy,
@@ -189,10 +191,6 @@ describe("runEvaluation gwEvalLlmCalledTotal grain + skipped_budget emission", (
   });
 
   it("per-key grain: skipped_budget emits gwEvalLlmCalledTotal{grain:key,result:skipped_budget}", async () => {
-    const { runEvaluation } = await import(
-      "../../../src/workers/evaluator/runEvaluation.js"
-    );
-
     await runEvaluation({
       ...baseInput,
       metrics: metricsSpy,
@@ -206,10 +204,6 @@ describe("runEvaluation gwEvalLlmCalledTotal grain + skipped_budget emission", (
   });
 
   it("no metrics (server.ts wiring absent) → counter is NOT incremented", async () => {
-    const { runEvaluation } = await import(
-      "../../../src/workers/evaluator/runEvaluation.js"
-    );
-
     // Passing metrics: undefined mimics the pre-fix server.ts behavior where
     // createEvaluatorWorker was called without a metrics object.
     await runEvaluation({

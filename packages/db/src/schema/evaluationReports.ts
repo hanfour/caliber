@@ -35,5 +35,5 @@ export const evaluationReports = pgTable('evaluation_reports', {
   userTimeIdx: index('evaluation_reports_user_time_idx').on(t.userId, t.periodStart),
   orgTimeIdx: index('evaluation_reports_org_time_idx').on(t.orgId, t.periodStart),
   teamTimeIdx: index('evaluation_reports_team_time_idx').on(t.teamId, t.periodStart),
-  periodUniq: uniqueIndex('evaluation_reports_period_uniq').on(t.userId, t.periodStart, t.periodType),
+  periodUniq: uniqueIndex('evaluation_reports_org_period_uniq').on(t.orgId, t.userId, t.periodStart, t.periodType),
 }))

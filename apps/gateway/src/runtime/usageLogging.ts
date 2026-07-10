@@ -23,6 +23,8 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { eq } from "drizzle-orm";
+import { upstreamAccounts, type Database } from "@caliber/db";
 import {
   loadPricing,
   resolveCost,
@@ -520,6 +522,83 @@ export interface EmitUsageLogInput {
   accountType?: "oauth" | "apikey";
 }
 
+interface AccountBillingDefaults {
+  accountRateMultiplier?: string;
+  accountType?: "oauth" | "apikey";
+}
+
+export function usageAccountTypeFromUpstreamType(
+  type: string | undefined,
+): "oauth" | "apikey" | undefined {
+  if (type === undefined) return undefined;
+  return type === "oauth" ? "oauth" : "apikey";
+}
+
+function hasDbSelect(db: unknown): db is Database {
+  return (
+    db !== null &&
+    typeof db === "object" &&
+    typeof (db as { select?: unknown }).select === "function"
+  );
+}
+
+async function resolveAccountBillingDefaults(
+  db: unknown,
+  accountId: string,
+  logger?: { warn: (obj: unknown, msg?: string) => void },
+): Promise<AccountBillingDefaults> {
+  if (!hasDbSelect(db)) return {};
+  try {
+    const [row] = await db
+      .select({
+        type: upstreamAccounts.type,
+        rateMultiplier: upstreamAccounts.rateMultiplier,
+      })
+      .from(upstreamAccounts)
+      .where(eq(upstreamAccounts.id, accountId))
+      .limit(1);
+    if (!row) {
+      logger?.warn(
+        { accountId },
+        "usage log account billing metadata missing; falling back to builder defaults",
+      );
+      return {};
+    }
+    return {
+      accountType: usageAccountTypeFromUpstreamType(row.type),
+      accountRateMultiplier: row.rateMultiplier,
+    };
+  } catch (err) {
+    logger?.warn(
+      {
+        accountId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "usage log account billing metadata lookup failed; falling back to builder defaults",
+    );
+    return {};
+  }
+}
+
+function formatRateMultiplier(value: number | undefined): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return value.toFixed(4);
+}
+
+function resolveGroupLogFields(req: FastifyRequest): {
+  groupId?: string | null;
+  rateMultiplier?: string;
+} {
+  const ctx = req.gwGroupContext;
+  if (!ctx) return {};
+  return {
+    groupId: ctx.groupId && !ctx.isLegacy && !ctx.isByok ? ctx.groupId : null,
+    rateMultiplier: formatRateMultiplier(ctx.rateMultiplier),
+  };
+}
+
 /**
  * Build the payload and enqueue it, handling:
  *   - Test mode (`app.usageLogQueue` undefined → log at debug, skip).
@@ -553,6 +632,12 @@ export async function emitUsageLog(input: EmitUsageLogInput): Promise<void> {
   // `buildUsageLogPayload`, the pricing-miss metering, AND the enqueue
   // — so any thrown error lands here and is logged, not propagated.
   try {
+    const groupDefaults = resolveGroupLogFields(req);
+    const needsAccountDefaults =
+      input.accountRateMultiplier === undefined || input.accountType === undefined;
+    const accountDefaults = needsAccountDefaults
+      ? await resolveAccountBillingDefaults(app.db, input.accountId, req.log)
+      : {};
     const { payload, cost } = await buildUsageLogPayload({
       req,
       requestedModel: input.requestedModel,
@@ -567,10 +652,12 @@ export async function emitUsageLog(input: EmitUsageLogInput): Promise<void> {
       firstTokenMs: input.firstTokenMs,
       bufferReleasedAtMs: input.bufferReleasedAtMs,
       pricingLookup: input.pricingLookup,
-      groupId: input.groupId,
-      rateMultiplier: input.rateMultiplier,
-      accountRateMultiplier: input.accountRateMultiplier,
-      accountType: input.accountType,
+      groupId:
+        input.groupId !== undefined ? input.groupId : groupDefaults.groupId,
+      rateMultiplier: input.rateMultiplier ?? groupDefaults.rateMultiplier,
+      accountRateMultiplier:
+        input.accountRateMultiplier ?? accountDefaults.accountRateMultiplier,
+      accountType: input.accountType ?? accountDefaults.accountType,
     });
 
     if (cost.miss) {

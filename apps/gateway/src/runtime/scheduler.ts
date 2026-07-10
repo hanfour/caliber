@@ -122,6 +122,7 @@ export interface ScheduledAccount {
   concurrency: number;
   platform: string;
   type: string;
+  rateMultiplier: string;
   priority: number;
   groupId: string | null;
 }
@@ -461,6 +462,7 @@ async function runLayers(
     concurrency: selectedAccount.concurrency,
     platform: selectedAccount.platform,
     type: selectedAccount.type,
+    rateMultiplier: selectedAccount.rateMultiplier,
     priority: selectedAccount.priority,
     groupId: selectedAccount.groupId,
   };
@@ -502,6 +504,7 @@ interface CandidateRow {
   concurrency: number;
   platform: string;
   type: string;
+  rateMultiplier: string;
   priority: number;
   groupId: string | null;
 }
@@ -629,6 +632,7 @@ export async function listSchedulableCandidates(
           concurrency: upstreamAccounts.concurrency,
           platform: upstreamAccounts.platform,
           type: upstreamAccounts.type,
+          rateMultiplier: upstreamAccounts.rateMultiplier,
           priority: upstreamAccounts.priority,
         })
         .from(upstreamAccounts)
@@ -643,6 +647,7 @@ export async function listSchedulableCandidates(
         concurrency: r.concurrency,
         platform: r.platform,
         type: r.type,
+        rateMultiplier: r.rateMultiplier,
         priority: r.priority,
         groupId: null,
       }));
@@ -664,6 +669,7 @@ export async function listSchedulableCandidates(
         concurrency: upstreamAccounts.concurrency,
         platform: upstreamAccounts.platform,
         type: upstreamAccounts.type,
+        rateMultiplier: upstreamAccounts.rateMultiplier,
         rowPriority: upstreamAccounts.priority,
         groupId: accountGroupMembers.groupId,
         groupPriority: accountGroupMembers.priority,
@@ -693,6 +699,7 @@ export async function listSchedulableCandidates(
       concurrency: r.concurrency,
       platform: r.platform,
       type: r.type,
+      rateMultiplier: r.rateMultiplier,
       // Group-level priority overrides per-account row priority — matches
       // sub2api semantics where groups carry their own priority ladder.
       priority: r.groupPriority ?? r.rowPriority,
@@ -708,6 +715,7 @@ export async function listSchedulableCandidates(
       concurrency: upstreamAccounts.concurrency,
       platform: upstreamAccounts.platform,
       type: upstreamAccounts.type,
+      rateMultiplier: upstreamAccounts.rateMultiplier,
       priority: upstreamAccounts.priority,
     })
     .from(upstreamAccounts)
@@ -729,6 +737,7 @@ export async function listSchedulableCandidates(
     concurrency: r.concurrency,
     platform: r.platform,
     type: r.type,
+    rateMultiplier: r.rateMultiplier,
     priority: r.priority,
     groupId: null,
   }));
@@ -801,6 +810,7 @@ export async function loadSchedulableAccount(
         concurrency: upstreamAccounts.concurrency,
         platform: upstreamAccounts.platform,
         type: upstreamAccounts.type,
+        rateMultiplier: upstreamAccounts.rateMultiplier,
         priority: upstreamAccounts.priority,
         userId: upstreamAccounts.userId,
         groupId: accountGroupMembers.groupId,
@@ -828,6 +838,7 @@ export async function loadSchedulableAccount(
       concurrency: row.concurrency,
       platform: row.platform,
       type: row.type,
+      rateMultiplier: row.rateMultiplier,
       priority: row.priority,
       groupId: row.groupId,
     };
@@ -841,6 +852,7 @@ export async function loadSchedulableAccount(
       concurrency: upstreamAccounts.concurrency,
       platform: upstreamAccounts.platform,
       type: upstreamAccounts.type,
+      rateMultiplier: upstreamAccounts.rateMultiplier,
       priority: upstreamAccounts.priority,
       userId: upstreamAccounts.userId,
     })
@@ -860,6 +872,7 @@ export async function loadSchedulableAccount(
     concurrency: row.concurrency,
     platform: row.platform,
     type: row.type,
+    rateMultiplier: row.rateMultiplier,
     priority: row.priority,
     groupId: null,
   };

@@ -3,6 +3,22 @@ import { can } from "../../../src/rbac/check";
 import type { UserPermissions } from "../../../src/rbac/permissions";
 import type { Action, Role, ScopeType } from "../../../src/rbac/actions";
 
+const deptOrgById = new Map([
+  ["dept-1a", "org-1"],
+  ["dept-1b", "org-1"],
+  ["dept-2a", "org-2"],
+]);
+const teamOrgById = new Map([
+  ["team-1a", "org-1"],
+  ["team-1b", "org-1"],
+  ["team-2a", "org-2"],
+]);
+const teamDeptById = new Map<string, string | null>([
+  ["team-1a", "dept-1a"],
+  ["team-1b", "dept-1b"],
+  ["team-2a", "dept-2a"],
+]);
+
 function makePerm(
   rows: ReadonlyArray<{
     role: Role;
@@ -51,6 +67,9 @@ function makePerm(
     coveredOrgs: new Set(covered.orgs ?? []),
     coveredDepts: new Set(covered.depts ?? []),
     coveredTeams: new Set(covered.teams ?? []),
+    deptOrgById,
+    teamOrgById,
+    teamDeptById,
   };
 }
 
@@ -91,6 +110,28 @@ const orgAdminOrg2 = makePerm(
 const deptMgrDept1b = makePerm(
   [{ role: "dept_manager", scopeType: "department", scopeId: "dept-1b" }],
   { depts: ["dept-1b"], teams: ["team-1b"] },
+);
+const org1AdminTeam2Member = makePerm(
+  [
+    { role: "org_admin", scopeType: "organization", scopeId: "org-1" },
+    { role: "member", scopeType: "team", scopeId: "team-2a" },
+  ],
+  {
+    orgs: ["org-1", "org-2"],
+    depts: ["dept-1a", "dept-1b"],
+    teams: ["team-1a", "team-1b", "team-2a"],
+  },
+);
+const org2AdminDept1aManager = makePerm(
+  [
+    { role: "org_admin", scopeType: "organization", scopeId: "org-2" },
+    { role: "dept_manager", scopeType: "department", scopeId: "dept-1a" },
+  ],
+  {
+    orgs: ["org-1", "org-2"],
+    depts: ["dept-1a", "dept-2a"],
+    teams: ["team-1a", "team-2a"],
+  },
 );
 
 const cases: Case[] = [
@@ -501,6 +542,60 @@ const crossBoundaryCases: Case[] = [
     },
     false,
   ],
+  [
+    "org_admin of org-1 plus member on org-2 team cannot update org-2 team",
+    org1AdminTeam2Member,
+    { type: "team.update", teamId: "team-2a" },
+    false,
+  ],
+  [
+    "org_admin of org-1 plus member on org-2 team cannot invite into org-2 team",
+    org1AdminTeam2Member,
+    { type: "user.invite", orgId: "org-2", teamId: "team-2a" },
+    false,
+  ],
+  [
+    "team_manager cannot invite using a mismatched orgId",
+    teamMgrTeam1a,
+    { type: "user.invite", orgId: "org-2", teamId: "team-1a" },
+    false,
+  ],
+  [
+    "team_manager cannot read team usage using a mismatched orgId",
+    teamMgrTeam1a,
+    { type: "usage.read_team", orgId: "org-2", teamId: "team-1a" },
+    false,
+  ],
+  [
+    "team_manager cannot read team reports using a mismatched orgId",
+    teamMgrTeam1a,
+    { type: "report.read_team", orgId: "org-2", teamId: "team-1a" },
+    false,
+  ],
+  [
+    "org_admin of org-1 plus member on org-2 team cannot grant member on org-2 team",
+    org1AdminTeam2Member,
+    {
+      type: "role.grant",
+      targetUserId: "u",
+      role: "member",
+      scopeType: "team",
+      scopeId: "team-2a",
+    },
+    false,
+  ],
+  [
+    "org_admin of org-2 does not elevate dept_manager rank on org-1 team",
+    org2AdminDept1aManager,
+    {
+      type: "role.grant",
+      targetUserId: "u",
+      role: "dept_manager",
+      scopeType: "team",
+      scopeId: "team-1a",
+    },
+    false,
+  ],
 ];
 
 const extraCoverageCases: Case[] = [
@@ -528,6 +623,12 @@ const extraCoverageCases: Case[] = [
     "dept_manager cannot invite at another dept",
     deptMgrDept1a,
     { type: "user.invite", orgId: "org-1", deptId: "dept-1b" },
+    false,
+  ],
+  [
+    "dept_manager cannot invite with mismatched org and dept",
+    deptMgrDept1a,
+    { type: "user.invite", orgId: "org-2", deptId: "dept-1a" },
     false,
   ],
   // role.revoke — requires any assignment to be truthy

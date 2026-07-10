@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { parseServerEnv, type ServerEnv } from "@caliber/config";
 import { LOG_REDACT_PATHS } from "@caliber/gateway-core";
@@ -143,6 +144,8 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
       redact: { paths: [...LOG_REDACT_PATHS], censor: "[REDACTED]" },
     },
     bodyLimit: opts.env.GATEWAY_MAX_BODY_BYTES,
+    requestIdHeader: false,
+    genReqId: () => randomUUID(),
     // Trust X-Forwarded-For only from configured proxy CIDRs. Without this
     // (or with the prior `false` default) Fastify uses the socket peer IP,
     // which is the reverse proxy itself — breaking per-key IP allow/deny

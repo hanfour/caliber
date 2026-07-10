@@ -15,7 +15,7 @@
  * entries never collide. invalidate(orgId) still prefix-matches `${orgId}::`.
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import type { Database } from "@caliber/db";
 import { organizations, rubrics } from "@caliber/db";
 import { rubricSchema, type Rubric } from "@caliber/evaluator";
@@ -164,6 +164,7 @@ async function doResolve(
           eq(rubrics.id, org.rubricId),
           isNull(rubrics.deletedAt),
           isNull(rubrics.apiKeyId),
+          or(isNull(rubrics.orgId), eq(rubrics.orgId, orgId)),
         ),
       )
       .limit(1)

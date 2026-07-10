@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { organizations, auditLogs, requestBodies, rubrics } from "@caliber/db";
 import { can } from "@caliber/auth";
 import { router } from "../procedures.js";
@@ -137,15 +137,29 @@ export const contentCaptureRouter = router({
       // blocks the second writer of organizations.rubricId at the API layer.
       if (input.patch.rubricId != null) {
         const rubricRow = await ctx.db
-          .select({ apiKeyId: rubrics.apiKeyId })
+          .select({ orgId: rubrics.orgId, apiKeyId: rubrics.apiKeyId })
           .from(rubrics)
-          .where(eq(rubrics.id, input.patch.rubricId))
+          .where(
+            and(
+              eq(rubrics.id, input.patch.rubricId),
+              isNull(rubrics.deletedAt),
+            ),
+          )
           .limit(1)
           .then((r) => r[0]);
-        if (rubricRow?.apiKeyId != null) {
+        if (!rubricRow) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        if (rubricRow.apiKeyId != null) {
           throw new TRPCError({
             code: "FORBIDDEN",
             message: "rubric is key-scoped",
+          });
+        }
+        if (rubricRow.orgId !== null && rubricRow.orgId !== input.orgId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "rubric belongs to another organization",
           });
         }
       }

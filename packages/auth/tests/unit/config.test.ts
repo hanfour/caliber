@@ -25,8 +25,8 @@ const migrationsFolder = path.resolve(
   "drizzle",
 );
 
-let container: StartedPostgreSqlContainer;
-let pool: pg.Pool;
+let container: StartedPostgreSqlContainer | undefined;
+let pool: pg.Pool | undefined;
 let db: ReturnType<typeof drizzle>;
 
 const env: AuthEnv = {
@@ -49,8 +49,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.end();
-  await container.stop();
+  if (pool) await pool.end();
+  if (container) await container.stop();
 });
 
 // Ensure a clean slate between cases — other cases' inserts should not leak.

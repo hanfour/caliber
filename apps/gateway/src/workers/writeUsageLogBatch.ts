@@ -17,7 +17,7 @@
  *      fallback racing a worker that already persisted the row) are
  *      silently dropped rather than aborting the txn — any new rows in the
  *      same batch still commit cleanly.
- *   2. One UPDATE per distinct api_key_id, summing the totalCost ONLY over
+ *   2. One UPDATE per distinct api_key_id, summing the actualCostUsd ONLY over
  *      rows that were actually inserted, against `api_keys.quota_used_usd`
  *      and bumping last_used_at / updated_at.  Duplicates contribute zero
  *      to the quota bump, so a single request_id can never charge quota
@@ -47,7 +47,7 @@ export async function writeUsageLogBatch(
 
   await db.transaction(async (tx) => {
     // 1. Multi-row INSERT into usage_logs with ON CONFLICT(request_id) DO
-    //    NOTHING RETURNING request_id.  Duplicate retries (e.g., BullMQ
+    //    NOTHING RETURNING quota inputs. Duplicate retries (e.g., BullMQ
     //    missed ACK after a prior commit) silently dedup. The `returning`
     //    clause yields only newly-inserted rows so quota_used_usd is
     //    bumped exactly once per request_id regardless of how many times
@@ -96,23 +96,19 @@ export async function writeUsageLogBatch(
         })),
       )
       .onConflictDoNothing({ target: usageLogs.requestId })
-      .returning({ requestId: usageLogs.requestId });
+      .returning({
+        requestId: usageLogs.requestId,
+        apiKeyId: usageLogs.apiKeyId,
+        actualCostUsd: usageLogs.actualCostUsd,
+      });
 
-    // 2. Group quota updates ONLY over payloads whose request_id actually
-    //    landed in usage_logs.  A duplicate (dropped by ON CONFLICT) must
-    //    NOT bump quota_used_usd a second time — the original insert
-    //    already bumped it in a prior successful batch.
-    const insertedIds = new Set(inserted.map((r) => r.requestId));
-    const actuallyInserted = payloads.filter((p) =>
-      insertedIds.has(p.requestId),
-    );
-
-    // Whole batch was duplicates → DB state is already correct, no quota
+    // 2. Whole batch was duplicates → DB state is already correct, no quota
     // update needed.  Commit cleanly.
-    if (actuallyInserted.length === 0) return;
+    if (inserted.length === 0) return;
 
-    // 3. One UPDATE per distinct api_key_id with the SUMmed totalCost.
-    const grouped = groupTotalCostByApiKey(actuallyInserted);
+    // 3. One UPDATE per distinct api_key_id with the SUMmed actualCostUsd,
+    //    based on rows Postgres confirms were actually inserted.
+    const grouped = groupActualCostByApiKey(inserted);
     for (const [apiKeyId, totals] of grouped.entries()) {
       const sumExpr = buildNumericSumExpr(totals);
       await tx
@@ -131,15 +127,15 @@ export async function writeUsageLogBatch(
 
 /**
  * Group payloads by `apiKeyId`, returning a Map of api_key_id → list of
- * `totalCost` strings to add.  Map iteration order is insertion order, so
+ * `actualCostUsd` strings to add.  Map iteration order is insertion order, so
  * the resulting UPDATEs are deterministic per batch.
  */
-export function groupTotalCostByApiKey(
-  payloads: UsageLogJobPayload[],
+export function groupActualCostByApiKey(
+  payloads: Array<Pick<UsageLogJobPayload, "apiKeyId" | "actualCostUsd">>,
 ): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const p of payloads) {
-    out.set(p.apiKeyId, [...(out.get(p.apiKeyId) ?? []), p.totalCost]);
+    out.set(p.apiKeyId, [...(out.get(p.apiKeyId) ?? []), p.actualCostUsd]);
   }
   return out;
 }
@@ -154,7 +150,7 @@ export function groupTotalCostByApiKey(
  */
 export function buildNumericSumExpr(values: string[]): SQL<unknown> {
   if (values.length === 0) {
-    // Defensive — shouldn't happen because groupTotalCostByApiKey only
+    // Defensive — shouldn't happen because groupActualCostByApiKey only
     // produces non-empty arrays — but a 0::numeric add is a safe no-op.
     return sql`0::numeric`;
   }

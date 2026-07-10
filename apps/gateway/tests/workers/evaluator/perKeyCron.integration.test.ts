@@ -2,9 +2,8 @@
  * Integration tests for Task 4: per-key cron fan-out (PR4).
  *
  * Covers:
- *   (a) jobId is 3-part when apiKeyId absent (byte-identical to existing
- *       format) and 4-part when set; per-key and per-person jobIds NEVER
- *       collide for the same userId + periodStart + periodType.
+ *   (a) jobId is org-scoped and grain-prefixed; per-key and per-person jobIds
+ *       NEVER collide for the same orgId + userId + periodStart + periodType.
  *   (b) with enableProjectEvaluation=true, cron enqueues one job per
  *       opted-in key WITH traffic in the window; idle, revoked, and
  *       non-opted keys are skipped.
@@ -116,7 +115,12 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
       triggeredByUser: null,
       // apiKeyId intentionally absent
     });
-    const expected = buildEvaluatorJobId({ userId: USER_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE });
+    const expected = buildEvaluatorJobId({
+      orgId: ORG_ID,
+      userId: USER_A,
+      periodStart: PERIOD_START,
+      periodType: PERIOD_TYPE,
+    });
     expect(calls[0]!.jobId).toBe(expected);
   });
 
@@ -133,7 +137,13 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
       apiKeyId: KEY_A,
       keyNameSnapshot: "my-project-key",
     });
-    const expected = buildEvaluatorJobId({ userId: USER_A, apiKeyId: KEY_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE });
+    const expected = buildEvaluatorJobId({
+      orgId: ORG_ID,
+      userId: USER_A,
+      apiKeyId: KEY_A,
+      periodStart: PERIOD_START,
+      periodType: PERIOD_TYPE,
+    });
     expect(calls[0]!.jobId).toBe(expected);
   });
 
@@ -168,8 +178,23 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
 
     expect(personJobId).not.toBe(keyJobId);
     // Verify each equals its canonical buildEvaluatorJobId form (colon-free)
-    expect(personJobId).toBe(buildEvaluatorJobId({ userId: USER_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE }));
-    expect(keyJobId).toBe(buildEvaluatorJobId({ userId: USER_A, apiKeyId: KEY_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE }));
+    expect(personJobId).toBe(
+      buildEvaluatorJobId({
+        orgId: ORG_ID,
+        userId: USER_A,
+        periodStart: PERIOD_START,
+        periodType: PERIOD_TYPE,
+      }),
+    );
+    expect(keyJobId).toBe(
+      buildEvaluatorJobId({
+        orgId: ORG_ID,
+        userId: USER_A,
+        apiKeyId: KEY_A,
+        periodStart: PERIOD_START,
+        periodType: PERIOD_TYPE,
+      }),
+    );
   });
 
   it("per-person jobId is deterministic and colon-free (buildEvaluatorJobId canonical form)", async () => {
@@ -185,7 +210,12 @@ describe("(a) enqueueEvaluator — jobId collision safety", () => {
     });
     // Must match the colon-free buildEvaluatorJobId canonical form
     expect(calls[0]!.jobId).toBe(
-      buildEvaluatorJobId({ userId: USER_A, periodStart: PERIOD_START, periodType: PERIOD_TYPE }),
+      buildEvaluatorJobId({
+        orgId: ORG_ID,
+        userId: USER_A,
+        periodStart: PERIOD_START,
+        periodType: PERIOD_TYPE,
+      }),
     );
   });
 });
@@ -420,7 +450,13 @@ describe("(b) enqueueDailyEvaluatorJobs — per-key enumeration", () => {
     expect(keyJobs[0]!.payload.periodType).toBe("daily");
 
     // jobId is deterministic colon-free form via buildEvaluatorJobId
-    const expectedKeyJobId = buildEvaluatorJobId({ userId: userId1, apiKeyId: optedInWithTraffic, periodStart: YESTERDAY_00.toISOString(), periodType: "daily" });
+    const expectedKeyJobId = buildEvaluatorJobId({
+      orgId: captureOrgId,
+      userId: userId1,
+      apiKeyId: optedInWithTraffic,
+      periodStart: YESTERDAY_00.toISOString(),
+      periodType: "daily",
+    });
     expect(keyJobs[0]!.jobId).toBe(expectedKeyJobId);
   });
 

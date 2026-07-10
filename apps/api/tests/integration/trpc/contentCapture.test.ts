@@ -67,6 +67,27 @@ function uniqRequestId(): string {
   return `req-cc-test-${Date.now()}-${seedCounter}`;
 }
 
+function validRubricDefinition(): Record<string, unknown> {
+  return {
+    name: "T",
+    description: "d",
+    version: "1.0.0",
+    locale: "en",
+    sections: [
+      {
+        id: "s1",
+        name: "S1",
+        weight: "100%",
+        standard: { score: 80, label: "Std", criteria: ["c"] },
+        superior: { score: 100, label: "Sup", criteria: ["c"] },
+        signals: [
+          { type: "threshold", id: "x", metric: "total_cost", lte: 10 },
+        ],
+      },
+    ],
+  };
+}
+
 async function seedApiKey(
   db: Database,
   opts: { userId: string; orgId: string },
@@ -511,24 +532,7 @@ describe("contentCapture router", () => {
         apiKeyId: keyId,
         name: "Key Rubric for CC test",
         version: "1.0.0",
-        definition: {
-          name: "T",
-          description: "d",
-          version: "1.0.0",
-          locale: "en",
-          sections: [
-            {
-              id: "s1",
-              name: "S1",
-              weight: "100%",
-              standard: { score: 80, label: "Std", criteria: ["c"] },
-              superior: { score: 100, label: "Sup", criteria: ["c"] },
-              signals: [
-                { type: "threshold", id: "x", metric: "total_cost", lte: 10 },
-              ],
-            },
-          ],
-        } as unknown as Record<string, unknown>,
+        definition: validRubricDefinition(),
         isDefault: false,
         createdBy: admin.id,
       })
@@ -541,6 +545,66 @@ describe("contentCapture router", () => {
         patch: { rubricId: keyRubricId },
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("setSettings: rejects another org's rubricId with FORBIDDEN", async () => {
+    const orgA = await makeOrg(t.db);
+    const orgB = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: orgA.id,
+      orgId: orgA.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+    const [rubricRow] = await t.db
+      .insert(rubrics)
+      .values({
+        orgId: orgB.id,
+        name: "Other Org Rubric for CC test",
+        version: "1.0.0",
+        definition: validRubricDefinition(),
+        isDefault: false,
+        createdBy: admin.id,
+      })
+      .returning({ id: rubrics.id });
+
+    await expect(
+      caller.contentCapture.setSettings({
+        orgId: orgA.id,
+        patch: { rubricId: rubricRow!.id },
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("setSettings: rejects a soft-deleted rubricId with NOT_FOUND", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+    const [rubricRow] = await t.db
+      .insert(rubrics)
+      .values({
+        orgId: org.id,
+        name: "Deleted Rubric for CC test",
+        version: "1.0.0",
+        definition: validRubricDefinition(),
+        isDefault: false,
+        createdBy: admin.id,
+        deletedAt: new Date(),
+      })
+      .returning({ id: rubrics.id });
+
+    await expect(
+      caller.contentCapture.setSettings({
+        orgId: org.id,
+        patch: { rubricId: rubricRow!.id },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("wipeExistingCaptures rejects non-org-admin with FORBIDDEN", async () => {

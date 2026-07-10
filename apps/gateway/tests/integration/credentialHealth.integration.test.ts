@@ -152,9 +152,8 @@ afterAll(
 beforeEach(async () => {
   receivedTokens = [];
   forceStatus = new Map<string, number>();
-  // request_id is restarted at `req-1` per built app; usage upsert is
-  // ON CONFLICT(request_id) DO NOTHING → clear the table between tests so each
-  // test's usage assertions are independent.
+  // Usage upsert is ON CONFLICT(request_id) DO NOTHING; clear the table between
+  // tests so each test's usage assertions are independent.
   await db.delete(usageLogs);
 });
 

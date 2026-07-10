@@ -6,7 +6,7 @@
  *   1. Opens a Drizzle transaction.
  *   2. Performs a single multi-row INSERT into `usage_logs`.
  *   3. Issues ONE UPDATE per distinct `api_key_id`, summing the batch's
- *      `total_cost` for that key and bumping `last_used_at`.
+ *      `actual_cost_usd` for that key and bumping `last_used_at`.
  *   4. Commits.
  *
  * The cost decimals are summed in JS as plain string concatenation into a SQL

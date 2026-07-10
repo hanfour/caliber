@@ -38,6 +38,7 @@ function makeReq(
     headers: Record<string, string | undefined>;
     ip: string;
     teamId: string | null;
+    gwGroupContext: Record<string, unknown> | null;
   }> = {},
 ): FastifyRequest {
   // Minimum viable FastifyRequest for the helper. Everything the helper
@@ -57,6 +58,7 @@ function makeReq(
     },
     gwUser: { id: VALID_UUID_USER, email: "test@example.com" },
     gwOrg: { id: VALID_UUID_ORG, slug: "test-org" },
+    gwGroupContext: overrides.gwGroupContext ?? null,
     log: {
       debug: vi.fn(),
       warn: vi.fn(),
@@ -69,13 +71,14 @@ function makeReq(
 function makeApp(
   overrides: Partial<{
     usageLogQueue: FastifyInstance["usageLogQueue"] | undefined;
+    db: unknown;
   }> = {},
 ): FastifyInstance {
   const pricingMissInc = vi.fn();
   const persistLostInc = vi.fn();
   const upstreamDurationObserve = vi.fn();
   const app = {
-    db: { __marker: "fake-db" },
+    db: overrides.db ?? { __marker: "fake-db" },
     usageLogQueue:
       "usageLogQueue" in overrides ? overrides.usageLogQueue : undefined,
     gwMetrics: {
@@ -85,6 +88,21 @@ function makeApp(
     },
   };
   return app as unknown as FastifyInstance;
+}
+
+function fakeAccountBillingDb(row: {
+  type: string;
+  rateMultiplier: string;
+}): unknown {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn().mockResolvedValue([row]),
+        })),
+      })),
+    })),
+  };
 }
 
 // Cache a pricing map that contains a single known model so we can exercise
@@ -434,6 +452,87 @@ describe("emitUsageLog", () => {
     );
     // pricingMissTotal.inc should NOT have been called for a known model.
     expect(app.gwMetrics.pricingMissTotal.inc).not.toHaveBeenCalled();
+  });
+
+  it("10a. emit path defaults group/account multipliers from request context and DB", async () => {
+    const addFn = vi.fn().mockResolvedValue({ id: "stub" });
+    const groupId = "66666666-6666-4666-8666-666666666666";
+    const app = makeApp({
+      db: fakeAccountBillingDb({
+        type: "api_key",
+        rateMultiplier: "2.0000",
+      }),
+      usageLogQueue: {
+        add: addFn,
+      } as unknown as FastifyInstance["usageLogQueue"],
+    });
+    const req = makeReq({
+      id: "req-emit-mult-defaults",
+      gwGroupContext: {
+        groupId,
+        rateMultiplier: 1.5,
+        isLegacy: false,
+        isByok: false,
+      },
+    });
+
+    await emitUsageLog({
+      app,
+      req,
+      requestedModel: "claude-3-5-haiku-20241022",
+      accountId: VALID_UUID_ACCT,
+      upstreamResponse: {
+        model: "claude-3-5-haiku-20241022",
+        usage: { input_tokens: 1000, output_tokens: 500 },
+      },
+      platform: "anthropic",
+      surface: "messages",
+      statusCode: 200,
+      durationMs: 50,
+    });
+
+    const payload = addFn.mock.calls[0]![1] as UsageLogJobPayload;
+    expect(payload.totalCost).toBe("0.0028000000");
+    expect(payload.actualCostUsd).toBe("0.0084000000");
+    expect(payload.groupId).toBe(groupId);
+    expect(payload.rateMultiplier).toBe("1.5000");
+    expect(payload.accountRateMultiplier).toBe("2.0000");
+  });
+
+  it("10b. emit path uses scheduled account billing metadata without DB fallback", async () => {
+    const addFn = vi.fn().mockResolvedValue({ id: "stub" });
+    const select = vi.fn(() => {
+      throw new Error("account metadata fallback should not run");
+    });
+    const app = makeApp({
+      db: { select },
+      usageLogQueue: {
+        add: addFn,
+      } as unknown as FastifyInstance["usageLogQueue"],
+    });
+    const req = makeReq({ id: "req-emit-scheduled-account-metadata" });
+
+    await emitUsageLog({
+      app,
+      req,
+      requestedModel: "claude-3-5-haiku-20241022",
+      accountId: VALID_UUID_ACCT,
+      upstreamResponse: {
+        model: "claude-3-5-haiku-20241022",
+        usage: { input_tokens: 1000, output_tokens: 500 },
+      },
+      platform: "anthropic",
+      surface: "messages",
+      statusCode: 200,
+      durationMs: 50,
+      accountRateMultiplier: "2.0000",
+      accountType: "apikey",
+    });
+
+    expect(select).not.toHaveBeenCalled();
+    const payload = addFn.mock.calls[0]![1] as UsageLogJobPayload;
+    expect(payload.actualCostUsd).toBe("0.0056000000");
+    expect(payload.accountRateMultiplier).toBe("2.0000");
   });
 
   it("11. test mode — no usageLogQueue, no enqueue + debug log", async () => {

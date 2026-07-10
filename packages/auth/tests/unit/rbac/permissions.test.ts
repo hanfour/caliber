@@ -25,8 +25,8 @@ const migrationsFolder = path.resolve(
   "drizzle",
 );
 
-let container: StartedPostgreSqlContainer;
-let pool: pg.Pool;
+let container: StartedPostgreSqlContainer | undefined;
+let pool: pg.Pool | undefined;
 let db: ReturnType<typeof drizzle>;
 
 beforeAll(async () => {
@@ -38,8 +38,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.end();
-  await container.stop();
+  if (pool) await pool.end();
+  if (container) await container.stop();
 });
 
 describe("resolvePermissions", () => {
@@ -71,6 +71,9 @@ describe("resolvePermissions", () => {
     expect(perm.coveredOrgs.has(org!.id)).toBe(true);
     expect(perm.coveredDepts.has(dept!.id)).toBe(true);
     expect(perm.coveredTeams.has(team!.id)).toBe(true);
+    expect(perm.deptOrgById.get(dept!.id)).toBe(org!.id);
+    expect(perm.teamOrgById.get(team!.id)).toBe(org!.id);
+    expect(perm.teamDeptById.get(team!.id)).toBe(dept!.id);
     expect(can(perm, { type: "team.update", teamId: team!.id })).toBe(true);
   });
 
@@ -107,6 +110,9 @@ describe("resolvePermissions", () => {
     expect(perm.coveredOrgs.has(org!.id)).toBe(true);
     expect(perm.coveredDepts.has(dept!.id)).toBe(true);
     expect(perm.coveredTeams.has(team!.id)).toBe(true);
+    expect(perm.deptOrgById.get(dept!.id)).toBe(org!.id);
+    expect(perm.teamOrgById.get(team!.id)).toBe(org!.id);
+    expect(perm.teamDeptById.get(team!.id)).toBe(dept!.id);
     expect(can(perm, { type: "team.update", teamId: team!.id })).toBe(true);
   });
 
@@ -243,5 +249,53 @@ describe("resolvePermissions", () => {
     expect(perm.coveredTeams.has(team2!.id)).toBe(true);
     expect(can(perm, { type: "team.update", teamId: team2!.id })).toBe(true);
     expect(can(perm, { type: "org.update", orgId: org2!.id })).toBe(false);
+  });
+
+  it("does not inherit org_admin rank onto a covered team in another org", async () => {
+    const [user] = await db
+      .insert(users)
+      .values({ email: "mixed-cross-org@x.com" })
+      .returning();
+    const [org1] = await db
+      .insert(organizations)
+      .values({ slug: "o-mixed-1", name: "Mixed 1" })
+      .returning();
+    const [org2] = await db
+      .insert(organizations)
+      .values({ slug: "o-mixed-2", name: "Mixed 2" })
+      .returning();
+    const [team2] = await db
+      .insert(teams)
+      .values({ orgId: org2!.id, name: "T2", slug: "t-mixed-2" })
+      .returning();
+
+    await db.insert(roleAssignments).values([
+      {
+        userId: user!.id,
+        role: "org_admin",
+        scopeType: "organization",
+        scopeId: org1!.id,
+      },
+      {
+        userId: user!.id,
+        role: "member",
+        scopeType: "team",
+        scopeId: team2!.id,
+      },
+    ]);
+
+    const perm = await resolvePermissions(db as never, user!.id);
+    expect(perm.coveredTeams.has(team2!.id)).toBe(true);
+    expect(perm.teamOrgById.get(team2!.id)).toBe(org2!.id);
+    expect(can(perm, { type: "team.update", teamId: team2!.id })).toBe(false);
+    expect(
+      can(perm, {
+        type: "role.grant",
+        targetUserId: "target",
+        role: "member",
+        scopeType: "team",
+        scopeId: team2!.id,
+      }),
+    ).toBe(false);
   });
 });

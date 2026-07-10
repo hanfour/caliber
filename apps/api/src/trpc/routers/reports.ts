@@ -678,6 +678,7 @@ export const reportsRouter = router({
           // which also powers apps/gateway enqueueEvaluator. Same inputs →
           // same id on both sides → cron and admin-rerun dedup correctly.
           const jobId = buildEvaluatorJobId({
+            orgId: input.orgId,
             userId: target.userId,
             apiKeyId: target.apiKeyId,
             periodStart: input.periodStart,

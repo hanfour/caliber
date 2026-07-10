@@ -610,6 +610,7 @@
     },
     "editDialog": {
       "title": "Edit upstream credential",
+      "description": "Update routing settings for \"{name}\".",
       "nameLabel": "Name",
       "schedulableLabel": "Enabled (available for routing)",
       "priorityLabel": "Priority (lower is preferred)",

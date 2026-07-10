@@ -121,6 +121,7 @@ function makePayload(
   apiKeyId: string,
   totalCost: string,
   requestId: string,
+  actualCostUsd = totalCost,
 ): UsageLogJobPayload {
   return makeUsageLogJobPayload({
     requestId,
@@ -131,6 +132,7 @@ function makePayload(
     inputCost: "0.0010000000",
     outputCost: "0.0020000000",
     totalCost,
+    actualCostUsd,
   });
 }
 
@@ -148,6 +150,7 @@ describe("writeUsageLogBatch — standalone helper", () => {
       .select({
         requestId: usageLogs.requestId,
         totalCost: usageLogs.totalCost,
+        actualCostUsd: usageLogs.actualCostUsd,
         apiKeyId: usageLogs.apiKeyId,
       })
       .from(usageLogs)
@@ -155,6 +158,7 @@ describe("writeUsageLogBatch — standalone helper", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.apiKeyId).toBe(key.id);
     expect(Number(rows[0]!.totalCost)).toBeCloseTo(0.042, 8);
+    expect(Number(rows[0]!.actualCostUsd)).toBeCloseTo(0.042, 8);
 
     // Quota bumped.
     const [keyRow] = await db
@@ -164,6 +168,34 @@ describe("writeUsageLogBatch — standalone helper", () => {
     expect(Number(keyRow!.used)).toBeCloseTo(0.042, 8);
     // last_used_at was set by the UPDATE (NOW()).
     expect(keyRow!.lastUsedAt).not.toBeNull();
+  });
+
+  it("bumps quota_used_usd from actualCostUsd, not raw totalCost", async () => {
+    const key = await seedApiKey("k-actual");
+    const payload = makePayload(
+      key.id,
+      "1.0000000000",
+      "req-actual-1",
+      "2.5000000000",
+    );
+
+    await writeUsageLogBatch(db, [payload]);
+
+    const [usageRow] = await db
+      .select({
+        totalCost: usageLogs.totalCost,
+        actualCostUsd: usageLogs.actualCostUsd,
+      })
+      .from(usageLogs)
+      .where(eq(usageLogs.requestId, "req-actual-1"));
+    expect(Number(usageRow!.totalCost)).toBeCloseTo(1, 8);
+    expect(Number(usageRow!.actualCostUsd)).toBeCloseTo(2.5, 8);
+
+    const [keyRow] = await db
+      .select({ used: apiKeys.quotaUsedUsd })
+      .from(apiKeys)
+      .where(eq(apiKeys.id, key.id));
+    expect(Number(keyRow!.used)).toBeCloseTo(2.5, 8);
   });
 
   it("is a no-op for an empty payload list", async () => {
@@ -200,6 +232,49 @@ describe("writeUsageLogBatch — standalone helper", () => {
       .from(apiKeys)
       .where(eq(apiKeys.id, key.id));
     expect(Number(keyRow!.used)).toBeCloseTo(0.01, 8);
+  });
+
+  it("same-batch duplicate request_id only bumps quota for the row that actually inserted", async () => {
+    const keyA = await seedApiKey("k-same-batch-a");
+    const keyB = await seedApiKey("k-same-batch-b");
+    const requestId = "req-same-batch-dup";
+    const first = makePayload(
+      keyA.id,
+      "1.0000000000",
+      requestId,
+      "2.5000000000",
+    );
+    const duplicate = makePayload(
+      keyB.id,
+      "9.0000000000",
+      requestId,
+      "9.0000000000",
+    );
+
+    await writeUsageLogBatch(db, [first, duplicate]);
+
+    const rows = await db
+      .select({
+        apiKeyId: usageLogs.apiKeyId,
+        actualCostUsd: usageLogs.actualCostUsd,
+      })
+      .from(usageLogs)
+      .where(eq(usageLogs.requestId, requestId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.apiKeyId).toBe(keyA.id);
+    expect(Number(rows[0]!.actualCostUsd)).toBeCloseTo(2.5, 8);
+
+    const [keyARow] = await db
+      .select({ used: apiKeys.quotaUsedUsd })
+      .from(apiKeys)
+      .where(eq(apiKeys.id, keyA.id));
+    const [keyBRow] = await db
+      .select({ used: apiKeys.quotaUsedUsd })
+      .from(apiKeys)
+      .where(eq(apiKeys.id, keyB.id));
+
+    expect(Number(keyARow!.used)).toBeCloseTo(2.5, 8);
+    expect(Number(keyBRow!.used)).toBeCloseTo(0, 8);
   });
 
   it("mixed batch of new + duplicate request_ids: new rows commit, duplicates are no-ops, quota bumped only for new", async () => {

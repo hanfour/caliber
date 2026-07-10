@@ -30,18 +30,39 @@ function coversTeam(perm: UserPermissions, teamId: string): boolean {
   return perm.coveredTeams.has(teamId);
 }
 
-function hasAnyOrgAdmin(perm: UserPermissions): boolean {
-  for (const [, rolesSet] of perm.rolesByOrg) {
-    if (rolesSet.has("org_admin")) return true;
-  }
-  return false;
+function deptBelongsToOrg(
+  perm: UserPermissions,
+  deptId: string,
+  orgId: string,
+): boolean {
+  return perm.deptOrgById.get(deptId) === orgId;
 }
 
-function hasAnyDeptManager(perm: UserPermissions): boolean {
-  for (const [, rolesSet] of perm.rolesByDept) {
-    if (rolesSet.has("dept_manager")) return true;
-  }
-  return false;
+function teamBelongsToOrg(
+  perm: UserPermissions,
+  teamId: string,
+  orgId: string,
+): boolean {
+  return perm.teamOrgById.get(teamId) === orgId;
+}
+
+function hasOrgAdminForDept(perm: UserPermissions, deptId: string): boolean {
+  const orgId = perm.deptOrgById.get(deptId);
+  return orgId !== undefined && rolesAt(perm, "organization", orgId).has("org_admin");
+}
+
+function hasOrgAdminForTeam(perm: UserPermissions, teamId: string): boolean {
+  const orgId = perm.teamOrgById.get(teamId);
+  return orgId !== undefined && rolesAt(perm, "organization", orgId).has("org_admin");
+}
+
+function hasDeptManagerForTeam(perm: UserPermissions, teamId: string): boolean {
+  const deptId = perm.teamDeptById.get(teamId);
+  return (
+    deptId !== undefined &&
+    deptId !== null &&
+    rolesAt(perm, "department", deptId).has("dept_manager")
+  );
 }
 
 function maxRoleForOrg(perm: UserPermissions, orgId: string): number {
@@ -60,8 +81,9 @@ function maxRoleForTeam(perm: UserPermissions, teamId: string): number {
   for (const r of rolesAt(perm, "team", teamId))
     max = Math.max(max, ROLE_RANK[r]);
   if (coversTeam(perm, teamId)) {
-    if (hasAnyOrgAdmin(perm)) max = Math.max(max, ROLE_RANK.org_admin);
-    if (hasAnyDeptManager(perm)) max = Math.max(max, ROLE_RANK.dept_manager);
+    if (hasOrgAdminForTeam(perm, teamId)) max = Math.max(max, ROLE_RANK.org_admin);
+    if (hasDeptManagerForTeam(perm, teamId))
+      max = Math.max(max, ROLE_RANK.dept_manager);
   }
   return max;
 }
@@ -91,7 +113,7 @@ export function can(perm: UserPermissions, action: Action): boolean {
       if (action.deptId) {
         return (
           rolesAt(perm, "department", action.deptId).has("dept_manager") &&
-          coversOrg(perm, action.orgId) &&
+          deptBelongsToOrg(perm, action.deptId, action.orgId) &&
           coversDept(perm, action.deptId)
         );
       }
@@ -109,12 +131,17 @@ export function can(perm: UserPermissions, action: Action): boolean {
     case "user.invite":
       if (action.teamId) {
         return (
+          teamBelongsToOrg(perm, action.teamId, action.orgId) &&
           coversTeam(perm, action.teamId) &&
           maxRoleForTeam(perm, action.teamId) >= ROLE_RANK.team_manager
         );
       }
       if (action.deptId) {
-        return rolesAt(perm, "department", action.deptId).has("dept_manager");
+        return (
+          deptBelongsToOrg(perm, action.deptId, action.orgId) &&
+          coversDept(perm, action.deptId) &&
+          rolesAt(perm, "department", action.deptId).has("dept_manager")
+        );
       }
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "role.grant": {
@@ -131,24 +158,12 @@ export function can(perm: UserPermissions, action: Action): boolean {
           ? ROLE_RANK.dept_manager
           : 0;
         const inheritedOrg =
-          coversDept(perm, scopeId) && hasAnyOrgAdmin(perm)
+          coversDept(perm, scopeId) && hasOrgAdminForDept(perm, scopeId)
             ? ROLE_RANK.org_admin
             : 0;
         actorRank = Math.max(directDept, inheritedOrg);
       } else if (action.scopeType === "team") {
         actorRank = maxRoleForTeam(perm, scopeId);
-        if (coversTeam(perm, scopeId)) {
-          for (const [, rolesSet] of perm.rolesByOrg) {
-            if (rolesSet.has("org_admin")) {
-              actorRank = Math.max(actorRank, ROLE_RANK.org_admin);
-            }
-          }
-          for (const [, rolesSet] of perm.rolesByDept) {
-            if (rolesSet.has("dept_manager")) {
-              actorRank = Math.max(actorRank, ROLE_RANK.dept_manager);
-            }
-          }
-        }
       }
       return actorRank > 0 && grantRank < actorRank;
     }
@@ -161,7 +176,8 @@ export function can(perm: UserPermissions, action: Action): boolean {
     case "audit.read":
       if (action.deptId) {
         return (
-          rolesAt(perm, "department", action.deptId).has("dept_manager") ||
+          (deptBelongsToOrg(perm, action.deptId, action.orgId) &&
+            rolesAt(perm, "department", action.deptId).has("dept_manager")) ||
           rolesAt(perm, "organization", action.orgId).has("org_admin")
         );
       }
@@ -213,7 +229,8 @@ export function can(perm: UserPermissions, action: Action): boolean {
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "usage.read_team":
       return (
-        rolesAt(perm, "team", action.teamId).has("team_manager") ||
+        (teamBelongsToOrg(perm, action.teamId, action.orgId) &&
+          rolesAt(perm, "team", action.teamId).has("team_manager")) ||
         rolesAt(perm, "organization", action.orgId).has("org_admin")
       );
     case "usage.read_org":
@@ -230,7 +247,8 @@ export function can(perm: UserPermissions, action: Action): boolean {
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "report.read_team":
       return (
-        rolesAt(perm, "team", action.teamId).has("team_manager") ||
+        (teamBelongsToOrg(perm, action.teamId, action.orgId) &&
+          rolesAt(perm, "team", action.teamId).has("team_manager")) ||
         rolesAt(perm, "organization", action.orgId).has("org_admin")
       );
     case "report.read_org":

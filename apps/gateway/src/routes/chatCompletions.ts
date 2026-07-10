@@ -40,6 +40,7 @@ import { callUpstreamResponses } from "../runtime/upstreamCallOpenai.js";
 import { acquireSlot, releaseSlot } from "../redis/slots.js";
 import {
   emitUsageLog,
+  usageAccountTypeFromUpstreamType,
   usageLogInboundPlatformForSurface,
 } from "../runtime/usageLogging.js";
 import { emitBodyCapture } from "../runtime/bodyCapture.js";
@@ -362,6 +363,8 @@ export function makeChatCompletionsAnthropicHandler(
               req,
               requestedModel,
               accountId: account.id,
+              accountRateMultiplier: account.rateMultiplier,
+              accountType: usageAccountTypeFromUpstreamType(account.type),
               upstreamResponse: parsed,
               platform: "openai",
               surface: "chat-completions",
@@ -671,6 +674,8 @@ async function runChatCompletionsStreamingFailover(
             req,
             requestedModel,
             accountId: account.id,
+            accountRateMultiplier: account.rateMultiplier,
+            accountType: usageAccountTypeFromUpstreamType(account.type),
             upstreamResponse,
             platform: "openai",
             surface: "chat-completions",
@@ -1004,6 +1009,8 @@ export function makeChatCompletionsOpenaiHandler(
                 req,
                 requestedModel,
                 accountId: account.id,
+                accountRateMultiplier: account.rateMultiplier,
+                accountType: usageAccountTypeFromUpstreamType(account.type),
                 upstreamResponse: upstreamForLog,
                 platform: usageLogInboundPlatformForSurface("chat-completions"),
                 surface: "chat-completions",
@@ -1293,6 +1300,8 @@ async function runChatCompletionsOpenaiStreamingFailover(
               req,
               requestedModel,
               accountId: account.id,
+              accountRateMultiplier: account.rateMultiplier,
+              accountType: usageAccountTypeFromUpstreamType(account.type),
               upstreamResponse: upstreamForLog,
               platform: usageLogInboundPlatformForSurface("chat-completions"),
               surface: "chat-completions",

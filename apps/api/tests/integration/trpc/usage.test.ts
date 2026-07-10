@@ -102,6 +102,7 @@ interface SeedRow {
   requestedModel?: string;
   upstreamModel?: string;
   totalCost?: string;
+  actualCostUsd?: string;
   inputTokens?: number;
   outputTokens?: number;
   cacheCreationTokens?: number;
@@ -132,6 +133,8 @@ async function insertUsageRow(db: Database, opts: SeedRow) {
     cacheCreationCost: "0",
     cacheReadCost: "0",
     totalCost: opts.totalCost ?? "0.0030000000",
+    actualCostUsd:
+      opts.actualCostUsd ?? opts.totalCost ?? "0.0030000000",
     rateMultiplier: "1.0000",
     accountRateMultiplier: "1.0000",
     stream: false,
@@ -201,6 +204,45 @@ describe("usage router", () => {
     expect(summary.totalCostUsd).toBe("0.7500000000");
     expect(summary.totalInputTokens).toBe(15);
     expect(summary.totalOutputTokens).toBe(27);
+  });
+
+  it("summary/list: public cost fields use actualCostUsd without exposing raw provider cost", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: user.id, orgId: org.id });
+    await insertUsageRow(t.db, {
+      userId: user.id,
+      apiKeyId: key,
+      accountId: account,
+      orgId: org.id,
+      requestedModel: "claude-actual-cost-test",
+      totalCost: "1.0000000000",
+      actualCostUsd: "2.5000000000",
+    });
+
+    const caller = await callerFor({ db: t.db, userId: user.id });
+    const summary = await caller.usage.summary({ scope: { type: "own" } });
+    expect(summary.totalCostUsd).toBe("2.5000000000");
+    expect(summary.byModel[0]!.costUsd).toBe("2.5000000000");
+    expect(summary.byKey[0]!.costUsd).toBe("2.5000000000");
+
+    const page = await caller.usage.list({
+      scope: { type: "own" },
+      page: 1,
+      pageSize: 10,
+    });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.costUsd).toBe("2.5000000000");
+    expect(page.items[0]).not.toHaveProperty("totalCost");
+    expect(page.items[0]).not.toHaveProperty("actualCostUsd");
+    expect(page.items[0]).not.toHaveProperty("inputCost");
+    expect(page.items[0]).not.toHaveProperty("outputCost");
   });
 
   it("summary: scope=org with org_admin returns full org totals", async () => {
@@ -576,7 +618,11 @@ describe("usage router", () => {
     // Drill-down columns surfaced; PII columns intentionally absent.
     const sample = page.items[0]!;
     expect(sample).toHaveProperty("requestId");
-    expect(sample).toHaveProperty("totalCost");
+    expect(sample).toHaveProperty("costUsd");
+    expect(sample).not.toHaveProperty("totalCost");
+    expect(sample).not.toHaveProperty("actualCostUsd");
+    expect(sample).not.toHaveProperty("inputCost");
+    expect(sample).not.toHaveProperty("outputCost");
     expect(sample).toHaveProperty("statusCode");
     expect(sample).not.toHaveProperty("userAgent");
     expect(sample).not.toHaveProperty("ipAddress");

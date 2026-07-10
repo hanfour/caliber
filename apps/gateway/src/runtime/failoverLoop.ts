@@ -307,10 +307,7 @@ export async function runFailover<T>(input: RunFailoverInput<T>): Promise<T> {
 
     for (let retry = 0; retry <= MAX_SAME_ACCOUNT_RETRIES; retry++) {
       try {
-        const result = await input.attempt({
-          id: account.id,
-          concurrency: account.concurrency,
-        });
+        const result = await input.attempt(account);
         scheduler.reportResult(account.id, true);
         // Centralized api_key credential-health clear: a successful attempt
         // return is the SINGLE 2xx choke point (streaming attempts also return

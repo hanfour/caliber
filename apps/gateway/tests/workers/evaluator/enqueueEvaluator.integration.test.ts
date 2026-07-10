@@ -147,6 +147,7 @@ describe("enqueueEvaluator — real BullMQ (colon-jobId regression)", () => {
     const enqueueResult = await enqueueEvaluator(queue, payload);
     // Simulate what reports.ts rerun calls (buildEvaluatorJobId directly)
     const rerunJobId = buildEvaluatorJobId({
+      orgId: ORG_ID,
       userId: USER_ID,
       periodStart: PERIOD_START,
       periodType: "daily",
@@ -171,6 +172,7 @@ describe("enqueueEvaluator — real BullMQ (colon-jobId regression)", () => {
     const enqueueResult = await enqueueEvaluator(queue, payload);
     // Simulate what reports.ts rerun calls (buildEvaluatorJobId directly)
     const rerunJobId = buildEvaluatorJobId({
+      orgId: ORG_ID,
       userId: USER_ID,
       apiKeyId: API_KEY_ID,
       periodStart: PERIOD_START,

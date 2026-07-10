@@ -419,7 +419,7 @@ Prometheus exposition format. Key series:
 | `gw_queue_depth` | gauge | — | BullMQ `wait + active` count for the usage-log queue |
 | `gw_queue_dlq_count` | gauge | — | BullMQ failed-job count |
 | `gw_usage_persist_lost_total` | counter | — | Rows that fell through every persistence path — should stay 0 |
-| `gw_billing_drift_total` | counter | — | Keys where `|quota_used_usd − SUM(usage_logs.total_cost)| > 0.01 USD` detected by the hourly audit |
+| `gw_billing_drift_total` | counter | — | Keys where `|quota_used_usd − SUM(usage_logs.actual_cost_usd)| > 0.01 USD` detected by the hourly audit |
 | `gw_billing_monotonicity_violation_total` | counter | — | Keys where `quota_used_usd` exceeds summed usage by more than 1¢ |
 
 ### Logs
@@ -431,7 +431,7 @@ outcome. Credentials and raw API keys are never logged.
 ### Billing audit
 
 `BillingAudit` runs hourly, Bernoulli-samples ~1% of `api_keys`, and
-compares `quota_used_usd` against `SUM(usage_logs.total_cost)`. Drift >
+compares `quota_used_usd` against `SUM(usage_logs.actual_cost_usd)`. Drift >
 $0.01 bumps the drift counter and logs the offending `apiKeyId`.
 Monotonicity violations (quota charged for rows that don't exist) bump a
 separate counter.
@@ -517,8 +517,9 @@ accompanies the counter bump, then:
 SELECT
   ak.id,
   ak.quota_used_usd                         AS quota_side,
-  COALESCE(SUM(ul.total_cost), 0)           AS usage_side,
-  ak.quota_used_usd - COALESCE(SUM(ul.total_cost), 0) AS drift
+  COALESCE(SUM(ul.actual_cost_usd), 0)      AS usage_side,
+  COALESCE(SUM(ul.total_cost), 0)           AS provider_side,
+  ak.quota_used_usd - COALESCE(SUM(ul.actual_cost_usd), 0) AS drift
 FROM api_keys ak
 LEFT JOIN usage_logs ul ON ul.api_key_id = ak.id
 WHERE ak.id = '<apiKeyId>'

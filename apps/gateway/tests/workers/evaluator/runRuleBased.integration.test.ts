@@ -349,6 +349,66 @@ describe("runRuleBased — integration", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("1b. ignores same-user usage rows from another org", async () => {
+    const [otherOrg] = await db
+      .insert(organizations)
+      .values({
+        slug: `run-rule-based-usage-other-${Date.now()}`,
+        name: "Run Rule Based Usage Other Org",
+      })
+      .returning({ id: organizations.id });
+    const [otherAccount] = await db
+      .insert(upstreamAccounts)
+      .values({
+        orgId: otherOrg!.id,
+        name: "test-upstream-other",
+        platform: "anthropic",
+        type: "oauth",
+      })
+      .returning({ id: upstreamAccounts.id });
+    const [otherKey] = await db
+      .insert(apiKeys)
+      .values({
+        userId,
+        orgId: otherOrg!.id,
+        keyHash: `hash-run-rule-other-${Math.random().toString(36).slice(2)}`,
+        keyPrefix: "rrb-other",
+        name: "run-rule-based-other-key",
+      })
+      .returning({ id: apiKeys.id });
+
+    await db.insert(usageLogs).values({
+      requestId: "req-rule-other-org-001",
+      userId,
+      apiKeyId: otherKey!.id,
+      accountId: otherAccount!.id,
+      orgId: otherOrg!.id,
+      teamId: null,
+      requestedModel: "claude-sonnet-4-5",
+      upstreamModel: "claude-sonnet-4-5-20250101",
+      platform: "anthropic",
+      surface: "messages",
+      stream: false,
+      inputTokens: 100,
+      outputTokens: 200,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      inputCost: "0",
+      outputCost: "0",
+      cacheCreationCost: "0",
+      cacheReadCost: "0",
+      totalCost: "1.0000000000",
+      statusCode: 200,
+      durationMs: 1000,
+      upstreamRetries: 0,
+      createdAt: new Date("2024-01-01T10:00:00.000Z"),
+    });
+
+    const result = await runRuleBased(makeRuleBasedInput());
+    expect(result.skipped).toBe(true);
+    expect(result.report.dataQuality.totalRequests).toBe(0);
+  });
+
   it("#257: transcript-only user (zero usage_logs) is scored, not skipped, with source_breakdown", async () => {
     await seedTranscriptTurn();
 
@@ -475,6 +535,50 @@ describe("runRuleBased — integration", () => {
       .from(evaluationReports)
       .where(eq(evaluationReports.userId, userId));
     expect(rows[0]!.triggeredBy).toBe("admin_rerun");
+  });
+
+  it("3b. same user and period can have separate reports in different orgs", async () => {
+    const requestId = "req-rule-cross-org-001";
+    await seedUsageLog(requestId);
+    const result = await runRuleBased(makeRuleBasedInput());
+    expect(result.skipped).toBe(false);
+
+    const [otherOrg] = await db
+      .insert(organizations)
+      .values({
+        slug: `run-rule-based-other-${Date.now()}`,
+        name: "Run Rule Based Other Org",
+      })
+      .returning({ id: organizations.id });
+
+    await upsertEvaluationReport(
+      makeUpsertInput(result.report, { orgId, triggeredBy: "cron" }),
+    );
+    await upsertEvaluationReport(
+      makeUpsertInput(result.report, {
+        orgId: otherOrg!.id,
+        triggeredBy: "admin_rerun",
+      }),
+    );
+
+    const rows = await db
+      .select({
+        orgId: evaluationReports.orgId,
+        triggeredBy: evaluationReports.triggeredBy,
+      })
+      .from(evaluationReports)
+      .where(eq(evaluationReports.userId, userId));
+
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ orgId, triggeredBy: "cron" }),
+        expect.objectContaining({
+          orgId: otherOrg!.id,
+          triggeredBy: "admin_rerun",
+        }),
+      ]),
+    );
   });
 
   it("4. missing bodies → usage rows exist but no bodies → coverageRatio=0, report still upserted", async () => {

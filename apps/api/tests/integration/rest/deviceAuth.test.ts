@@ -79,12 +79,65 @@ describe("POST /v1/device-auth/poll", () => {
     const { device_code } = await startFlow();
     const key = flowKey(hashDeviceCode(device_code));
     const flow = JSON.parse((await redis.get(key))!);
-    await redis.set(key, JSON.stringify({ ...flow, status: "approved", enrollmentToken: "tok_abc" }), "EX", 900);
+    await redis.set(
+      key,
+      JSON.stringify({
+        ...flow,
+        status: "approved",
+        enrollmentToken: "tok_abc",
+        gatewayProvisioning: { requested: false, status: "not_requested" },
+      }),
+      "EX",
+      900,
+    );
     const ok = await app.inject({ method: "POST", url: "/v1/device-auth/poll", payload: { device_code } });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().enrollment_token).toBe("tok_abc");
+    expect(ok.json().gateway).toEqual({
+      requested: false,
+      status: "not_requested",
+    });
     const again = await app.inject({ method: "POST", url: "/v1/device-auth/poll", payload: { device_code } });
     expect(again.json().error).toBe("expired_token"); // single collection
+  });
+  it("returns non-secret gateway provisioning failure status on poll", async () => {
+    const { device_code } = await startFlow();
+    const key = flowKey(hashDeviceCode(device_code));
+    const flow = JSON.parse((await redis.get(key))!);
+    await redis.set(
+      key,
+      JSON.stringify({
+        ...flow,
+        status: "approved",
+        enrollmentToken: "tok_failed",
+        gatewayProvisioning: {
+          requested: true,
+          status: "failed",
+          gatewayUrl: "http://localhost:3002",
+          errorCode: "gateway_key_issue_failed",
+        },
+      }),
+      "EX",
+      900,
+    );
+
+    const ok = await app.inject({
+      method: "POST",
+      url: "/v1/device-auth/poll",
+      payload: { device_code },
+    });
+
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({
+      enrollment_token: "tok_failed",
+      gateway: {
+        requested: true,
+        status: "failed",
+        gateway_url: "http://localhost:3002",
+        error_code: "gateway_key_issue_failed",
+      },
+    });
+    expect(ok.json().api_key).toBeUndefined();
   });
   it("expired_token on corrupt payload (and deletes it)", async () => {
     const { device_code } = await startFlow();

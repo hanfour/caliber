@@ -18,6 +18,7 @@ function recordingScheduler(): {
     concurrency: 5,
     platform: "anthropic",
     type: "anthropic",
+    rateMultiplier: "1.0000",
     priority: 0,
     groupId: "grp-1",
   };

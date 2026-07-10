@@ -193,6 +193,7 @@ function makePayload(
     inputCost: "0.0010000000",
     outputCost: "0.0020000000",
     totalCost,
+    actualCostUsd: totalCost,
   });
 }
 

@@ -180,10 +180,8 @@ beforeEach(async () => {
   receivedModel = null;
   receivedModels = [];
   failTokens = new Set<string>();
-  // Each test uses a fresh app whose Fastify req-id counter restarts at
-  // `req-1` (this server pins `requestIdHeader: false`), and the inline usage
-  // writer dedups on ON CONFLICT(request_id). Truncate so a prior test's
-  // `req-1` row can't shadow this test's `req-1` insert.
+  // Each test can write inline usage rows. Truncate so prior rows cannot shadow
+  // this test's usage-log assertions through ON CONFLICT(request_id) DO NOTHING.
   await db.execute(sql`TRUNCATE TABLE usage_logs RESTART IDENTITY CASCADE`);
 });
 

@@ -69,7 +69,7 @@ const ISO_DATETIME = z.string().datetime();
  *     the cron always supplies it and the worker never silently receives "".
  *
  * PR4 adds:
- *   - 4-part jobId derivation when `apiKeyId` is present (in `enqueueEvaluator`).
+ *   - org-scoped v2 jobId derivation when `apiKeyId` is present (in `enqueueEvaluator`).
  *   - Zod `.refine()` co-presence: `apiKeyId` set → `keyNameSnapshot` required
  *     and non-empty.
  */
@@ -193,13 +193,14 @@ export interface EnqueueEvaluatorResult {
   /**
    * The BullMQ job ID — produced by `buildEvaluatorJobId` (colon-free).
    *
-   * - Per-person (apiKeyId absent): `${userId}_${periodStart}_${periodType}`
+   * - Per-person (apiKeyId absent): `eval_v2_person_${orgId}_${userId}_${periodStart}_${periodType}`
    *   with all `:` replaced by `-`.
-   * - Per-key (apiKeyId present): `${userId}_${apiKeyId}_${periodStart}_${periodType}`
+   * - Per-key (apiKeyId present): `eval_v2_key_${orgId}_${userId}_${apiKeyId}_${periodStart}_${periodType}`
    *   with all `:` replaced by `-`.
    *
-   * The two formats can never collide: a UUID apiKeyId contains no year-digit
-   * ISO-datetime prefix, and the segment count differs by one.
+   * The two formats can never collide because the grain prefix differs, and
+   * the same user/period in different orgs does not collide because `orgId`
+   * is part of the identity.
    */
   jobId: string;
 }
@@ -213,8 +214,8 @@ export interface EnqueueEvaluatorResult {
  *   embeds multiple colons and would trigger that error with a naive template
  *   literal. The shared builder is also used by `apps/api reports.ts` rerun so
  *   cron and admin-rerun always produce the same id for the same inputs (dedup).
- * - Collision safety: per-person (3 segments) can never equal per-key (4 segments)
- *   because a UUID apiKeyId never looks like an ISO periodStart.
+ * - Collision safety: per-person and per-key grains are prefixed separately,
+ *   and orgId is part of the identity so cross-org jobs do not dedup each other.
  * - On Zod validation failure this throws — treat as a programmer error
  *   (the caller assembled a bad payload), not a transient condition.
  * - On Redis-side failure (`queue.add` rejects), the error propagates.

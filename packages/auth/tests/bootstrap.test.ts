@@ -19,8 +19,8 @@ const migrationsFolder = path.resolve(
   "drizzle",
 );
 
-let container: StartedPostgreSqlContainer;
-let pool: pg.Pool;
+let container: StartedPostgreSqlContainer | undefined;
+let pool: pg.Pool | undefined;
 let db: Database;
 
 const cfg: BootstrapConfig = {
@@ -38,8 +38,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.end();
-  await container.stop();
+  if (pool) await pool.end();
+  if (container) await container.stop();
 });
 
 describe("decideSignUp", () => {

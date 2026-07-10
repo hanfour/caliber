@@ -5,7 +5,7 @@
  *   1. Rejects invalid payload (missing orgId)
  *   2. Rejects invalid payload (non-uuid userId)
  *   3. Rejects invalid periodType value
- *   4. jobId is colon-free and encodes userId + periodStart + periodType (via buildEvaluatorJobId)
+ *   4. jobId is colon-free and encodes orgId + userId + periodStart + periodType (via buildEvaluatorJobId)
  *   5. Uses job name `evaluator`
  *   6. Applies default job options correctly
  */
@@ -183,8 +183,9 @@ describe("enqueueEvaluator", () => {
   });
 
   // Test case 4: jobId is colon-free and derived via buildEvaluatorJobId
-  it("uses a colon-free jobId encoding userId + periodStart + periodType for dedup", async () => {
+  it("uses a colon-free jobId encoding orgId + userId + periodStart + periodType for dedup", async () => {
     const payload = validPayload({
+      orgId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
       userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       periodStart: "2024-03-01T00:00:00Z",
       periodType: "weekly",
@@ -197,8 +198,29 @@ describe("enqueueEvaluator", () => {
     // Must be colon-free (BullMQ 5.x rejects ids where includes(':') && split(':').length !== 3)
     expect(jobId).not.toContain(":");
     // Must contain the identity components
+    expect(jobId).toContain("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
     expect(jobId).toContain("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
     expect(jobId).toContain("weekly");
+  });
+
+  it("does not dedup per-person jobs for the same user and period in different orgs", async () => {
+    const base = {
+      userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      periodStart: "2024-03-01T00:00:00Z",
+      periodType: "weekly" as const,
+    };
+    const first = await enqueueEvaluator(fake.queue, validPayload({
+      ...base,
+      orgId: "11111111-1111-4111-8111-111111111111",
+    }));
+    const second = await enqueueEvaluator(fake.queue, validPayload({
+      ...base,
+      orgId: "22222222-2222-4222-8222-222222222222",
+    }));
+
+    expect(first.jobId).not.toBe(second.jobId);
+    expect(first.jobId).toContain("11111111-1111-4111-8111-111111111111");
+    expect(second.jobId).toContain("22222222-2222-4222-8222-222222222222");
   });
 
   // Test case 5: Uses job name `evaluator`

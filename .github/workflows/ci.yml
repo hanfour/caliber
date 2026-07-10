@@ -20,7 +20,11 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo run lint typecheck test build
+      # Keep Next's build separate from typecheck. Both touch `.next/types`;
+      # running them in the same Turbo invocation can make tsc observe files
+      # while `next build` is replacing the generated directory.
+      - run: pnpm turbo run lint typecheck test
+      - run: pnpm turbo run build
       - name: Root CLI tests (@hanfour.huang/caliber — NOT in the turbo workspace)
         # The published CLI package lives at the repo root and is absent from
         # pnpm-workspace.yaml, so `turbo run test` never touches it. Build the

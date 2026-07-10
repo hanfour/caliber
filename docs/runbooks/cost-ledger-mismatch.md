@@ -33,11 +33,12 @@ psql "$DATABASE_URL" -c "
 # usage_logs reconciliation (per Plan 4A audit)
 psql "$DATABASE_URL" -c "
   SELECT api_key_id,
-         SUM(total_cost) AS logs_total,
+         SUM(actual_cost_usd) AS logs_total,
+         SUM(total_cost) AS provider_total,
          (SELECT quota_used_usd FROM api_keys WHERE id = ul.api_key_id) AS quota_used
   FROM usage_logs ul
   GROUP BY api_key_id
-  HAVING ABS(SUM(total_cost) - (SELECT quota_used_usd FROM api_keys WHERE id = ul.api_key_id)) > 0.01
+  HAVING ABS(SUM(actual_cost_usd) - (SELECT quota_used_usd FROM api_keys WHERE id = ul.api_key_id)) > 0.01
   LIMIT 20;
 "
 

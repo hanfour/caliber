@@ -3,13 +3,13 @@
  *
  * Samples a small fraction of `api_keys` (default 1% via Postgres
  * BERNOULLI sampling) and compares each key's `quota_used_usd` against
- * `SUM(usage_logs.total_cost)` for that key.  Two integrity signals are
+ * `SUM(usage_logs.actual_cost_usd)` for that key.  Two integrity signals are
  * surfaced:
  *
- *   1. **Drift** — `|sum(total_cost) - quota_used_usd| > 0.01 USD`.
+ *   1. **Drift** — `|sum(actual_cost_usd) - quota_used_usd| > 0.01 USD`.
  *      Either direction; bumps `gw_billing_drift_total`.
  *
- *   2. **Monotonicity violation** — `quota_used_usd > sum(total_cost) +
+ *   2. **Monotonicity violation** — `quota_used_usd > sum(actual_cost_usd) +
  *      0.01 USD`.  Means quota was charged for a row that no longer
  *      exists in `usage_logs` (deleted? failed insert mid-txn?).
  *      Bumps `gw_billing_monotonicity_violation_total`.  A monotonicity
@@ -193,7 +193,7 @@ export class BillingAudit {
           ak.id,
           ak.quota_used_usd,
           COALESCE(
-            (SELECT SUM(total_cost) FROM usage_logs WHERE api_key_id = ak.id),
+            (SELECT SUM(actual_cost_usd) FROM usage_logs WHERE api_key_id = ak.id),
             0
           ) AS actual_sum
         FROM api_keys ak TABLESAMPLE BERNOULLI(${this.#sampleRatioLiteral})

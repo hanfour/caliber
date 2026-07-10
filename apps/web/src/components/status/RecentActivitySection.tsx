@@ -67,7 +67,7 @@ export function RecentActivitySection() {
                     <td className="px-3 py-2 font-mono text-xs">{row.requestedModel}</td>
                     <td className="px-3 py-2 font-mono text-xs">{row.statusCode}</td>
                     <td className="px-3 py-2 text-right text-xs text-muted-foreground">{row.durationMs}ms</td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">{formatUsd(row.totalCost)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">{formatUsd(row.costUsd)}</td>
                     <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">{formatUsd(row.notionalCost)}</td>
                   </tr>
                 ))}

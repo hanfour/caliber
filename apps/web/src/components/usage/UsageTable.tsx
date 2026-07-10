@@ -76,7 +76,7 @@ function Row({ row }: { row: UsageRow }) {
         {totalTokens.toLocaleString()}
       </td>
       <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
-        {formatUsd(row.totalCost)}
+        {formatUsd(row.costUsd)}
       </td>
       <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-muted-foreground">
         {formatDuration(row.durationMs)}

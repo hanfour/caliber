@@ -116,6 +116,7 @@ export async function runRuleBased(
     .from(usageLogs)
     .where(
       and(
+        eq(usageLogs.orgId, orgId),
         eq(usageLogs.userId, userId),
         gte(usageLogs.createdAt, periodStart),
         lt(usageLogs.createdAt, periodEnd),
@@ -317,6 +318,7 @@ export async function upsertEvaluationReport(
     .values(withLlm)
     .onConflictDoUpdate({
       target: [
+        evaluationReports.orgId,
         evaluationReports.userId,
         evaluationReports.periodStart,
         evaluationReports.periodType,

@@ -158,11 +158,7 @@ const listColumns = {
   outputTokens: usageLogs.outputTokens,
   cacheCreationTokens: usageLogs.cacheCreationTokens,
   cacheReadTokens: usageLogs.cacheReadTokens,
-  inputCost: usageLogs.inputCost,
-  outputCost: usageLogs.outputCost,
-  cacheCreationCost: usageLogs.cacheCreationCost,
-  cacheReadCost: usageLogs.cacheReadCost,
-  totalCost: usageLogs.totalCost,
+  costUsd: usageLogs.actualCostUsd,
   stream: usageLogs.stream,
   statusCode: usageLogs.statusCode,
   durationMs: usageLogs.durationMs,
@@ -203,7 +199,7 @@ export const usageRouter = router({
       const [totals] = await ctx.db
         .select({
           totalRequests: sql<number>`COUNT(*)::int`,
-          totalCostUsd: sql<string>`COALESCE(SUM(${usageLogs.totalCost}), 0)::text`,
+          totalCostUsd: sql<string>`COALESCE(SUM(${usageLogs.actualCostUsd}), 0)::text`,
           totalInputTokens: sql<number>`COALESCE(SUM(${usageLogs.inputTokens}), 0)::int`,
           totalOutputTokens: sql<number>`COALESCE(SUM(${usageLogs.outputTokens}), 0)::int`,
           totalCacheCreationTokens: sql<number>`COALESCE(SUM(${usageLogs.cacheCreationTokens}), 0)::int`,
@@ -216,14 +212,14 @@ export const usageRouter = router({
         .select({
           model: usageLogs.requestedModel,
           requests: sql<number>`COUNT(*)::int`,
-          costUsd: sql<string>`COALESCE(SUM(${usageLogs.totalCost}), 0)::text`,
+          costUsd: sql<string>`COALESCE(SUM(${usageLogs.actualCostUsd}), 0)::text`,
           inputTokens: sql<number>`COALESCE(SUM(${usageLogs.inputTokens}), 0)::int`,
           outputTokens: sql<number>`COALESCE(SUM(${usageLogs.outputTokens}), 0)::int`,
         })
         .from(usageLogs)
         .where(where)
         .groupBy(usageLogs.requestedModel)
-        .orderBy(desc(sql`SUM(${usageLogs.totalCost})`))
+        .orderBy(desc(sql`SUM(${usageLogs.actualCostUsd})`))
         .limit(MAX_BY_MODEL_GROUPS);
 
       // Per-API-key breakdown (1 key ≈ 1 project for BYOK users). Joins the
@@ -237,7 +233,7 @@ export const usageRouter = router({
           keyName: apiKeys.name,
           ownerEmail: users.email,
           requests: sql<number>`COUNT(*)::int`,
-          costUsd: sql<string>`COALESCE(SUM(${usageLogs.totalCost}), 0)::text`,
+          costUsd: sql<string>`COALESCE(SUM(${usageLogs.actualCostUsd}), 0)::text`,
           // Notional cost: what this usage WOULD cost at current API rates,
           // mirroring computeCost() (billable input excludes cache-classified
           // tokens; cache reads fall back to the input rate when no cache_read

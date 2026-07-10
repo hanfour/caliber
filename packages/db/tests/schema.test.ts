@@ -9,8 +9,8 @@ import { organizations, users } from '../src/schema/index.js'
 import { organizationMembers } from '../src/schema/membership.js'
 import { roleAssignments } from '../src/schema/roles.js'
 
-let container: StartedPostgreSqlContainer
-let pool: pg.Pool
+let container: StartedPostgreSqlContainer | undefined
+let pool: pg.Pool | undefined
 let db: ReturnType<typeof drizzle>
 
 beforeAll(async () => {
@@ -23,8 +23,8 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await pool.end()
-  await container.stop()
+  if (pool) await pool.end()
+  if (container) await container.stop()
 })
 
 describe('schema round-trip', () => {

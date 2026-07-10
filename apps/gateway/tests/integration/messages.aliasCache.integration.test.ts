@@ -167,11 +167,8 @@ afterAll(
 beforeEach(async () => {
   receivedModels = [];
   failCredentials = new Set<string>();
-  // Each freshly-built app restarts Fastify's request-id counter at `req-1`,
-  // and `writeUsageLogBatch` upserts ON CONFLICT(request_id) DO NOTHING with a
-  // GLOBALLY-unique request_id — so a second `it`'s `req-1` usage row would
-  // silently collide with the first's. Clear the table between tests to keep
-  // the per-test usage-log assertions independent.
+  // `writeUsageLogBatch` upserts ON CONFLICT(request_id) DO NOTHING. Clear the
+  // table between tests to keep per-test usage-log assertions independent.
   await db.delete(usageLogs);
 });
 
