@@ -145,7 +145,23 @@ const STUB_BODIES: BodyRow[] = [
 
 // Valid LLM JSON payload that parseLlmResponse will accept
 const VALID_LLM_JSON = JSON.stringify({
-  narrative: "Good engineering practices observed.",
+  userReport: {
+    title: "Your engineering report",
+    summary: "Good engineering practices observed.",
+    strengths: [{ sectionId: "quality", title: "Clear communication", detail: "Requests are concise." }],
+    growthAreas: [],
+    nextSteps: [],
+  },
+  adminReport: {
+    title: "Engineering effectiveness report",
+    executiveSummary: "Good engineering practices observed.",
+    performanceAssessment: "The quality rubric is met.",
+    strengths: [{ sectionId: "quality", title: "Clear communication", detail: "Requests are concise." }],
+    concerns: [],
+    coachingPlan: [],
+    calibrationNotes: [],
+    dataLimitations: [],
+  },
   evidence: [
     {
       quote: "Hello",
@@ -386,6 +402,8 @@ describe("runLlmDeepAnalysis — integration", () => {
 
     expect(result).not.toBeNull();
     expect(result!.narrative).toBe("Good engineering practices observed.");
+    expect(result!.userReport.title).toBe("Your engineering report");
+    expect(result!.adminReport.title).toBe("Engineering effectiveness report");
     expect(result!.evidence).toHaveLength(1);
     expect(result!.evidence[0]!.requestId).toBe(STUB_REQUEST_ID);
     expect(result!.sectionAdjustments).toHaveLength(1);

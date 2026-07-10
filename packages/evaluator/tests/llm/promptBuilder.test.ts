@@ -110,6 +110,8 @@ describe("buildPrompt", () => {
     const { system } = buildPrompt(input);
     expect(system.toLowerCase()).toContain("rubric");
     expect(system.toLowerCase()).toContain("evaluat");
+    expect(system).toContain("user report");
+    expect(system).toContain("admin report");
   });
 
   it("user message contains the rubric JSON", () => {
@@ -136,6 +138,9 @@ describe("buildPrompt", () => {
     expect(content).toContain("totalScore");
     expect(content).toContain("sectionScores");
     expect(content).toContain("dataQuality");
+    expect(content).toContain('"userReport"');
+    expect(content).toContain('"adminReport"');
+    expect(content).toContain("must not contain request IDs");
   });
 
   it("user message contains all provided snippets", () => {

@@ -20,6 +20,7 @@ import { SectionRow, scoreBadgeClass, type SectionResult } from "./reportDetailS
 import { DataProvenanceCard } from "./DataProvenanceCard";
 import { FacetSummaryCard } from "./FacetSummaryCard";
 import { LlmEvidenceList } from "./LlmEvidenceList";
+import { GeneratedAudienceReport } from "./GeneratedAudienceReport";
 import type { RubricSignal } from "./rubricThreshold";
 
 // ─── Main ReportDetail component ───────────────────────────────────────────────
@@ -127,6 +128,7 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
     : [];
 
   const hasLlmNarrative = typeof latest.llmNarrative === "string" && latest.llmNarrative.length > 0;
+  const hasGeneratedReport = latest.generatedReport != null;
 
   const rubricSectionsById: Record<string, { signals: RubricSignal[] }> = {};
   const def = rubric?.definition as { sections?: Array<{ id: string; signals: RubricSignal[] }> } | undefined;
@@ -182,8 +184,15 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
         </CardContent>
       </Card>
 
+      <GeneratedAudienceReport
+        audience={latest.reportAudience}
+        report={latest.generatedReport}
+        model={latest.llmModel}
+        generatedAt={latest.llmCalledAt}
+      />
+
       {/* LLM narrative card — only when llmNarrative is present */}
-      {hasLlmNarrative && (
+      {!hasGeneratedReport && hasLlmNarrative && (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-semibold">{t("aiNarrative")}</CardTitle>

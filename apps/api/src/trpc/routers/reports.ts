@@ -72,6 +72,8 @@ const dateRange = z.object({
 // columns — so a single generic helper redacts either row shape identically.
 interface LlmRedactable {
   llmNarrative: string | null;
+  llmUserReport: unknown;
+  llmAdminReport: unknown;
   llmEvidence: unknown;
   llmModel: string | null;
   llmCalledAt: Date | null;
@@ -79,11 +81,49 @@ interface LlmRedactable {
   llmUpstreamAccountId: string | null;
 }
 
-function redactLlm<T extends LlmRedactable>(row: T, canSeeLlm: boolean): T {
-  if (canSeeLlm) return row;
+type ReportAudience = "user" | "admin" | "redacted";
+
+function projectReportForAudience<T extends LlmRedactable>(
+  row: T,
+  audience: ReportAudience,
+) {
+  const generatedReport =
+    audience === "user"
+      ? row.llmUserReport
+      : audience === "admin"
+        ? row.llmAdminReport
+        : null;
+
+  if (audience === "admin") {
+    return {
+      ...row,
+      reportAudience: audience,
+      generatedReport,
+      llmUserReport: null,
+      llmAdminReport: null,
+    };
+  }
+
+  if (audience === "user") {
+    return {
+      ...row,
+      reportAudience: audience,
+      generatedReport,
+      llmUserReport: null,
+      llmAdminReport: null,
+      llmEvidence: null,
+      llmCostUsd: null,
+      llmUpstreamAccountId: null,
+    };
+  }
+
   return {
     ...row,
+    reportAudience: audience,
+    generatedReport: null,
     llmNarrative: null,
+    llmUserReport: null,
+    llmAdminReport: null,
     llmEvidence: null,
     llmModel: null,
     llmCalledAt: null,
@@ -144,7 +184,7 @@ async function resolveKeyInOrg(
 export const reportsRouter = router({
   /**
    * Returns the caller's most recent evaluation report (by periodStart desc).
-   * The owner always sees their full LLM fields.
+   * The owner receives the user-audience report only.
    * Requires `report.read_own`.
    */
   getOwnLatest: evaluatorProcedure.query(async ({ ctx }) => {
@@ -160,13 +200,13 @@ export const reportsRouter = router({
       .limit(1)
       .then((r) => r[0] ?? null);
 
-    return row;
+    return row ? projectReportForAudience(row, "user") : null;
   }),
 
   /**
    * Returns all of the caller's reports whose periodStart falls within [from, to].
    * Results are ordered by periodStart desc.
-   * The owner always sees their full LLM fields.
+   * The owner receives the user-audience report only.
    * Requires `report.read_own`.
    */
   getOwnRange: evaluatorProcedure
@@ -188,7 +228,7 @@ export const reportsRouter = router({
         )
         .orderBy(desc(evaluationReports.periodStart));
 
-      return rows;
+      return rows.map((row) => projectReportForAudience(row, "user"));
     }),
 
   /**
@@ -230,11 +270,10 @@ export const reportsRouter = router({
         )
         .orderBy(desc(evaluationReports.periodStart));
 
-      const canSeeLlm =
-        input.userId === ctx.user.id ||
-        can(ctx.perm, { type: "report.read_org", orgId: input.orgId });
+      const audience: ReportAudience =
+        input.userId === ctx.user.id ? "user" : "admin";
 
-      return rows.map((r) => redactLlm(r, canSeeLlm));
+      return rows.map((row) => projectReportForAudience(row, audience));
     }),
 
   /**
@@ -313,12 +352,14 @@ export const reportsRouter = router({
         .orderBy(desc(evaluationReports.periodStart));
 
       // Only org_admins see LLM details — team_managers get them redacted.
-      const canSeeLlm = can(ctx.perm, {
+      const isOrgAdmin = can(ctx.perm, {
         type: "report.read_org",
         orgId: input.orgId,
       });
 
-      return rows.map((r) => redactLlm(r, canSeeLlm));
+      return rows.map((row) =>
+        projectReportForAudience(row, isOrgAdmin ? "admin" : "redacted"),
+      );
     }),
 
   /**
@@ -350,8 +391,7 @@ export const reportsRouter = router({
         )
         .orderBy(desc(evaluationReports.periodStart));
 
-      // Caller is org_admin (enforced above) — full LLM fields returned.
-      return rows;
+      return rows.map((row) => projectReportForAudience(row, "admin"));
     }),
 
   // ─── Per-key (project) report reads ───────────────────────────────────────────
@@ -386,7 +426,7 @@ export const reportsRouter = router({
         .limit(1)
         .then((r) => r[0] ?? null);
 
-      return row;
+      return row ? projectReportForAudience(row, "user") : null;
     }),
 
   /**
@@ -416,13 +456,13 @@ export const reportsRouter = router({
         )
         .orderBy(desc(evaluationReportsByKey.periodStart));
 
-      return rows;
+      return rows.map((row) => projectReportForAudience(row, "user"));
     }),
 
   /**
    * Per-key reports for a specific api key, for admins / the subject. Mirrors
-   * `getUser` (per-user read): gate `report.read_user`, LLM visible only to the
-   * subject or an org_admin (redacted otherwise via the shared `redactLlm`).
+   * `getUser` (per-user read): gate `report.read_user`, then project the LLM
+   * payload to the subject or admin audience on the server.
    *
    * Anti-enumeration: resolves the key's owner + org; if the key is missing or
    * `key.orgId !== input.orgId`, returns NOT_FOUND so cross-org probes can't
@@ -466,11 +506,10 @@ export const reportsRouter = router({
       // `getUser`. (As with `getUser`, the only non-subject caller that passes
       // the `report.read_user` gate is an org_admin, who is also canSeeLlm; the
       // redaction is kept for parity and defence-in-depth.)
-      const canSeeLlm =
-        key.userId === ctx.user.id ||
-        can(ctx.perm, { type: "report.read_org", orgId: input.orgId });
+      const audience: ReportAudience =
+        key.userId === ctx.user.id ? "user" : "admin";
 
-      return rows.map((r) => redactLlm(r, canSeeLlm));
+      return rows.map((row) => projectReportForAudience(row, audience));
     }),
 
   /**
@@ -728,7 +767,8 @@ export const reportsRouter = router({
       .orderBy(desc(evaluationReports.periodStart));
 
     // GDPR access/portability: per-key (project) reports are the caller's own
-    // data too — include them so the export is complete. Owner sees full LLM.
+    // data too. Audience projection below excludes admin-only analysis while
+    // retaining the complete user-facing report.
     const reportsByKey = await ctx.db
       .select()
       .from(evaluationReportsByKey)
@@ -778,8 +818,10 @@ export const reportsRouter = router({
     return {
       userId: ctx.user.id,
       exportedAt: new Date(),
-      reports,
-      reportsByKey,
+      reports: reports.map((row) => projectReportForAudience(row, "user")),
+      reportsByKey: reportsByKey.map((row) =>
+        projectReportForAudience(row, "user"),
+      ),
       bodies,
       keyRubrics,
       note: "Body content is encrypted at rest. Contact your administrator to request decrypted exports.",

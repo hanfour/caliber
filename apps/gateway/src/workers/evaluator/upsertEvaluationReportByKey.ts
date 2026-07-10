@@ -52,6 +52,8 @@ export interface UpsertEvaluationReportByKeyInput {
   report: Report;
   llm: {
     narrative: string;
+    userReport: unknown;
+    adminReport: unknown;
     evidence: unknown;
     model: string;
     calledAt: Date;
@@ -98,6 +100,8 @@ export async function upsertEvaluationReportByKey(
     ? {
         ...base,
         llmNarrative: input.llm.narrative,
+        llmUserReport: input.llm.userReport,
+        llmAdminReport: input.llm.adminReport,
         llmEvidence: input.llm.evidence as unknown,
         llmModel: input.llm.model,
         llmCalledAt: input.llm.calledAt,

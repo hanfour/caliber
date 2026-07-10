@@ -50,6 +50,14 @@ const report = {
   dataQuality: { coverageRatio: 0.87, capturedRequests: 100 },
   signalsSummary: { period: { requestCount: 115, bodyCount: 100 } },
   llmNarrative: null,
+  reportAudience: "user" as const,
+  generatedReport: {
+    title: "Your rubric report",
+    summary: "You meet the configured standard.",
+    strengths: [],
+    growthAreas: [],
+    nextSteps: [],
+  },
   llmModel: null,
   llmCalledAt: null,
 };
@@ -77,6 +85,7 @@ describe("ProfileEvaluation", () => {
     render(<ProfileEvaluation />);
 
     expect(screen.getByText("112.0")).toBeInTheDocument();
+    expect(screen.getByText("Your rubric report")).toBeInTheDocument();
     expect(screen.getByText(/Data provenance/i)).toBeInTheDocument();
     expect(screen.getByText(/1823/)).toBeInTheDocument();
 

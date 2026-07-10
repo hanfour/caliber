@@ -25,8 +25,27 @@ The evaluator has three layers:
    optional LLM Deep Analysis calls to a provisioned API account; results
    stored in `member_scores` + `score_evidence`.
 3. **Transparency** (UI) — members see their own 30-day trend, rules breakdown,
-   and sample evidence on `/dashboard/profile/evaluation`; admins see team
-   aggregates + drill-downs on `/dashboard/organizations/[id]/teams/[tid]`.
+   and a growth-oriented report on `/dashboard/profile/evaluation`; org admins
+   see team aggregates plus a deeper management report on
+   `/dashboard/organizations/[id]/teams/[tid]`.
+
+### Audience-specific reports
+
+When LLM Deep Analysis is enabled, one evaluation call produces two structured
+views from the same rubric and score evidence:
+
+- **User report** — summary, strengths, growth areas, and concrete next steps.
+  It excludes organization comparisons, raw LLM evidence, request IDs, model
+  cost, and upstream-account diagnostics.
+- **Admin report** — executive summary, deeper rubric assessment, evidence-linked
+  concerns, coaching plan, calibration notes, and explicit data limitations.
+  It is available only to callers with `report.read_org` for that organization.
+
+The API selects the audience on the server and returns only one
+`generatedReport`; the other stored payload is cleared before serialization.
+Team managers without org-admin permission receive the existing redacted view.
+Legacy rows generated before migration `0028_audience_reports` continue to use
+the original narrative fallback.
 
 **Workspace packages.**
 
@@ -60,7 +79,8 @@ On `/dashboard/profile/evaluation`, members see:
   links below)
 - 30-day score trend (chart)
 - Breakdown of scores by rubric rule
-- Sample evidence (latest N interactions that matched a rule, redacted)
+- A personal report with strengths, growth areas, and recommended next steps
+- Transparent rule-signal details for the member's own score
 - Export data button (triggers GDPR export workflow)
 - Delete data button (triggers GDPR delete request)
 
@@ -152,7 +172,10 @@ organization `eval_spending_usd` field.
 - `/dashboard/organizations/[id]/teams/[tid]` → Evaluator tab
 - Leaderboard (if enabled in rubric settings): sorted by average score
 - Distribution histogram: score ranges across the team
-- Drill-down: click a member → their detailed 30-day report + evidence
+- Org-admin drill-down: click a member → admin report, evidence-linked concerns,
+  coaching plan, calibration notes, and data limitations
+- Team managers retain aggregate/redacted access and do not receive either
+  subject-level LLM audience payload
 
 ---
 

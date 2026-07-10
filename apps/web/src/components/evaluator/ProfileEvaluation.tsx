@@ -20,6 +20,7 @@ import { FacetSummaryCard } from "./FacetSummaryCard";
 import { DataProvenanceCard } from "./DataProvenanceCard";
 import { ProjectScoreSection } from "./ProjectScoreSection";
 import { LlmEvidenceList } from "./LlmEvidenceList";
+import { GeneratedAudienceReport } from "./GeneratedAudienceReport";
 import {
   scoreBadgeClass,
   SectionRow,
@@ -130,6 +131,7 @@ export function ProfileEvaluation() {
   const hasLlmNarrative =
     typeof latestReport.llmNarrative === "string" &&
     latestReport.llmNarrative.length > 0;
+  const hasGeneratedReport = latestReport.generatedReport != null;
 
   const rubricSectionsById: Record<string, { signals: RubricSignal[] }> = {};
   const rubricDef = rubric?.definition as
@@ -173,6 +175,13 @@ export function ProfileEvaluation() {
         </CardContent>
       </Card>
 
+      <GeneratedAudienceReport
+        audience={latestReport.reportAudience}
+        report={latestReport.generatedReport}
+        model={latestReport.llmModel}
+        generatedAt={latestReport.llmCalledAt}
+      />
+
       {/* Facet drill-down (Plan 4C follow-up #3). Hidden silently when
           there are no facet rows for this period. */}
       <FacetSummaryCard
@@ -191,7 +200,7 @@ export function ProfileEvaluation() {
       />
 
       {/* LLM narrative — owner always has full visibility */}
-      {hasLlmNarrative && (
+      {!hasGeneratedReport && hasLlmNarrative && (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-semibold">

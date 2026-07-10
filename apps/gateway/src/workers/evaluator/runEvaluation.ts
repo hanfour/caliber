@@ -249,6 +249,8 @@ export async function runEvaluation(
   const sharedLlmArg = llmResult
     ? {
         narrative: llmResult.narrative,
+        userReport: llmResult.userReport,
+        adminReport: llmResult.adminReport,
         evidence: llmResult.evidence,
         model: llmResult.model,
         calledAt: new Date(),

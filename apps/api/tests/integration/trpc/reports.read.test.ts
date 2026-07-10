@@ -51,12 +51,35 @@ beforeAll(async () => {
   t = await setupTestDb();
 });
 afterAll(async () => {
-  await t.stop();
+  if (t) await t.stop();
 });
 
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
 let seedCounter = 0;
+
+const USER_REPORT = {
+  title: "Your engineering report",
+  summary: "You are using the tools effectively.",
+  strengths: [
+    { sectionId: "efficiency", title: "Efficient workflow", detail: "Cost stayed within the rubric target." },
+  ],
+  growthAreas: [],
+  nextSteps: [],
+};
+
+const ADMIN_REPORT = {
+  title: "Engineering effectiveness report",
+  executiveSummary: "The engineer meets the configured standard.",
+  performanceAssessment: "Efficiency signals are within the rubric target.",
+  strengths: [
+    { sectionId: "efficiency", title: "Efficient workflow", detail: "Observed cost remained controlled." },
+  ],
+  concerns: [],
+  coachingPlan: [],
+  calibrationNotes: ["Use the configured rubric as the comparison baseline."],
+  dataLimitations: ["The report covers one evaluation window."],
+};
 
 function minimalRubricDefinition() {
   return {
@@ -129,6 +152,8 @@ interface SeedReportOpts {
   periodStart: Date;
   periodEnd: Date;
   llmNarrative?: string | null;
+  llmUserReport?: Record<string, unknown> | null;
+  llmAdminReport?: Record<string, unknown> | null;
   llmEvidence?: Record<string, unknown> | null;
   llmModel?: string | null;
   llmCostUsd?: string | null;
@@ -153,6 +178,8 @@ async function seedReport(db: Database, opts: SeedReportOpts) {
       signalsSummary: {},
       dataQuality: { coverageRatio: 0.9, capturedRequests: 0 },
       llmNarrative: opts.llmNarrative ?? null,
+      llmUserReport: opts.llmUserReport ?? null,
+      llmAdminReport: opts.llmAdminReport ?? null,
       llmEvidence: opts.llmEvidence ?? null,
       llmModel: opts.llmModel ?? null,
       llmCalledAt: opts.llmModel ? new Date() : null,
@@ -168,11 +195,21 @@ async function seedReport(db: Database, opts: SeedReportOpts) {
 // Seed a report with all LLM fields populated.
 async function seedReportWithLlm(
   db: Database,
-  opts: Omit<SeedReportOpts, "llmNarrative" | "llmEvidence" | "llmModel" | "llmCostUsd">,
+  opts: Omit<
+    SeedReportOpts,
+    | "llmNarrative"
+    | "llmUserReport"
+    | "llmAdminReport"
+    | "llmEvidence"
+    | "llmModel"
+    | "llmCostUsd"
+  >,
 ) {
   return seedReport(db, {
     ...opts,
     llmNarrative: "Performance was excellent this week.",
+    llmUserReport: USER_REPORT,
+    llmAdminReport: ADMIN_REPORT,
     llmEvidence: { highlights: ["Used cache effectively"] },
     llmModel: "claude-sonnet-4-5",
     llmCostUsd: "0.0025000000",
@@ -238,6 +275,8 @@ async function seedReportByKey(db: Database, opts: SeedByKeyOpts) {
       signalsSummary: {},
       dataQuality: { coverageRatio: 0.9, capturedRequests: 0 },
       llmNarrative: opts.withLlm ? "By-key narrative." : null,
+      llmUserReport: opts.withLlm ? USER_REPORT : null,
+      llmAdminReport: opts.withLlm ? ADMIN_REPORT : null,
       llmEvidence: opts.withLlm ? { highlights: ["used cache"] } : null,
       llmModel: opts.withLlm ? "claude-sonnet-4-5" : null,
       llmCalledAt: opts.withLlm ? new Date() : null,
@@ -364,8 +403,13 @@ describe("reports router — read endpoints", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe(reportId);
-    // org_admin → LLM fields are NOT redacted
+    expect(rows[0]!.reportAudience).toBe("admin");
+    expect(rows[0]!.generatedReport).toEqual(ADMIN_REPORT);
+    expect(rows[0]!.llmUserReport).toBeNull();
+    expect(rows[0]!.llmAdminReport).toBeNull();
+    // org_admin retains evidence and operational provenance.
     expect(rows[0]!.llmNarrative).not.toBeNull();
+    expect(rows[0]!.llmEvidence).not.toBeNull();
     expect(rows[0]!.llmModel).toBe("claude-sonnet-4-5");
   });
 
@@ -393,8 +437,14 @@ describe("reports router — read endpoints", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe(reportId);
-    // Self-access → LLM fields visible
+    expect(rows[0]!.reportAudience).toBe("user");
+    expect(rows[0]!.generatedReport).toEqual(USER_REPORT);
+    expect(rows[0]!.llmUserReport).toBeNull();
+    expect(rows[0]!.llmAdminReport).toBeNull();
+    // Self-access keeps the user summary but not admin-only evidence or cost.
     expect(rows[0]!.llmNarrative).not.toBeNull();
+    expect(rows[0]!.llmEvidence).toBeNull();
+    expect(rows[0]!.llmCostUsd).toBeNull();
   });
 
   // ── Test 5: getUser — non-admin gets FORBIDDEN for another user's reports ─────
@@ -462,6 +512,8 @@ describe("reports router — read endpoints", () => {
     expect(rows[0]!.llmEvidence).toBeNull();
     expect(rows[0]!.llmCalledAt).toBeNull();
     expect(rows[0]!.llmUpstreamAccountId).toBeNull();
+    expect(rows[0]!.reportAudience).toBe("redacted");
+    expect(rows[0]!.generatedReport).toBeNull();
     // Non-LLM fields remain visible
     expect(rows[0]!.totalScore).toBe("85.0000");
   });
@@ -500,6 +552,8 @@ describe("reports router — read endpoints", () => {
     const report = rows.find((r) => r.id === reportId)!;
     // org_admin → LLM fields must be intact
     expect(report.llmNarrative).not.toBeNull();
+    expect(report.reportAudience).toBe("admin");
+    expect(report.generatedReport).toEqual(ADMIN_REPORT);
     expect(report.llmModel).toBe("claude-sonnet-4-5");
     expect(report.llmCostUsd).not.toBeNull();
   });
@@ -534,6 +588,8 @@ describe("reports router — read endpoints", () => {
     expect(rows.some((r) => r.id === reportId)).toBe(true);
     const report = rows.find((r) => r.id === reportId)!;
     expect(report.llmNarrative).toBe("Performance was excellent this week.");
+    expect(report.reportAudience).toBe("admin");
+    expect(report.generatedReport).toEqual(ADMIN_REPORT);
     expect(report.llmModel).toBe("claude-sonnet-4-5");
   });
 
@@ -556,7 +612,7 @@ describe("reports router — read endpoints", () => {
 // ─── PR5: per-key report reads ────────────────────────────────────────────────
 
 describe("reports router — per-key read endpoints", () => {
-  it("getOwnByKeyLatest: owner sees latest by-key report (full LLM); null when none", async () => {
+  it("getOwnByKeyLatest: owner sees the user-audience report; null when none", async () => {
     const org = await makeOrg(t.db);
     const rubricId = await seedRubric(t.db, null);
     const user = await makeUser(t.db, { orgId: org.id });
@@ -586,8 +642,11 @@ describe("reports router — per-key read endpoints", () => {
 
     const latest = await caller.reports.getOwnByKeyLatest({ apiKeyId });
     expect(latest!.id).toBe(latestId);
-    // Owner sees full LLM.
     expect(latest!.llmNarrative).toBe("By-key narrative.");
+    expect(latest!.reportAudience).toBe("user");
+    expect(latest!.generatedReport).toEqual(USER_REPORT);
+    expect(latest!.llmEvidence).toBeNull();
+    expect(latest!.llmCostUsd).toBeNull();
     expect(latest!.keyNameSnapshot).toBeTruthy();
   });
 
@@ -695,8 +754,10 @@ describe("reports router — per-key read endpoints", () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe(reportId);
-    // org_admin (and subject) → LLM intact.
+    expect(rows[0]!.reportAudience).toBe("admin");
+    expect(rows[0]!.generatedReport).toEqual(ADMIN_REPORT);
     expect(rows[0]!.llmNarrative).toBe("By-key narrative.");
+    expect(rows[0]!.llmEvidence).not.toBeNull();
     expect(rows[0]!.llmModel).toBe("claude-sonnet-4-5");
   });
 
@@ -726,6 +787,9 @@ describe("reports router — per-key read endpoints", () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.llmNarrative).toBe("By-key narrative.");
+    expect(rows[0]!.reportAudience).toBe("user");
+    expect(rows[0]!.generatedReport).toEqual(USER_REPORT);
+    expect(rows[0]!.llmEvidence).toBeNull();
   });
 
   it("getByKey: non-subject non-admin member → FORBIDDEN (no data leak)", async () => {

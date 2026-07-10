@@ -969,6 +969,28 @@
       "actualValue": "實測值: {value}",
       "thresholdLabel": "門檻值:"
     },
+    "audienceReport": {
+      "userLabel": "個人報告",
+      "adminLabel": "管理員報告",
+      "generatedBy": "由 {model} 產生",
+      "generatedByDate": "由 {model} 產生 · {date}",
+      "executiveSummary": "管理摘要",
+      "performanceAssessment": "績效評估",
+      "strengths": "優勢",
+      "growthAreas": "成長面向",
+      "nextSteps": "建議的下一步",
+      "concerns": "需要關注的項目",
+      "coachingPlan": "輔導計畫",
+      "calibrationNotes": "校準備註",
+      "dataLimitations": "資料限制",
+      "evidenceCount": "由 {count} 項證據支持",
+      "successMeasure": "成功指標：{measure}",
+      "priority": {
+        "high": "高優先",
+        "medium": "中優先",
+        "low": "低優先"
+      }
+    },
     "profileEval": {
       "loading": "載入你的評估資料中…",
       "noEvaluationsTitle": "尚無評估",

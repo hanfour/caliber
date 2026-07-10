@@ -325,7 +325,23 @@ async function seedLlmCostLog(
 
 // Valid LLM JSON payload that parseLlmResponse will accept
 const VALID_LLM_JSON = JSON.stringify({
-  narrative: "Good engineering practices observed.",
+  userReport: {
+    title: "Your engineering report",
+    summary: "Good engineering practices observed.",
+    strengths: [{ sectionId: "quality", title: "Clear communication", detail: "Requests are concise." }],
+    growthAreas: [],
+    nextSteps: [],
+  },
+  adminReport: {
+    title: "Engineering effectiveness report",
+    executiveSummary: "Good engineering practices observed.",
+    performanceAssessment: "The quality rubric is met.",
+    strengths: [{ sectionId: "quality", title: "Clear communication", detail: "Requests are concise." }],
+    concerns: [],
+    coachingPlan: [],
+    calibrationNotes: [],
+    dataLimitations: [],
+  },
   evidence: [
     {
       quote: "Hello",
@@ -478,6 +494,8 @@ describe("runEvaluation — integration", () => {
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.llmNarrative).toBe("Good engineering practices observed.");
+    expect(row.llmUserReport).toMatchObject({ title: "Your engineering report" });
+    expect(row.llmAdminReport).toMatchObject({ title: "Engineering effectiveness report" });
     expect(row.llmModel).toBe(STUB_LLM_MODEL);
     expect(Number(row.llmCostUsd)).toBeCloseTo(0.005, 8);
     expect(row.llmCalledAt).toBeInstanceOf(Date);

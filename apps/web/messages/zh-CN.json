@@ -969,6 +969,28 @@
       "actualValue": "实测值: {value}",
       "thresholdLabel": "阈值:"
     },
+    "audienceReport": {
+      "userLabel": "个人报告",
+      "adminLabel": "管理员报告",
+      "generatedBy": "由 {model} 生成",
+      "generatedByDate": "由 {model} 生成 · {date}",
+      "executiveSummary": "管理摘要",
+      "performanceAssessment": "绩效评估",
+      "strengths": "优势",
+      "growthAreas": "成长方向",
+      "nextSteps": "建议的下一步",
+      "concerns": "需要关注的项目",
+      "coachingPlan": "辅导计划",
+      "calibrationNotes": "校准备注",
+      "dataLimitations": "数据限制",
+      "evidenceCount": "由 {count} 项证据支持",
+      "successMeasure": "成功指标：{measure}",
+      "priority": {
+        "high": "高优先级",
+        "medium": "中优先级",
+        "low": "低优先级"
+      }
+    },
     "profileEval": {
       "loading": "加载你的评估数据中…",
       "noEvaluationsTitle": "暂无评估",

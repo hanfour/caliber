@@ -19,6 +19,8 @@ export const evaluationReports = pgTable('evaluation_reports', {
   signalsSummary: jsonb('signals_summary').notNull(),
   dataQuality: jsonb('data_quality').notNull(),
   llmNarrative: text('llm_narrative'),
+  llmUserReport: jsonb('llm_user_report'),
+  llmAdminReport: jsonb('llm_admin_report'),
   llmEvidence: jsonb('llm_evidence'),
   llmModel: text('llm_model'),
   llmCalledAt: timestamp('llm_called_at', { withTimezone: true }),

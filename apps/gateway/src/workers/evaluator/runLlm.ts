@@ -38,6 +38,8 @@ export interface RunLlmDeepAnalysisInput {
 
 export interface LlmDeepAnalysisResult {
   narrative: string;
+  userReport: LlmResponse["userReport"];
+  adminReport: LlmResponse["adminReport"];
   evidence: LlmResponse["evidence"];
   sectionAdjustments: LlmResponse["sectionAdjustments"];
   model: string;
@@ -182,7 +184,9 @@ export async function runLlmDeepAnalysis(
     }
 
     return {
-      narrative: parsed.narrative,
+      narrative: parsed.userReport.summary,
+      userReport: parsed.userReport,
+      adminReport: parsed.adminReport,
       evidence: parsed.evidence,
       sectionAdjustments: parsed.sectionAdjustments,
       model: orgRow.llmEvalModel,

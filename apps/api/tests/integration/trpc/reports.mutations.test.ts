@@ -64,12 +64,14 @@ beforeAll(async () => {
   t = await setupTestDb();
 });
 afterAll(async () => {
-  await t.stop();
+  if (t) await t.stop();
 });
 
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
 let seedCounter = 0;
+const EXPORT_USER_REPORT = { title: "User report", summary: "User-safe summary" };
+const EXPORT_ADMIN_REPORT = { title: "Admin report", executiveSummary: "Admin-only detail" };
 
 async function seedRubric(db: Database, orgId: string | null) {
   seedCounter += 1;
@@ -151,11 +153,13 @@ async function seedReport(
       sectionScores: [],
       signalsSummary: {},
       dataQuality: { coverageRatio: 0.9, capturedRequests: 0 },
-      llmNarrative: null,
-      llmEvidence: null,
-      llmModel: null,
-      llmCalledAt: null,
-      llmCostUsd: null,
+      llmNarrative: "User-safe summary",
+      llmUserReport: EXPORT_USER_REPORT,
+      llmAdminReport: EXPORT_ADMIN_REPORT,
+      llmEvidence: { quote: "admin-only evidence" },
+      llmModel: "test-model",
+      llmCalledAt: new Date(),
+      llmCostUsd: "0.1230000000",
       llmUpstreamAccountId: null,
       triggeredBy: "manual",
       triggeredByUser: null,
@@ -193,11 +197,13 @@ async function seedReportByKey(
       sectionScores: [],
       signalsSummary: {},
       dataQuality: { coverageRatio: 0.9, capturedRequests: 0 },
-      llmNarrative: null,
-      llmEvidence: null,
-      llmModel: null,
-      llmCalledAt: null,
-      llmCostUsd: null,
+      llmNarrative: "User-safe summary",
+      llmUserReport: EXPORT_USER_REPORT,
+      llmAdminReport: EXPORT_ADMIN_REPORT,
+      llmEvidence: { quote: "admin-only evidence" },
+      llmModel: "test-model",
+      llmCalledAt: new Date(),
+      llmCostUsd: "0.1230000000",
       llmUpstreamAccountId: null,
       triggeredBy: "manual",
       triggeredByUser: null,
@@ -558,6 +564,14 @@ describe("reports router — mutation endpoints", () => {
     expect(result.reports).toHaveLength(1);
     expect(result.reportsByKey).toHaveLength(1);
     expect(result.reportsByKey[0]!.id).toBe(byKeyId);
+    for (const report of [...result.reports, ...result.reportsByKey]) {
+      expect(report.reportAudience).toBe("user");
+      expect(report.generatedReport).toEqual(EXPORT_USER_REPORT);
+      expect(report.llmUserReport).toBeNull();
+      expect(report.llmAdminReport).toBeNull();
+      expect(report.llmEvidence).toBeNull();
+      expect(report.llmCostUsd).toBeNull();
+    }
     expect(result.bodies.length).toBeGreaterThanOrEqual(1);
 
     const body = result.bodies.find((b) => b.requestId === requestId);

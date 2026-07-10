@@ -969,6 +969,28 @@
       "actualValue": "측정값: {value}",
       "thresholdLabel": "기준값:"
     },
+    "audienceReport": {
+      "userLabel": "개인 보고서",
+      "adminLabel": "관리자 보고서",
+      "generatedBy": "{model} 생성",
+      "generatedByDate": "{model} 생성 · {date}",
+      "executiveSummary": "관리 요약",
+      "performanceAssessment": "성과 평가",
+      "strengths": "강점",
+      "growthAreas": "성장 영역",
+      "nextSteps": "권장 다음 단계",
+      "concerns": "주의가 필요한 항목",
+      "coachingPlan": "코칭 계획",
+      "calibrationNotes": "보정 메모",
+      "dataLimitations": "데이터 한계",
+      "evidenceCount": "{count}개 근거 항목으로 뒷받침됨",
+      "successMeasure": "성공 지표: {measure}",
+      "priority": {
+        "high": "높은 우선순위",
+        "medium": "중간 우선순위",
+        "low": "낮은 우선순위"
+      }
+    },
     "profileEval": {
       "loading": "평가 데이터 로딩 중…",
       "noEvaluationsTitle": "아직 평가가 없습니다",

@@ -71,10 +71,12 @@ through a shared pool of upstream accounts:
 - **GDPR member-initiated delete request workflow** — members request deletion,
   org admins approve (or auto-reject after 30 days). Retention purge and GDPR
   execution run on separate cron workers.
-- **Labor-law-friendly transparency** — members always see their own full
-  evaluation report; team managers see redacted team views (LLM analysis
-  fields nulled unless they are also org admins). Leaderboard visibility is
-  opt-in per organization (privacy default).
+- **Labor-law-friendly transparency** — members see their own scores plus a
+  growth-oriented user report; org admins receive a separate, deeper report
+  with evidence-linked concerns, coaching guidance, calibration notes, and
+  data limitations. Audience selection happens server-side. Team managers see
+  redacted team views unless they are also org admins. Leaderboard visibility
+  is opt-in per organization (privacy default).
 
 **v0.5.0** extends the v0.4.0 evaluator with **per-org LLM cost budgeting**
 and **opt-in LLM facet extraction** (gated behind `ENABLE_FACET_EXTRACTION`

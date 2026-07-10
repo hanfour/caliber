@@ -31,6 +31,17 @@ const report = {
   dataQuality: { coverageRatio: 0.87, capturedRequests: 100 },
   signalsSummary: { period: { requestCount: 115, bodyCount: 100 } },
   llmNarrative: null,
+  reportAudience: "admin" as const,
+  generatedReport: {
+    title: "Admin rubric report",
+    executiveSummary: "The engineer meets the configured standard.",
+    performanceAssessment: "The available signals are stable.",
+    strengths: [],
+    concerns: [],
+    coachingPlan: [],
+    calibrationNotes: [],
+    dataLimitations: [],
+  },
   llmModel: null,
   llmCalledAt: null,
 };
@@ -50,6 +61,7 @@ describe("ReportDetail", () => {
     });
     render(<ReportDetail orgId="org-1" userId="u-1" userName="Steve" />);
     expect(screen.getByText("112.0")).toBeInTheDocument();
+    expect(screen.getByText("Admin rubric report")).toBeInTheDocument();
     expect(screen.getByText(/Data provenance/i)).toBeInTheDocument();
     expect(screen.getByText(/1823/)).toBeInTheDocument();
   });

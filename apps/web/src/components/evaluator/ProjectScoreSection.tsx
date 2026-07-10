@@ -18,6 +18,7 @@ import {
   SectionRow,
 } from "./reportDetailShared";
 import type { SectionResult } from "./reportDetailShared";
+import { GeneratedAudienceReport } from "./GeneratedAudienceReport";
 import type { ScorePoint } from "./TrendChart";
 import { RubricEditor } from "./RubricEditor";
 
@@ -90,6 +91,7 @@ function ProjectKeyReport({ apiKeyId, isRevoked }: ProjectKeyReportProps) {
 
   const hasLlmNarrative =
     typeof latest.llmNarrative === "string" && latest.llmNarrative.length > 0;
+  const hasGeneratedReport = latest.generatedReport != null;
 
   const keyName =
     "keyNameSnapshot" in latest && typeof latest.keyNameSnapshot === "string"
@@ -134,8 +136,15 @@ function ProjectKeyReport({ apiKeyId, isRevoked }: ProjectKeyReportProps) {
         </CardContent>
       </Card>
 
-      {/* LLM narrative — owner always has full visibility */}
-      {hasLlmNarrative && (
+      <GeneratedAudienceReport
+        audience={latest.reportAudience}
+        report={latest.generatedReport}
+        model={latest.llmModel}
+        generatedAt={latest.llmCalledAt}
+      />
+
+      {/* Legacy fallback for reports generated before audience reports. */}
+      {!hasGeneratedReport && hasLlmNarrative && (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-semibold">
