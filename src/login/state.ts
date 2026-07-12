@@ -6,6 +6,7 @@ export interface CliState {
   readonly serverUrl: string;
   readonly agentVersion: string;
   readonly binaryPath: string;
+  readonly accessToken?: string;
 }
 
 export function cliStateDir(): string {
@@ -26,7 +27,12 @@ export function loadCliState(): CliState | null {
   try {
     const raw = JSON.parse(readFileSync(path, "utf-8")) as Partial<CliState>;
     if (!raw.serverUrl || !raw.agentVersion || !raw.binaryPath) return null;
-    return { serverUrl: raw.serverUrl, agentVersion: raw.agentVersion, binaryPath: raw.binaryPath };
+    return {
+      serverUrl: raw.serverUrl,
+      agentVersion: raw.agentVersion,
+      binaryPath: raw.binaryPath,
+      accessToken: raw.accessToken,
+    };
   } catch {
     return null;
   }

@@ -27,4 +27,12 @@ describe("caliber login/agent CLI surface", () => {
     const out = run("logout --help");
     expect(out).toMatch(/logout/);
   });
+
+  it("admin report exposes member, organization, period, and output controls", () => {
+    const out = run("admin report --help");
+    expect(out).toMatch(/--org/);
+    expect(out).toMatch(/--member/);
+    expect(out).toMatch(/--since/);
+    expect(out).toMatch(/--format/);
+  });
 });

@@ -12,6 +12,7 @@ const POLL_INTERVAL_SEC = 5;
 // How many distinct user_codes to try before giving up (collision guard).
 const USER_CODE_CLAIM_ATTEMPTS = 5;
 const RATE_LIMIT_PER_MIN = 60;
+export const CLI_ACCESS_TTL_SEC = 24 * 60 * 60;
 // Unambiguous alphabet: no vowels (no accidental words), no 0/O/1/I.
 const USER_CODE_ALPHABET = "BCDFGHJKMNPQRSTVWXYZ23456789";
 export const USER_CODE_RE = /^[BCDFGHJKMNPQRSTVWXYZ23456789]{4}-[BCDFGHJKMNPQRSTVWXYZ23456789]{4}$/;
@@ -53,6 +54,7 @@ export const deviceAuthFlowSchema = z.object({
   createdAt: z.string(),
   approvalNonce: z.string().optional(),
   enrollmentToken: z.string().optional(),
+  cliAccessToken: z.string().optional(),
   // #256: gateway provisioning — requested at start, fulfilled at approve.
   provisionGateway: z.boolean().optional(),
   gatewayProvisioning: deviceGatewayProvisioningSchema.optional(),
@@ -63,6 +65,12 @@ export type DeviceAuthFlow = z.infer<typeof deviceAuthFlowSchema>;
 
 export function hashDeviceCode(code: string): string {
   return createHash("sha256").update(code).digest("hex");
+}
+export function hashCliAccessToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+export function cliAccessKey(tokenHash: string): string {
+  return `cli-access:${tokenHash}`;
 }
 export function flowKey(deviceCodeHash: string): string {
   return `device-auth:${deviceCodeHash}`;
@@ -197,6 +205,9 @@ export function deviceAuthRoutes(env: ServerEnv, redis: Redis): FastifyPluginAsy
         reply.code(200);
         return {
           enrollment_token: flow.enrollmentToken,
+          ...(flow.cliAccessToken
+            ? { access_token: flow.cliAccessToken }
+            : {}),
           ...gatewayProvisioningPayload(flow),
           // #256: present only when --gateway provisioning was requested and
           // a key was freshly minted at approve.

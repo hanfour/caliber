@@ -134,7 +134,12 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
     );
   }
 
-  saveCliState({ serverUrl, agentVersion: AGENT_TAG, binaryPath: binPath });
+  saveCliState({
+    serverUrl,
+    agentVersion: AGENT_TAG,
+    binaryPath: binPath,
+    accessToken: approved.accessToken,
+  });
 
   // 5. Optional (#256): route Claude Code through the gateway. The key was
   //    minted at approval; write it into ~/.claude/settings.json so the next

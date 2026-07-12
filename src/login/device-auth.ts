@@ -52,6 +52,7 @@ const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export interface ApprovedResult {
   enrollmentToken: string;
+  accessToken?: string;
   /** Present only when --gateway provisioning was requested and fulfilled. */
   apiKey?: string;
   gatewayUrl?: string;
@@ -60,6 +61,7 @@ export interface ApprovedResult {
 interface PollBody {
   error?: string;
   enrollment_token?: string;
+  access_token?: string;
   api_key?: string;
   gateway_url?: string;
 }
@@ -96,6 +98,7 @@ export async function pollUntilApproved(
       if (status === 200 && body.enrollment_token)
         return {
           enrollmentToken: body.enrollment_token,
+          accessToken: body.access_token,
           apiKey: body.api_key,
           gatewayUrl: body.gateway_url,
         };

@@ -85,6 +85,7 @@ describe("POST /v1/device-auth/poll", () => {
         ...flow,
         status: "approved",
         enrollmentToken: "tok_abc",
+        cliAccessToken: "cct_admin_abc",
         gatewayProvisioning: { requested: false, status: "not_requested" },
       }),
       "EX",
@@ -93,6 +94,7 @@ describe("POST /v1/device-auth/poll", () => {
     const ok = await app.inject({ method: "POST", url: "/v1/device-auth/poll", payload: { device_code } });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().enrollment_token).toBe("tok_abc");
+    expect(ok.json().access_token).toBe("cct_admin_abc");
     expect(ok.json().gateway).toEqual({
       requested: false,
       status: "not_requested",

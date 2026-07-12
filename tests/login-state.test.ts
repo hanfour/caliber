@@ -23,8 +23,9 @@ describe("cli state", () => {
   });
   it("round-trips save/load and clears", async () => {
     const { loadCliState, saveCliState, clearCliState } = await import("../src/login/state.js");
-    saveCliState({ serverUrl: "https://caliber.miilink.net", agentVersion: "agent/v0.2.0", binaryPath: join(tmp, ".caliber/bin/caliber-agent") });
+    saveCliState({ serverUrl: "https://caliber.miilink.net", agentVersion: "agent/v0.2.0", binaryPath: join(tmp, ".caliber/bin/caliber-agent"), accessToken: "cct_test" });
     expect(loadCliState()?.serverUrl).toBe("https://caliber.miilink.net");
+    expect(loadCliState()?.accessToken).toBe("cct_test");
     clearCliState();
     expect(loadCliState()).toBeNull();
   });

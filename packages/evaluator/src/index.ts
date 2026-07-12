@@ -5,4 +5,5 @@ export * from "./engine/index.js";
 export * from "./llm/index.js";
 export * from "./budget/index.js";
 export * from "./facet/index.js";
+export * from "./telemetry/index.js";
 export * from "./jobId.js";

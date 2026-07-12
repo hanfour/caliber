@@ -46,6 +46,7 @@ import {
   t,
 } from "./i18n.js";
 import { loginCommand, logoutCommand, agentPassthrough } from "./login/commands.js";
+import { runAdminReport } from "./admin-report.js";
 
 const program = new Command();
 
@@ -119,6 +120,37 @@ configCmd
   });
 
 // ── Report command ──
+
+const adminCmd = program
+  .command("admin")
+  .description("Organization administration / 組織管理");
+
+adminCmd
+  .command("report")
+  .description("Fetch a member's live telemetry, score locally, and generate an admin report")
+  .requiredOption("--org <slug-or-id>", "Organization slug or UUID")
+  .requiredOption("--member <email-or-id>", "Member email or UUID")
+  .option("-s, --since <date>", "Start date (YYYY-MM-DD), default: 30 days ago")
+  .option("-u, --until <date>", "End date (YYYY-MM-DD), default: today")
+  .option("-f, --format <format>", "Output format: markdown or json", "markdown")
+  .option("-o, --output <file>", "Write report to file")
+  .option("--locale <locale>", "Rubric locale: en, zh-Hant, or ja")
+  .action(async (options: {
+    org: string;
+    member: string;
+    since?: string;
+    until?: string;
+    format?: string;
+    output?: string;
+    locale?: "en" | "zh-Hant" | "ja";
+  }) => {
+    try {
+      await runAdminReport(options);
+    } catch (error) {
+      process.stderr.write(chalk.red(error instanceof Error ? error.message : String(error)) + "\n");
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command("report")

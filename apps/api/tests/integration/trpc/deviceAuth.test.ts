@@ -79,6 +79,7 @@ describe("devices.deviceAuth", () => {
     expect(flow.status).toBe("approved");
     expect(typeof flow.enrollmentToken).toBe("string");
     expect(flow.enrollmentToken.length).toBeGreaterThan(20);
+    expect(flow.cliAccessToken).toMatch(/^cct_/);
     expect(flow.gatewayProvisioning).toMatchObject({
       requested: false,
       status: "not_requested",

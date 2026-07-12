@@ -22,6 +22,9 @@ import { resolveUserPrimaryOrgId } from "./_shared.js";
 import { AUDIT_ACTIONS } from "../../services/auditActions.js";
 import {
   flowKey,
+  cliAccessKey,
+  hashCliAccessToken,
+  CLI_ACCESS_TTL_SEC,
   userCodeKey,
   normalizeUserCode,
   USER_CODE_RE,
@@ -779,9 +782,16 @@ export const devicesRouter = router({
             ...flow,
             status: "approved",
             enrollmentToken: token,
+            cliAccessToken: `cct_${randomBytes(32).toString("base64url")}`,
             gatewayProvisioning,
             ...(apiKey ? { apiKey, gatewayUrl } : {}),
           };
+          await ctx.redis.set(
+            cliAccessKey(hashCliAccessToken(approved.cliAccessToken!)),
+            JSON.stringify({ userId: ctx.user.id, orgId }),
+            "EX",
+            CLI_ACCESS_TTL_SEC,
+          );
           const stored = await finishApprovalFlow(
             ctx.redis,
             codeHash,
@@ -789,6 +799,9 @@ export const devicesRouter = router({
             approved,
           );
           if (!stored) {
+            await ctx.redis
+              .del(cliAccessKey(hashCliAccessToken(approved.cliAccessToken!)))
+              .catch(() => {});
             await cleanupApprovalSideEffects(ctx.db, {
               enrollmentTokenId: row.id,
               apiKeyId: createdApiKeyId,

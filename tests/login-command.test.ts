@@ -37,7 +37,7 @@ function stubLoginFetch(): ReturnType<typeof vi.fn> {
       );
     }
     if (url.endsWith("/v1/device-auth/poll")) {
-      return new Response(JSON.stringify({ enrollment_token: "tok-e2e" }), { status: 200 });
+      return new Response(JSON.stringify({ enrollment_token: "tok-e2e", access_token: "cct-e2e" }), { status: 200 });
     }
     if (url.endsWith(".tar.gz.sha256")) {
       return new Response(`${TAR_SHA}  asset.tar.gz\n`);
@@ -121,6 +121,7 @@ describe("loginCommand end-to-end wiring", () => {
       serverUrl: "https://caliber.example",
       agentVersion: "agent/v0.2.1",
       binaryPath: binPath,
+      accessToken: "cct-e2e",
     });
   });
 

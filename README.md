@@ -150,7 +150,10 @@ Operator guides:
 server with BullMQ workers, doesn't fit Vercel's serverless model. See
 the deploy/ READMEs for what does work.
 
-CLI mode and platform mode share no runtime state; pick whichever fits.
+Local report commands can still run independently. After `caliber login`, an
+org admin can also use the platform's uploaded resident-agent telemetry with
+`caliber admin report`; authorization and data retrieval happen through the
+platform, while rubric scoring and report generation run in the admin's CLI.
 
 > **First time trying platform mode?** Start with
 > [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — a 30-minute
@@ -172,15 +175,19 @@ CLI mode and platform mode share no runtime state; pick whichever fits.
 | Codex History | `~/.codex/history.jsonl` | Full user prompts by thread/session |
 | Codex Logs | `~/.codex/logs_2.sqlite` | Thread-level tool calls and error events |
 
-All data is read **locally and read-only**. No data is sent to any external service.
+The local `report`, `summary`, `monthly`, and `quarterly` commands read these
+sources **locally and read-only**. `caliber admin report` is the explicit
+exception: it securely fetches an authorized member bundle from the configured
+Caliber server, then scores it locally.
 
-所有資料皆為**本地端唯讀存取**，不會傳送至任何外部服務。
+一般本機報告指令皆為**本地端唯讀存取**。`caliber admin report` 會明確地從已登入的
+Caliber server 取得經授權的成員資料，再於管理員本機完成評分。
 
 ---
 
 ## Prerequisites / 系統需求
 
-- **Node.js** >= 18
+- **Node.js** >= 20
 - **npm** (included with Node.js)
 - `~/.claude/` directory (from Claude Code usage)
 - `~/.codex/` directory (from Codex CLI usage, optional)
@@ -336,6 +343,28 @@ node dist/cli.js report --format html --output report.html
 ---
 
 ## CLI Reference / 命令參考
+
+### `caliber admin report`
+
+Fetch the latest telemetry already uploaded by a connected member agent,
+apply the organization's active rubric locally, and generate an admin-depth
+Markdown or JSON report. The caller needs `report.read_org`; permission is
+checked live on every request. Run `caliber login --server <url>` once to
+authorize this CLI in the browser.
+
+```bash
+caliber admin report \
+  --org onead \
+  --member engineer@example.com \
+  --since 2026-07-01 \
+  --until 2026-07-12 \
+  --format markdown \
+  --output engineer-report.md
+```
+
+The date range is limited to 31 days. Reports reflect events uploaded before
+the fetch time; the resident agent's normal polling interval determines the
+small delay from an active session. Output files are written with mode `0600`.
 
 ### `caliber report`
 
