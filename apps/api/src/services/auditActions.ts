@@ -11,6 +11,7 @@ export const AUDIT_ACTIONS = {
   DEVICE_AUTH_DENIED: "device_auth.denied",
   DEVICE_AUTH_CONFIG_SET: "device_auth.config_set",
   REPORT_CLI_BUNDLE_EXPORTED: "report.cli_bundle_exported",
+  CLI_POOL_OAUTH_ADDED: "account.cli_pool_oauth_added",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

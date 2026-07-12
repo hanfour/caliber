@@ -47,6 +47,7 @@ import {
 } from "./i18n.js";
 import { loginCommand, logoutCommand, agentPassthrough } from "./login/commands.js";
 import { runAdminReport } from "./admin-report.js";
+import { addClaudeSubscriptionToPool } from "./admin-pool.js";
 
 const program = new Command();
 
@@ -124,6 +125,33 @@ configCmd
 const adminCmd = program
   .command("admin")
   .description("Organization administration / 組織管理");
+
+const adminPoolCmd = adminCmd
+  .command("pool")
+  .description("Manage organization shared upstreams / 管理組織共用池");
+
+adminPoolCmd
+  .command("add")
+  .description("Authorize a Claude subscription and add it to the organization pool")
+  .requiredOption("--org <slug-or-id>", "Organization slug or UUID")
+  .option("--name <name>", "Pool account name", "Claude subscription pool")
+  .option("--priority <number>", "Scheduler priority (lower runs first)", "50")
+  .option("--concurrency <number>", "Maximum concurrent requests", "20")
+  .option("--no-open", "Print the authorization URL without opening a browser")
+  .action(async (options: {
+    org: string;
+    name?: string;
+    priority?: string;
+    concurrency?: string;
+    open?: boolean;
+  }) => {
+    try {
+      await addClaudeSubscriptionToPool(options);
+    } catch (error) {
+      process.stderr.write(chalk.red(error instanceof Error ? error.message : String(error)) + "\n");
+      process.exitCode = 1;
+    }
+  });
 
 adminCmd
   .command("report")

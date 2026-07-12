@@ -35,4 +35,12 @@ describe("caliber login/agent CLI surface", () => {
     expect(out).toMatch(/--since/);
     expect(out).toMatch(/--format/);
   });
+
+  it("admin pool add exposes OAuth pool scheduling controls", () => {
+    const out = run("admin pool add --help");
+    expect(out).toMatch(/--org/);
+    expect(out).toMatch(/--priority/);
+    expect(out).toMatch(/--concurrency/);
+    expect(out).toMatch(/--no-open/);
+  });
 });

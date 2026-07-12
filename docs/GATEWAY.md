@@ -168,6 +168,21 @@ The gateway decrypts on each failover attempt (cache: none in 4A).
 
 **Adding an account.**
 
+An org admin can add an Anthropic subscription directly from the CLI without
+copying access or refresh tokens:
+
+```sh
+caliber login --server https://caliber.example.com
+caliber admin pool add --org <slug-or-uuid> --name "Claude Max shared"
+```
+
+This uses the manual-loopback OAuth flow and creates an organization-scoped
+row (`user_id IS NULL`, `team_id IS NULL`). That distinction is load-bearing:
+the self-service `/dashboard/upstreams` OAuth flow creates a user-owned row and
+is intentionally excluded from shared-pool scheduling. The CLI path requires
+`ENABLE_ANTHROPIC_OAUTH=true`; credentials are exchanged and encrypted only on
+the server, never returned to the CLI.
+
 1. Open `/dashboard/organizations/[id]/accounts/new`
 2. Pick scope (org-wide or team override), platform (`anthropic` or
    `openai`), type

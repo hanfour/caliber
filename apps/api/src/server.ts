@@ -9,6 +9,7 @@ import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
 import { healthRoutes } from "./rest/health.js";
 import { deviceAuthRoutes } from "./rest/deviceAuth.js";
 import { cliAdminReportRoutes } from "./rest/cliAdminReport.js";
+import { cliAdminPoolRoutes } from "./rest/cliAdminPool.js";
 import { devicesEnrollRoutes } from "./rest/devicesEnroll.js";
 import { devicesRevokeSelfRoutes } from "./rest/devicesRevokeSelf.js";
 import { ingestRoutes } from "./rest/ingest.js";
@@ -132,6 +133,7 @@ export async function buildServer() {
   // 404 before ever touching the throwing disabled-redis proxy.
   await app.register(deviceAuthRoutes(env, redis));
   await app.register(cliAdminReportRoutes(env, redis));
+  await app.register(cliAdminPoolRoutes(env, redis));
 
   // Instantiate the evaluator BullMQ queue when the feature flag is on.
   // Skipped entirely when ENABLE_EVALUATOR=false or REDIS_URL is absent —

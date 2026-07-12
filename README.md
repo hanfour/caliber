@@ -366,6 +366,29 @@ The date range is limited to 31 days. Reports reflect events uploaded before
 the fetch time; the resident agent's normal polling interval determines the
 small delay from an active session. Output files are written with mode `0600`.
 
+### `caliber admin pool add`
+
+Authorize a Claude Pro/Max subscription with Anthropic OAuth and add it as an
+organization-scoped shared upstream. The caller must be an org admin with
+`account.create`; both OAuth stages re-check live permissions.
+
+```bash
+caliber login --server https://caliber.example.com
+caliber admin pool add \
+  --org onead \
+  --name "Claude Max shared" \
+  --priority 50 \
+  --concurrency 20
+```
+
+The CLI opens Anthropic authorization. After approval, the loopback callback
+may show a connection-refused page; paste the full URL from the browser address
+bar into the CLI. The server exchanges the one-time code, encrypts the OAuth
+credential, and creates an upstream with `user_id = NULL`, making it eligible
+for API keys whose routing policy is `pool` or the fallback arm of
+`own_then_pool`. Requires `ENABLE_GATEWAY=true` and
+`ENABLE_ANTHROPIC_OAUTH=true` on the API deployment.
+
 ### `caliber report`
 
 Generate a full evaluation report.

@@ -16,7 +16,7 @@ import { mapEventsToRows } from "@caliber/evaluator/telemetry";
 import { writeAudit } from "../services/audit.js";
 import { AUDIT_ACTIONS } from "../services/auditActions.js";
 import { resolveReportRubric } from "../services/resolveReportRubric.js";
-import { cliAccessKey, hashCliAccessToken } from "./deviceAuth.js";
+import { authenticateCliAccess } from "./cliAccess.js";
 
 const MAX_PERIOD_MS = 31 * 24 * 60 * 60 * 1000;
 const MAX_EVENTS = 20_000;
@@ -29,17 +29,6 @@ const bodySchema = z.object({
   period_end: z.string().datetime(),
   locale: z.enum(["en", "zh-Hant", "ja"]).optional(),
 });
-
-interface CliPrincipal {
-  userId: string;
-  orgId: string;
-}
-
-function bearerToken(header: string | undefined): string | null {
-  if (!header?.startsWith("Bearer ")) return null;
-  const token = header.slice(7);
-  return token.startsWith("cct_") ? token : null;
-}
 
 export function cliAdminReportRoutes(
   env: ServerEnv,
@@ -57,22 +46,15 @@ export function cliAdminReportRoutes(
         reply.code(404);
         return { error: "not_found" };
       }
-      const token = bearerToken(request.headers.authorization);
-      if (!token) {
+      const access = await authenticateCliAccess(
+        redis,
+        request.headers.authorization,
+      );
+      if (!access.ok) {
         reply.code(401);
-        return { error: "unauthorized" };
+        return { error: access.error };
       }
-      const rawPrincipal = await redis.get(cliAccessKey(hashCliAccessToken(token)));
-      let principal: CliPrincipal | null = null;
-      try {
-        principal = rawPrincipal ? (JSON.parse(rawPrincipal) as CliPrincipal) : null;
-      } catch {
-        principal = null;
-      }
-      if (!principal?.userId || !principal.orgId) {
-        reply.code(401);
-        return { error: "expired_access_token" };
-      }
+      const { principal } = access;
       const parsed = bodySchema.safeParse(request.body);
       if (!parsed.success) {
         reply.code(400);
