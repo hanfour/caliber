@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, decimal, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, jsonb, timestamp, decimal, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core'
 import { organizations, teams } from './org.js'
 import { users } from './auth.js'
 import { rubrics } from './rubrics.js'
@@ -14,7 +14,9 @@ export const evaluationReports = pgTable('evaluation_reports', {
   periodType: text('period_type').notNull(),
   rubricId: uuid('rubric_id').notNull().references(() => rubrics.id, { onDelete: 'restrict' }),
   rubricVersion: text('rubric_version').notNull(),
-  totalScore: decimal('total_score', { precision: 10, scale: 4 }).notNull(),
+  totalScore: decimal('total_score', { precision: 10, scale: 4 }),
+  /** v2 (0030): true when the rubric couldn't score for lack of samples. */
+  insufficientData: boolean('insufficient_data').notNull().default(false),
   sectionScores: jsonb('section_scores').notNull(),
   signalsSummary: jsonb('signals_summary').notNull(),
   dataQuality: jsonb('data_quality').notNull(),

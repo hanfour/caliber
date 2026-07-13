@@ -104,7 +104,7 @@ export interface RunEvaluationInput {
 
 export interface RunEvaluationResult {
   reportId: string | null;
-  totalScore: number;
+  totalScore: number | null;
   skipped: boolean;
   llmAttempted: boolean;
   llmSucceeded: boolean;

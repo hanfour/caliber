@@ -448,6 +448,10 @@ export function RubricEditor({
                         exploration | other), gte (0-1)
                       </span>
                     </li>
+                    <li>
+                      <code>facet_user_satisfaction</code> ·{" "}
+                      <span className="text-muted-foreground">gte (1-5)</span>
+                    </li>
                   </ul>
                   <p className="mt-2 text-muted-foreground">
                     Facet signals return <code>hit: false</code> (or{" "}
@@ -456,6 +460,89 @@ export function RubricEditor({
                     breaking orgs that haven&apos;t opted in to facet
                     extraction.
                   </p>
+                </div>
+                <div>
+                  <p className="font-medium uppercase text-muted-foreground tracking-wide">
+                    Continuous scoring (v2)
+                  </p>
+                  <ul className="mt-1 space-y-0.5 font-mono">
+                    <li>
+                      <code>scoring.mode</code> ·{" "}
+                      <span className="text-muted-foreground">
+                        &quot;tiered&quot; (default) | &quot;continuous&quot;
+                        — set on a section to switch it to point-curve scoring
+                      </span>
+                    </li>
+                    <li>
+                      <code>minSamples</code> ·{" "}
+                      <span className="text-muted-foreground">
+                        section-level; below this many data rows the section
+                        score is <code>null</code> (insufficient data)
+                        instead of a number
+                      </span>
+                    </li>
+                    <li>
+                      <code>points</code> ·{" "}
+                      <span className="text-muted-foreground">
+                        per-signal; the max points this signal contributes
+                        when fully satisfied (continuous sections only)
+                      </span>
+                    </li>
+                    <li>
+                      <code>curve</code> ·{" "}
+                      <span className="text-muted-foreground">
+                        {"{ zeroAt, fullAt }"} — linear ramp from 0 points at{" "}
+                        <code>zeroAt</code> to full <code>points</code> at{" "}
+                        <code>fullAt</code>
+                      </span>
+                    </li>
+                    <li>
+                      <code>normalize</code> ·{" "}
+                      <span className="text-muted-foreground">
+                        &quot;per_session&quot; — divide a count-style metric
+                        (e.g. <code>facet_bugs_caught</code>,{" "}
+                        <code>facet_codex_errors</code>) by session count
+                        before curving
+                      </span>
+                    </li>
+                    <li>
+                      <code>scale</code> ·{" "}
+                      <span className="text-muted-foreground">
+                        rubric-level <code>{"{ max, pass? }"}</code> — the
+                        overall score ceiling and pass threshold (defaults to
+                        120 / 108)
+                      </span>
+                    </li>
+                  </ul>
+                  <p className="mt-2 text-muted-foreground">
+                    Example continuous section (satisfaction, 25% weight,
+                    requires 5+ sampled rows):
+                  </p>
+                  <pre className="mt-1 overflow-x-auto rounded bg-muted/50 p-2 text-[10px] leading-relaxed">
+{`{
+  "id": "satisfaction",
+  "name": "Requester Satisfaction / 需求方滿意",
+  "weight": "25%",
+  "scoring": { "mode": "continuous" },
+  "minSamples": 5,
+  "signals": [
+    {
+      "type": "facet_outcome_success_rate",
+      "id": "outcome_success",
+      "gte": 0.6,
+      "points": 70,
+      "curve": { "zeroAt": 0.4, "fullAt": 0.85 }
+    },
+    {
+      "type": "facet_user_satisfaction",
+      "id": "user_satisfaction",
+      "gte": 3.5,
+      "points": 30,
+      "curve": { "zeroAt": 2.5, "fullAt": 4.5 }
+    }
+  ]
+}`}
+                  </pre>
                 </div>
               </div>
             </details>

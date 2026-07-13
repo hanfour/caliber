@@ -207,7 +207,11 @@ describe("scoreWithRules", () => {
         clientSessionId: null,
         requestParams: null,
         responseBody: null,
-        requestBody: { text: "What are my options here?" },
+        requestBody: {
+          messages: [
+            { role: "user", content: "What are my options here?" },
+          ],
+        },
       },
     ];
     const report = scoreWithRules({ rubric, usageRows: [], bodyRows: bodies });
@@ -253,7 +257,14 @@ describe("scoreWithRules", () => {
         clientSessionId: null,
         requestParams: null,
         responseBody: null,
-        requestBody: { text: i < hitCount ? "please refactor this" : "hello" },
+        requestBody: {
+          messages: [
+            {
+              role: "user",
+              content: i < hitCount ? "please refactor this" : "hello",
+            },
+          ],
+        },
       }));
     }
 
@@ -322,6 +333,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -330,6 +342,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -357,6 +370,7 @@ describe("scoreWithRules", () => {
             frictionCount: 0,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -365,6 +379,7 @@ describe("scoreWithRules", () => {
             frictionCount: 1,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -388,6 +403,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: 2,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -396,6 +412,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: 2,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -419,6 +436,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: 2,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -427,6 +445,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: 1,
+            userSatisfaction: null,
           },
         ],
       });
@@ -454,6 +473,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -462,6 +482,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -470,6 +491,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -498,6 +520,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: "feature_dev",
@@ -506,6 +529,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: "bug_fix",
@@ -514,6 +538,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -547,6 +572,182 @@ describe("scoreWithRules", () => {
         bodyRows: [],
       });
       expect(reportLte.totalScore).toBe(120);
+    });
+  });
+
+  // ── Rubric v2 — continuous scoring integration ──────────────────────────
+  const contRubric = {
+    name: "v2",
+    version: "2.0.0",
+    locale: "en" as const,
+    scale: { max: 120, pass: 108 },
+    sections: [
+      {
+        id: "sat",
+        name: "Satisfaction",
+        weight: "100%",
+        scoring: { mode: "continuous" as const },
+        minSamples: 2,
+        signals: [
+          {
+            type: "facet_user_satisfaction" as const,
+            id: "usat",
+            gte: 3.5,
+            points: 100,
+            curve: { zeroAt: 2.5, fullAt: 4.5 },
+          },
+        ],
+      },
+    ],
+  };
+
+  const facetRow = (userSatisfaction: number | null) => ({
+    sessionType: null, outcome: null, claudeHelpfulness: null,
+    frictionCount: null, bugsCaughtCount: null, codexErrorsCount: null,
+    userSatisfaction,
+  });
+
+  describe("scoreWithRules v2 continuous", () => {
+    it("scores a continuous rubric from facet rows on the 120 scale", () => {
+      const report = scoreWithRules({
+        rubric: contRubric,
+        usageRows: [],
+        bodyRows: [],
+        facetRows: [facetRow(4.5), facetRow(4.5), facetRow(4.5)],
+      });
+      expect(report.totalScore).toBeCloseTo(120);
+      expect(report.insufficientData).toBe(false);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(report.sectionScores[0]!.mode).toBe("continuous");
+    });
+
+    it("yields a mid-scale score for mid-scale inputs (no more all-or-nothing)", () => {
+      const report = scoreWithRules({
+        rubric: contRubric,
+        usageRows: [],
+        bodyRows: [],
+        facetRows: [facetRow(3.5), facetRow(3.5)],
+      });
+      expect(report.totalScore).toBeCloseTo(60); // subscore 0.5 → 120×0.5
+    });
+
+    it("returns null totalScore + insufficientData when samples are too thin", () => {
+      const report = scoreWithRules({
+        rubric: contRubric,
+        usageRows: [],
+        bodyRows: [],
+        facetRows: [facetRow(5)], // 1 < minSamples 2
+      });
+      expect(report.totalScore).toBeNull();
+      expect(report.insufficientData).toBe(true);
+    });
+
+    it("keeps legacy tiered rubrics working (insufficientData always false)", () => {
+      const tieredRubric = {
+        name: "v1", version: "1.0.0", locale: "en" as const,
+        sections: [{
+          id: "risk", name: "Risk", weight: "100%",
+          standard: { score: 100, label: "Std", criteria: [] },
+          superior: { score: 120, label: "Sup", criteria: [] },
+          signals: [{ type: "refusal_rate" as const, id: "rr", lte: 0.2 }],
+        }],
+      };
+      const report = scoreWithRules({ rubric: tieredRubric, usageRows: [], bodyRows: [] });
+      expect(report.totalScore).toBe(120); // 空 bodies → refusal hit:true → 全 signal 命中 → superior（既有 v1 行為）
+      expect(report.insufficientData).toBe(false);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(report.sectionScores[0]!.mode).toBe("tiered");
+    });
+
+    it("forwards normalize: per_session to facet_bugs_caught so the collector scores a rate, not a raw sum", () => {
+      // Regression for the dropped-`normalize` bug in dispatchSignal: 4 bugs
+      // caught across 20 rows should be scored as a 0.2 per-session rate
+      // (curve zeroAt:0/fullAt:0.5 → subscore 0.4), NOT as the raw sum (4),
+      // which would blow past fullAt and saturate the curve at 1.0.
+      const bugsRubric = {
+        name: "v2-bugs", version: "2.0.0", locale: "en" as const,
+        scale: { max: 120, pass: 108 },
+        sections: [
+          {
+            id: "riskControl",
+            name: "Risk Control",
+            weight: "100%",
+            scoring: { mode: "continuous" as const },
+            minSamples: 2,
+            signals: [
+              {
+                type: "facet_bugs_caught" as const,
+                id: "bugs_caught_rate",
+                gte: 0.2,
+                normalize: "per_session" as const,
+                points: 100,
+                curve: { zeroAt: 0, fullAt: 0.5 },
+              },
+            ],
+          },
+        ],
+      };
+      const bugRow = (bugsCaughtCount: number) => ({
+        sessionType: null, outcome: null, claudeHelpfulness: null,
+        frictionCount: null, bugsCaughtCount, codexErrorsCount: null,
+        userSatisfaction: null,
+      });
+      const facetRows = [
+        ...Array.from({ length: 4 }, () => bugRow(1)),
+        ...Array.from({ length: 16 }, () => bugRow(0)),
+      ];
+      const report = scoreWithRules({ rubric: bugsRubric, usageRows: [], bodyRows: [], facetRows });
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const hit = report.sectionScores[0]!.signals[0]!;
+      expect(hit.value).toBe(0.2); // rate = 4/20, not the raw sum 4
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(report.sectionScores[0]!.score).toBeCloseTo(48); // 120 × (0.2/0.5)
+    });
+  });
+
+  describe("keyword v2 — latest-human-turn scanning", () => {
+    const kwRubric = {
+      name: "kw", version: "1.0.0", locale: "en" as const,
+      sections: [{
+        id: "s", name: "S", weight: "100%",
+        standard: { score: 100, label: "Std", criteria: [] },
+        superior: { score: 120, label: "Sup", criteria: [] },
+        signals: [{
+          type: "keyword" as const, id: "kw", in: "request_body" as const,
+          terms: ["refactor"], caseSensitive: false, minRatio: 0.5,
+        }],
+      }],
+    };
+
+    const bodyWith = (requestId: string, messages: unknown[]) => ({
+      requestId, stopReason: null, clientUserAgent: null, clientSessionId: null,
+      requestParams: null, responseBody: null, requestBody: { messages },
+    });
+
+    it("history mentions no longer snowball into later turns", () => {
+      // 3 個 body 共用同一段含 "refactor" 的歷史，但只有第 1 個的「最新 user turn」提到 refactor
+      const history = [
+        { role: "user", content: [{ type: "text", text: "refactor this" }] },
+        { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      ];
+      const bodies = [
+        bodyWith("r1", [{ role: "user", content: [{ type: "text", text: "refactor this" }] }]),
+        bodyWith("r2", [...history, { role: "user", content: [{ type: "text", text: "add tests" }] }]),
+        bodyWith("r3", [...history, { role: "user", content: [{ type: "text", text: "ship it" }] }]),
+      ];
+      const report = scoreWithRules({ rubric: kwRubric, usageRows: [], bodyRows: bodies });
+      // 1/3 < 0.5 → 不 hit → section 停在 standard
+      expect(report.sectionScores[0]!.signals[0]!.hit).toBe(false);
+    });
+
+    it("pure tool_result turns are excluded from the minRatio denominator", () => {
+      const bodies = [
+        bodyWith("r1", [{ role: "user", content: [{ type: "text", text: "please refactor" }] }]),
+        bodyWith("r2", [{ role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "refactor refactor" }] }]),
+      ];
+      const report = scoreWithRules({ rubric: kwRubric, usageRows: [], bodyRows: bodies });
+      // 分母 1（r2 無真人文字）→ 1/1 >= 0.5 → hit
+      expect(report.sectionScores[0]!.signals[0]!.hit).toBe(true);
     });
   });
 });

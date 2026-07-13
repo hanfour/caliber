@@ -93,4 +93,16 @@ describe("ProfileEvaluation", () => {
     fireEvent.click(screen.getByText("Interaction"));
     expect(screen.getByText(/of bodies contain a term/i)).toBeInTheDocument();
   });
+
+  it("shows the insufficient-data badge instead of a NaN score when totalScore is null", () => {
+    const insufficientReport = { ...report, totalScore: null, insufficientData: true };
+    getOwnLatest.mockReturnValue({ data: insufficientReport, isLoading: false, error: null });
+    getOwnRange.mockReturnValue({ data: [insufficientReport], isLoading: false, error: null });
+    rubricGet.mockReturnValue({ data: null, isLoading: false, error: null });
+
+    render(<ProfileEvaluation />);
+
+    expect(screen.getByText("Insufficient data")).toBeInTheDocument();
+    expect(screen.queryByText("NaN")).not.toBeInTheDocument();
+  });
 });

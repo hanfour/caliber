@@ -14,10 +14,20 @@ export interface RubricSignal {
   between?: [number, number];
   minRatio?: number;
   minCount?: number;
+  // v2 continuous fields (present depending on `type`/`scoring.mode`)
+  points?: number;
+  curve?: { zeroAt: number; fullAt: number };
+  normalize?: "per_session";
 }
 
 function pct(ratio: number): string {
   return `${Math.round(ratio * 100)}%`;
+}
+
+function withCurveSuffix(signal: RubricSignal, base: string): string {
+  return signal.curve
+    ? `${base} · curve ${signal.curve.zeroAt}→${signal.curve.fullAt}`
+    : base;
 }
 
 export function formatThreshold(signal: RubricSignal): string {
@@ -43,15 +53,17 @@ export function formatThreshold(signal: RubricSignal): string {
     case "cache_read_ratio":
     case "tool_diversity":
     case "iteration_count":
-      return `${signal.type} ≥ ${signal.gte}`;
+      return withCurveSuffix(signal, `${signal.type} ≥ ${signal.gte}`);
     case "facet_claude_helpfulness":
     case "facet_bugs_caught":
     case "facet_outcome_success_rate":
     case "facet_session_type_ratio":
-      return `${signal.type} ≥ ${signal.gte}`;
+      return withCurveSuffix(signal, `${signal.type} ≥ ${signal.gte}`);
+    case "facet_user_satisfaction":
+      return withCurveSuffix(signal, `mean satisfaction ≥ ${signal.gte}`);
     case "facet_friction_per_session":
     case "facet_codex_errors":
-      return `${signal.type} ≤ ${signal.lte}`;
+      return withCurveSuffix(signal, `${signal.type} ≤ ${signal.lte}`);
     default:
       return "";
   }

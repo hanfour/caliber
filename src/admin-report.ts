@@ -122,7 +122,7 @@ export function renderAdminMarkdown(report: LocalAdminReport): string {
     "",
     "## Executive Summary",
     "",
-    `Overall score: **${report.result.totalScore.toFixed(1)} / 120** across ${report.source.turn_count} captured human turns in ${report.source.session_count} sessions. Data coverage is ${(report.result.dataQuality.coverageRatio * 100).toFixed(1)}%.`,
+    `Overall score: **${report.result.totalScore === null ? "insufficient data" : `${report.result.totalScore.toFixed(1)} / 120`}** across ${report.source.turn_count} captured human turns in ${report.source.session_count} sessions. Data coverage is ${(report.result.dataQuality.coverageRatio * 100).toFixed(1)}%.`,
     "",
     "## Performance Assessment",
     "",
@@ -130,7 +130,8 @@ export function renderAdminMarkdown(report: LocalAdminReport): string {
     "| --- | ---: | ---: | --- | ---: |",
     ...report.result.sectionScores.map((section) => {
       const hitCount = section.signals.filter((signal) => signal.hit).length;
-      return `| ${esc(section.name)} | ${section.weight}% | ${section.score.toFixed(1)} | ${esc(section.label)} | ${hitCount}/${section.signals.length} |`;
+      const scoreCell = section.score === null ? "—" : section.score.toFixed(1);
+      return `| ${esc(section.name)} | ${section.weight}% | ${scoreCell} | ${esc(section.label)} | ${hitCount}/${section.signals.length} |`;
     }),
     "",
     "## Demonstrated Strengths",

@@ -13,6 +13,7 @@ const VALID_FACET_TEXT = JSON.stringify({
   frictionCount: 0,
   bugsCaughtCount: 1,
   codexErrorsCount: 0,
+  userSatisfaction: 5,
 });
 
 function makeSession(): FacetSession {
@@ -62,6 +63,7 @@ describe("extractOne — happy path", () => {
       frictionCount: 0,
       bugsCaughtCount: 1,
       codexErrorsCount: 0,
+      userSatisfaction: 5,
     });
 
     expect(callWithCostTracking).toHaveBeenCalledTimes(1);
@@ -82,6 +84,7 @@ describe("extractOne — happy path", () => {
     expect(row.frictionCount).toBe(0);
     expect(row.bugsCaughtCount).toBe(1);
     expect(row.codexErrorsCount).toBe(0);
+    expect(row.userSatisfaction).toBe(5);
     expect(row.extractedWithModel).toBe("claude-haiku-4-5");
     expect(row.promptVersion).toBe(CURRENT_PROMPT_VERSION);
     expect(row.extractionError).toBeNull();
@@ -109,6 +112,7 @@ describe("extractOne — deterministic failures (write row with extractionError)
     expect(row.sessionType).toBeNull();
     expect(row.outcome).toBeNull();
     expect(row.claudeHelpfulness).toBeNull();
+    expect(row.userSatisfaction).toBeNull();
     expect(row.promptVersion).toBe(CURRENT_PROMPT_VERSION);
     expect(row.extractedWithModel).toBe("claude-haiku-4-5");
   });
@@ -135,6 +139,7 @@ describe("extractOne — deterministic failures (write row with extractionError)
     expect(insertFacet).toHaveBeenCalledTimes(1);
     const row = insertFacet.mock.calls[0]![0] as FacetRow;
     expect(row.extractionError).toMatch(/^validation_error:/);
+    expect(row.userSatisfaction).toBeNull();
   });
 
   it("writes a timeout row when LLM call rejects with timeout error (no status)", async () => {
@@ -150,6 +155,7 @@ describe("extractOne — deterministic failures (write row with extractionError)
     expect(insertFacet).toHaveBeenCalledTimes(1);
     const row = insertFacet.mock.calls[0]![0] as FacetRow;
     expect(row.extractionError).toMatch(/^timeout:/);
+    expect(row.userSatisfaction).toBeNull();
     expect(row.promptVersion).toBe(CURRENT_PROMPT_VERSION);
   });
 });

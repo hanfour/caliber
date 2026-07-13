@@ -41,6 +41,12 @@ const AGENT_CONFIG_KEYS = [
   "devices.agentConfig.outOfRange",
 ];
 
+// All new keys required by continuous-section rendering + 108 pass line (Task 12)
+const CONTINUOUS_SCORING_KEYS = [
+  "evaluator.report.insufficientData",
+  "evaluator.trendChart.passLine",
+];
+
 function getByPath(obj: Record<string, unknown>, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc != null && typeof acc === "object" && key in acc) {
@@ -137,6 +143,26 @@ describe("i18n catalog parity — agent config keys (Task 14)", () => {
   };
 
   for (const key of AGENT_CONFIG_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — continuous scoring keys (Task 12)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of CONTINUOUS_SCORING_KEYS) {
     it(`"${key}" exists in all 5 catalogs`, () => {
       for (const [locale, catalog] of Object.entries(catalogs)) {
         const value = getByPath(catalog, key);

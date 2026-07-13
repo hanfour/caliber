@@ -7,8 +7,11 @@ import {
   usageLogs,
   apiKeys,
   upstreamAccounts,
+  requestBodies,
+  requestBodyFacets,
 } from "@caliber/db";
 import { resolvePermissions } from "@caliber/auth";
+import { platformRubricV2En } from "@caliber/evaluator";
 import type { ServerEnv } from "@caliber/config";
 import {
   setupTestDb,
@@ -142,6 +145,7 @@ async function seedUsageLog(
     accountId: string;
     totalCost?: string;
     createdAt?: Date;
+    cacheReadTokens?: number;
   },
 ) {
   seedCounter += 1;
@@ -160,7 +164,7 @@ async function seedUsageLog(
     inputTokens: 10,
     outputTokens: 20,
     cacheCreationTokens: 0,
-    cacheReadTokens: 0,
+    cacheReadTokens: opts.cacheReadTokens ?? 0,
     inputCost: "0.0001",
     outputCost: "0.0002",
     cacheCreationCost: "0",
@@ -230,6 +234,54 @@ async function seedAccount(db: Database, orgId: string) {
     })
     .returning({ id: upstreamAccounts.id });
   return row!.id;
+}
+
+/**
+ * FK-only placeholder `request_bodies` row: dryRun never decrypts bodies, so
+ * the sealed blobs never need to be real ciphertext — they only need to
+ * exist so `request_body_facets.request_id` (FK → request_bodies.request_id)
+ * can be inserted for the same requestId.
+ */
+async function seedRequestBody(
+  db: Database,
+  opts: { requestId: string; orgId: string },
+) {
+  await db.insert(requestBodies).values({
+    requestId: opts.requestId,
+    orgId: opts.orgId,
+    requestBodySealed: Buffer.from("placeholder"),
+    responseBodySealed: Buffer.from("placeholder"),
+    retentionUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+  });
+}
+
+async function seedFacetRow(
+  db: Database,
+  opts: {
+    requestId: string;
+    orgId: string;
+    outcome?: string | null;
+    claudeHelpfulness?: number | null;
+    frictionCount?: number | null;
+    bugsCaughtCount?: number | null;
+    codexErrorsCount?: number | null;
+    userSatisfaction?: number | null;
+  },
+) {
+  await db.insert(requestBodyFacets).values({
+    requestId: opts.requestId,
+    orgId: opts.orgId,
+    sessionType: null,
+    outcome: opts.outcome ?? null,
+    claudeHelpfulness: opts.claudeHelpfulness ?? null,
+    frictionCount: opts.frictionCount ?? null,
+    bugsCaughtCount: opts.bugsCaughtCount ?? null,
+    codexErrorsCount: opts.codexErrorsCount ?? null,
+    userSatisfaction: opts.userSatisfaction ?? null,
+    extractedWithModel: "test-model",
+    promptVersion: 2,
+    extractionError: null,
+  });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -784,6 +836,131 @@ describe("rubrics router", () => {
     expect(result.preview.signalsSummary.total_cost).toBeCloseTo(1, 10);
     expect(result.preview.dataQuality.totalRequests).toBe(1);
     expect(result.preview.totalScore).toBe(100);
+  });
+
+  // ── Test 8: dryRun — v2 continuous rubric scores facet signals ───────────────
+
+  it("dryRun: v2 continuous rubric scores real facet signals once minSamples is met", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const { id: rubricId } = await caller.rubrics.create({
+      orgId: org.id,
+      name: "DryRun v2 Rubric",
+      version: "2.0.0",
+      definition: platformRubricV2En,
+    });
+
+    const apiKeyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const accountId = await seedAccount(t.db, org.id);
+
+    // 6 rows clears every section's minSamples (5).
+    const outcomes = [
+      "success",
+      "success",
+      "success",
+      "success",
+      "failure",
+      "failure",
+    ];
+    const satisfactions = [4, 4, 3, 4, 4, 3];
+    const bugsCaught = [1, 0, 0, 0, 0, 0];
+    const codexErrors = [1, 0, 0, 0, 0, 0];
+
+    for (let i = 0; i < 6; i++) {
+      const requestId = await seedUsageLog(t.db, {
+        userId: admin.id,
+        orgId: org.id,
+        apiKeyId,
+        accountId,
+        cacheReadTokens: 20,
+      });
+      await seedRequestBody(t.db, { requestId, orgId: org.id });
+      await seedFacetRow(t.db, {
+        requestId,
+        orgId: org.id,
+        outcome: outcomes[i],
+        claudeHelpfulness: 4,
+        frictionCount: 1,
+        bugsCaughtCount: bugsCaught[i],
+        codexErrorsCount: codexErrors[i],
+        userSatisfaction: satisfactions[i],
+      });
+    }
+
+    const result = await caller.rubrics.dryRun({
+      orgId: org.id,
+      rubricId,
+      userId: admin.id,
+      days: 7,
+    });
+
+    expect(typeof result.preview.totalScore).toBe("number");
+    expect(result.preview.totalScore).toBeGreaterThan(0);
+    expect(result.preview.totalScore).toBeLessThan(120);
+    expect(result.preview.insufficientData).toBe(false);
+    expect(result.preview.sectionScores.length).toBeGreaterThan(0);
+    for (const section of result.preview.sectionScores) {
+      expect(section.mode).toBe("continuous");
+    }
+  });
+
+  it("dryRun: v2 continuous rubric reports insufficientData below minSamples", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+
+    const { id: rubricId } = await caller.rubrics.create({
+      orgId: org.id,
+      name: "DryRun v2 Rubric Insufficient",
+      version: "2.0.0",
+      definition: platformRubricV2En,
+    });
+
+    const apiKeyId = await seedApiKey(t.db, { userId: admin.id, orgId: org.id });
+    const accountId = await seedAccount(t.db, org.id);
+
+    // Only 3 facet rows — below every section's minSamples (5).
+    for (let i = 0; i < 3; i++) {
+      const requestId = await seedUsageLog(t.db, {
+        userId: admin.id,
+        orgId: org.id,
+        apiKeyId,
+        accountId,
+      });
+      await seedRequestBody(t.db, { requestId, orgId: org.id });
+      await seedFacetRow(t.db, {
+        requestId,
+        orgId: org.id,
+        outcome: "success",
+        claudeHelpfulness: 4,
+        frictionCount: 1,
+        bugsCaughtCount: 0,
+        codexErrorsCount: 0,
+        userSatisfaction: 4,
+      });
+    }
+
+    const result = await caller.rubrics.dryRun({
+      orgId: org.id,
+      rubricId,
+      userId: admin.id,
+      days: 7,
+    });
+
+    expect(result.preview.insufficientData).toBe(true);
+    expect(result.preview.totalScore).toBeNull();
   });
 });
 

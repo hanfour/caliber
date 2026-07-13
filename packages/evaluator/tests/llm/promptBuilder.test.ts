@@ -33,11 +33,13 @@ function mkRubric(): Rubric {
 function mkReport(): Report {
   return {
     totalScore: 100,
+    insufficientData: false,
     sectionScores: [
       {
         sectionId: "sec1",
         name: "Code Quality",
         weight: 100,
+        mode: "tiered",
         standardScore: 100,
         superiorScore: 120,
         score: 100,

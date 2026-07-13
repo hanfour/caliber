@@ -1,10 +1,11 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   apiKeys,
   organizationMembers,
   organizations,
+  requestBodyFacets,
   rubrics,
   usageLogs,
 } from "@caliber/db";
@@ -12,7 +13,7 @@ import type { Database } from "@caliber/db";
 import { can } from "@caliber/auth";
 import type { UserPermissions } from "@caliber/auth";
 import { rubricSchema, scoreWithRules } from "@caliber/evaluator";
-import type { UsageRow } from "@caliber/evaluator";
+import type { BodyRow, UsageRow } from "@caliber/evaluator";
 import { formatValidationKey } from "@caliber/i18n-validation";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
@@ -421,7 +422,11 @@ export const rubricsRouter = router({
    * is always empty. Keyword, refusal-rate, client-mix, extended-thinking,
    * tool-diversity, and iteration-count signals will therefore show zero hits.
    * The preview score reflects only threshold-based signals that derive from
-   * usage metrics (token counts, cost, model diversity, cache ratios).
+   * usage metrics (token counts, cost, model diversity, cache ratios) plus,
+   * as of v2, facet-based signals (`facet_*`) — `request_body_facets` columns
+   * are plaintext, so they carry no `CREDENTIAL_ENCRYPTION_KEY` dependency and
+   * are loaded for the same window as `usageRows`. Continuous v2 rubrics that
+   * rely on facet signals will therefore preview real (non-zero) scores here.
    *
    * For a full-fidelity dry-run including body signals, use the gateway's
    * admin evaluation endpoint instead.
@@ -496,11 +501,33 @@ export const rubricsRouter = router({
         totalCost: u.totalCost,
       }));
 
+      // Facet rows are plaintext (no CREDENTIAL_ENCRYPTION_KEY dependency), so
+      // dry-run can load them for the same requestIds even though bodyRows
+      // stays empty — see JSDoc above.
+      const requestIds = usageRows.map((u) => u.requestId);
+      const facetRows =
+        requestIds.length === 0
+          ? []
+          : await ctx.db
+              .select({
+                sessionType: requestBodyFacets.sessionType,
+                outcome: requestBodyFacets.outcome,
+                claudeHelpfulness: requestBodyFacets.claudeHelpfulness,
+                frictionCount: requestBodyFacets.frictionCount,
+                bugsCaughtCount: requestBodyFacets.bugsCaughtCount,
+                codexErrorsCount: requestBodyFacets.codexErrorsCount,
+                userSatisfaction: requestBodyFacets.userSatisfaction,
+              })
+              .from(requestBodyFacets)
+              .where(inArray(requestBodyFacets.requestId, requestIds));
+
       // bodyRows is always empty — see JSDoc above for rationale.
+      const bodyRows: BodyRow[] = [];
       const report = scoreWithRules({
         rubric: parsedRubric,
         usageRows,
-        bodyRows: [],
+        bodyRows,
+        facetRows,
       });
 
       return {
@@ -508,7 +535,7 @@ export const rubricsRouter = router({
         userId: input.userId,
         periodStart,
         periodEnd,
-        usageOnly: true,
+        usageOnly: bodyRows.length === 0,
         preview: report,
       };
     }),

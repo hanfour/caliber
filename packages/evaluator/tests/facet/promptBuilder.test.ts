@@ -7,8 +7,8 @@ import {
 } from "../../src/facet/promptBuilder";
 
 describe("CURRENT_PROMPT_VERSION", () => {
-  it("is 1", () => {
-    expect(CURRENT_PROMPT_VERSION).toBe(1);
+  it("is 2", () => {
+    expect(CURRENT_PROMPT_VERSION).toBe(2);
   });
 });
 
@@ -19,6 +19,12 @@ describe("buildFacetPrompt", () => {
     expect(system).toContain("feature_dev");
     expect(system).toContain("claudeHelpfulness");
     expect(system).toContain("Output JSON only");
+  });
+
+  it("v2 prompt declares userSatisfaction in the schema and bumps the version", () => {
+    expect(CURRENT_PROMPT_VERSION).toBe(2);
+    const { system } = buildFacetPrompt({ turns: [] });
+    expect(system).toContain('"userSatisfaction"');
   });
 
   it("user prompt formats turns with role: content", () => {

@@ -74,4 +74,16 @@ describe("ReportDetail", () => {
       screen.getByText(/Generate report for this range|產生此區間報告/i),
     ).toBeInTheDocument();
   });
+
+  it("shows the insufficient-data badge instead of a NaN score when totalScore is null", () => {
+    getUser.mockReturnValue({
+      data: [{ ...report, totalScore: null, insufficientData: true }],
+      isLoading: false,
+      error: null,
+    });
+    rubricGet.mockReturnValue({ data: null, isLoading: false, error: null });
+    render(<ReportDetail orgId="org-1" userId="u-1" userName="Steve" />);
+    expect(screen.getByText("Insufficient data")).toBeInTheDocument();
+    expect(screen.queryByText("NaN")).not.toBeInTheDocument();
+  });
 });

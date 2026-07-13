@@ -90,9 +90,12 @@ export function TeamAggregate({ orgId, teamId, teamName }: Props) {
   }
 
   // Group reports by date (YYYY-MM-DD) to compute daily team averages.
-  // Reports are ordered periodStart desc from the server.
+  // Reports are ordered periodStart desc from the server. Reports with a
+  // null (insufficient-data) score are skipped — they contribute nothing
+  // to a numeric average.
   const byDate = new Map<string, number[]>();
   for (const r of reports) {
+    if (r.totalScore === null) continue;
     const day = new Date(r.periodStart).toISOString().slice(0, 10);
     const existing = byDate.get(day) ?? [];
     byDate.set(day, [...existing, parseFloat(r.totalScore)]);

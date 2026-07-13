@@ -117,13 +117,19 @@ export function ProfileEvaluation() {
     );
   }
 
-  const latestScore = parseFloat(latestReport.totalScore);
+  const latestScore =
+    latestReport.totalScore === null ? null : parseFloat(latestReport.totalScore);
+  const isInsufficientData = latestScore === null || latestReport.insufficientData;
 
-  // Build 30-day trend series: oldest → newest
-  const trendSeries: ScorePoint[] = [...rangeReports].reverse().map((r) => ({
-    date: new Date(r.periodStart).toISOString().slice(0, 10),
-    score: parseFloat(r.totalScore),
-  }));
+  // Build 30-day trend series: oldest → newest. Reports with a null/insufficient
+  // score are skipped — there's nothing to plot for them.
+  const trendSeries: ScorePoint[] = [...rangeReports]
+    .reverse()
+    .filter((r) => r.totalScore !== null)
+    .map((r) => ({
+      date: new Date(r.periodStart).toISOString().slice(0, 10),
+      score: parseFloat(r.totalScore as string),
+    }));
 
   // Parse section scores from jsonb (SectionResult[])
   const sectionScores: SectionResult[] = Array.isArray(
@@ -192,7 +198,7 @@ export function ProfileEvaluation() {
             <span
               className={`rounded-full px-3 py-1 text-lg font-bold ring-1 ${scoreBadgeClass(latestScore)}`}
             >
-              {latestScore.toFixed(1)}
+              {isInsufficientData ? tReport("insufficientData") : latestScore!.toFixed(1)}
             </span>
           </div>
         </CardHeader>

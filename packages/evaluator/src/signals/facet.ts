@@ -17,6 +17,7 @@ export interface FacetRowInput {
   frictionCount: number | null;
   bugsCaughtCount: number | null;
   codexErrorsCount: number | null;
+  userSatisfaction: number | null;
 }
 
 interface MeanGteInput {
@@ -32,11 +33,13 @@ interface MeanLteInput {
 interface SumGteInput {
   rows: FacetRowInput[];
   gte: number;
+  normalize?: "per_session";
 }
 
 interface SumLteInput {
   rows: FacetRowInput[];
   lte: number;
+  normalize?: "per_session";
 }
 
 interface RatioGteInput {
@@ -70,11 +73,11 @@ export function collectFacetClaudeHelpfulness(
     .filter((v): v is number => v !== null);
 
   if (present.length === 0) {
-    return { hit: false, value: 0, evidence: [] };
+    return { hit: false, value: 0, evidence: [], sampleCount: 0 };
   }
 
   const mean = present.reduce((a, b) => a + b, 0) / present.length;
-  return { hit: mean >= input.gte, value: mean, evidence: [] };
+  return { hit: mean >= input.gte, value: mean, evidence: [], sampleCount: present.length };
 }
 
 /**
@@ -94,15 +97,16 @@ export function collectFacetFrictionPerSession(
     .filter((v): v is number => v !== null);
 
   if (present.length === 0) {
-    return { hit: true, value: 0, evidence: [] };
+    return { hit: true, value: 0, evidence: [], sampleCount: 0 };
   }
 
   const mean = present.reduce((a, b) => a + b, 0) / present.length;
-  return { hit: mean <= input.lte, value: mean, evidence: [] };
+  return { hit: mean <= input.lte, value: mean, evidence: [], sampleCount: present.length };
 }
 
 /**
  * Sum of `bugsCaughtCount` across rows. `hit: true` when sum >= gte.
+ * If normalize: "per_session", divides by the count of rows with data.
  */
 export function collectFacetBugsCaught(input: SumGteInput): SignalResult {
   const present = input.rows
@@ -110,17 +114,19 @@ export function collectFacetBugsCaught(input: SumGteInput): SignalResult {
     .filter((v): v is number => v !== null);
 
   if (present.length === 0) {
-    return { hit: false, value: 0, evidence: [] };
+    return { hit: false, value: 0, evidence: [], sampleCount: 0 };
   }
 
   const sum = present.reduce((a, b) => a + b, 0);
-  return { hit: sum >= input.gte, value: sum, evidence: [] };
+  const value = input.normalize === "per_session" ? sum / present.length : sum;
+  return { hit: value >= input.gte, value, evidence: [], sampleCount: present.length };
 }
 
 /**
  * Sum of `codexErrorsCount` — *inverted threshold* (lower is better).
  * `hit: true` when sum <= lte. Same `refusalRate`-style semantics as
  * `collectFacetFrictionPerSession`: empty/all-null returns `hit: true`.
+ * If normalize: "per_session", divides by the count of rows with data.
  */
 export function collectFacetCodexErrors(input: SumLteInput): SignalResult {
   const present = input.rows
@@ -128,11 +134,12 @@ export function collectFacetCodexErrors(input: SumLteInput): SignalResult {
     .filter((v): v is number => v !== null);
 
   if (present.length === 0) {
-    return { hit: true, value: 0, evidence: [] };
+    return { hit: true, value: 0, evidence: [], sampleCount: 0 };
   }
 
   const sum = present.reduce((a, b) => a + b, 0);
-  return { hit: sum <= input.lte, value: sum, evidence: [] };
+  const value = input.normalize === "per_session" ? sum / present.length : sum;
+  return { hit: value <= input.lte, value, evidence: [], sampleCount: present.length };
 }
 
 /**
@@ -148,14 +155,33 @@ export function collectFacetOutcomeSuccessRate(
     .filter((v): v is string => v !== null);
 
   if (present.length === 0) {
-    return { hit: false, value: 0, evidence: [] };
+    return { hit: false, value: 0, evidence: [], sampleCount: 0 };
   }
 
   const wins = present.filter(
     (o) => o === "success" || o === "partial",
   ).length;
   const ratio = wins / present.length;
-  return { hit: ratio >= input.gte, value: ratio, evidence: [] };
+  return { hit: ratio >= input.gte, value: ratio, evidence: [], sampleCount: present.length };
+}
+
+/**
+ * Mean `userSatisfaction` across rows with a numeric value (1-5 scale, v2).
+ * `hit: true` when mean >= gte. Empty/all-null → hit:false.
+ */
+export function collectFacetUserSatisfaction(
+  input: MeanGteInput,
+): SignalResult {
+  const present = input.rows
+    .map((r) => r.userSatisfaction)
+    .filter((v): v is number => v !== null);
+
+  if (present.length === 0) {
+    return { hit: false, value: 0, evidence: [], sampleCount: 0 };
+  }
+
+  const mean = present.reduce((a, b) => a + b, 0) / present.length;
+  return { hit: mean >= input.gte, value: mean, evidence: [], sampleCount: present.length };
 }
 
 /**
@@ -173,10 +199,10 @@ export function collectFacetSessionTypeRatio(
     .filter((v): v is string => v !== null);
 
   if (present.length === 0) {
-    return { hit: false, value: 0, evidence: [] };
+    return { hit: false, value: 0, evidence: [], sampleCount: 0 };
   }
 
   const matches = present.filter((t) => t === input.targetType).length;
   const ratio = matches / present.length;
-  return { hit: ratio >= input.gte, value: ratio, evidence: [] };
+  return { hit: ratio >= input.gte, value: ratio, evidence: [], sampleCount: present.length };
 }

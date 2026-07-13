@@ -28,6 +28,8 @@ export interface SignalResult {
   hit: boolean;
   value?: number;
   evidence: Evidence[];
+  /** v2: number of rows that actually carried data for this signal. */
+  sampleCount?: number;
 }
 
 export interface KeywordInput {

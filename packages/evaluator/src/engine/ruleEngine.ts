@@ -17,9 +17,12 @@ import {
   collectFacetCodexErrors,
   collectFacetOutcomeSuccessRate,
   collectFacetSessionTypeRatio,
+  collectFacetUserSatisfaction,
+  extractLatestHumanText,
   type FacetRowInput,
 } from "../signals/index.js";
 import { scoreSection } from "./sectionScorer.js";
+import { scoreSectionContinuous } from "./continuousScorer.js";
 import type { SignalHit, DataQuality, Report } from "./types.js";
 import type { Metrics } from "../metrics/aggregator.js";
 import type { UaBucket } from "../signals/uaBucket.js";
@@ -50,29 +53,34 @@ function dispatchSignal(
   usageRows: UsageRow[],
   bodyRows: BodyRow[],
   facetRows: FacetRowInput[],
+  noiseFilters: string[],
 ): SignalHit {
   switch (signal.type) {
     case "keyword": {
-      const texts =
-        signal.in === "request_body"
-          ? bodyRows.map((b) => ({
-              text: bodyToString(b.requestBody),
-              id: b.requestId,
-            }))
-          : signal.in === "response_body"
-            ? bodyRows.map((b) => ({
-                text: bodyToString(b.responseBody),
-                id: b.requestId,
-              }))
-            : bodyRows.map((b) => ({
-                text: `${bodyToString(b.requestBody)} ${bodyToString(b.responseBody)}`,
-                id: b.requestId,
-              }));
+      // v2 hygiene (docs/RUBRIC_V2_DESIGN.md §6): request_body/both scan only
+      // the latest genuine human turn (via extractLatestHumanText), honoring
+      // rubric.noiseFilters, so keyword hits measure this turn — not the
+      // accumulated history, system prompt, or tool output.
+      type ScanText = { text: string; id: string };
+      const scanTexts: ScanText[] = [];
+      for (const b of bodyRows) {
+        const human = extractLatestHumanText(b.requestBody, noiseFilters);
+        if (signal.in === "request_body") {
+          if (human !== null) scanTexts.push({ text: human, id: b.requestId });
+        } else if (signal.in === "response_body") {
+          scanTexts.push({ text: bodyToString(b.responseBody), id: b.requestId });
+        } else {
+          const resp = bodyToString(b.responseBody);
+          scanTexts.push({
+            text: human !== null ? `${human} ${resp}` : resp,
+            id: b.requestId,
+          });
+        }
+      }
 
       const allEvidence: NonNullable<SignalHit["evidence"]> = [];
       let bodiesWithHit = 0;
-
-      for (const { text, id } of texts) {
+      for (const { text, id } of scanTexts) {
         const result = collectKeyword({
           body: text,
           terms: signal.terms,
@@ -83,13 +91,15 @@ function dispatchSignal(
         allEvidence.push(...result.evidence);
       }
 
-      // #261: with minRatio, require a fraction of bodies to contain a term so
-      // high-volume telemetry (a term appearing in a handful of 1000s of
-      // bodies) no longer auto-hits. Without it, legacy any-hit is preserved.
+      // #261: with minRatio, require a fraction of scanned texts to contain a
+      // term so high-volume telemetry (a term appearing in a handful of
+      // 1000s of bodies) no longer auto-hits. Without it, legacy any-hit is
+      // preserved. Bodies excluded from scanTexts (no genuine human text for
+      // request_body) do not count toward the denominator.
       const hit =
         signal.minRatio !== undefined
-          ? texts.length > 0 &&
-            bodiesWithHit / texts.length >= signal.minRatio
+          ? scanTexts.length > 0 &&
+            bodiesWithHit / scanTexts.length >= signal.minRatio
           : bodiesWithHit > 0;
 
       return {
@@ -98,6 +108,7 @@ function dispatchSignal(
         hit,
         value: allEvidence.length,
         evidence: allEvidence,
+        sampleCount: scanTexts.length,
       };
     }
 
@@ -115,6 +126,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -126,6 +138,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -141,6 +154,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -155,6 +169,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -169,6 +184,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -183,6 +199,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -197,6 +214,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -211,6 +229,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -226,6 +245,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -240,6 +260,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -247,6 +268,7 @@ function dispatchSignal(
       const result = collectFacetBugsCaught({
         rows: facetRows,
         gte: signal.gte,
+        normalize: signal.normalize,
       });
       return {
         id: signal.id,
@@ -254,6 +276,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -261,6 +284,7 @@ function dispatchSignal(
       const result = collectFacetCodexErrors({
         rows: facetRows,
         lte: signal.lte,
+        normalize: signal.normalize,
       });
       return {
         id: signal.id,
@@ -268,6 +292,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -282,6 +307,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -297,6 +323,22 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
+      };
+    }
+
+    case "facet_user_satisfaction": {
+      const result = collectFacetUserSatisfaction({
+        rows: facetRows,
+        gte: signal.gte,
+      });
+      return {
+        id: signal.id,
+        type: signal.type,
+        hit: result.hit,
+        value: result.value,
+        evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
   }
@@ -326,23 +368,31 @@ function computeDataQuality(
 export function scoreWithRules(input: ScoreWithRulesInput): Report {
   const { rubric, usageRows, bodyRows, truncatedRequestIds } = input;
   const facetRows: FacetRowInput[] = input.facetRows ?? [];
+  const scaleMax = rubric.scale?.max ?? 120;
 
   const metrics = aggregate({ usageRows, bodyRows });
 
   const sectionScores = rubric.sections.map((section) => {
     const hits: SignalHit[] = section.signals.map((signal) =>
-      dispatchSignal(signal, metrics, usageRows, bodyRows, facetRows),
+      dispatchSignal(signal, metrics, usageRows, bodyRows, facetRows, rubric.noiseFilters ?? []),
     );
-    return scoreSection(section, hits);
+    return section.scoring?.mode === "continuous"
+      ? scoreSectionContinuous(section, hits, scaleMax)
+      : scoreSection(section, hits);
   });
 
-  const totalWeight = sectionScores.reduce((sum, s) => sum + s.weight, 0);
-  const weightedSum = sectionScores.reduce(
-    (sum, s) => sum + s.score * s.weight,
-    0,
-  );
-  const rawTotal = totalWeight === 0 ? 0 : weightedSum / totalWeight;
-  const totalScore = Math.min(120, Math.max(0, rawTotal));
+  const insufficientData = sectionScores.some((s) => s.score === null);
+
+  let totalScore: number | null = null;
+  if (!insufficientData) {
+    const totalWeight = sectionScores.reduce((sum, s) => sum + s.weight, 0);
+    const weightedSum = sectionScores.reduce(
+      (sum, s) => sum + (s.score as number) * s.weight,
+      0,
+    );
+    const rawTotal = totalWeight === 0 ? 0 : weightedSum / totalWeight;
+    totalScore = Math.min(scaleMax, Math.max(0, rawTotal));
+  }
 
   const dataQuality = computeDataQuality(
     usageRows,
@@ -350,10 +400,5 @@ export function scoreWithRules(input: ScoreWithRulesInput): Report {
     truncatedRequestIds,
   );
 
-  return {
-    totalScore,
-    sectionScores,
-    signalsSummary: metrics,
-    dataQuality,
-  };
+  return { totalScore, insufficientData, sectionScores, signalsSummary: metrics, dataQuality };
 }

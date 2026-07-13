@@ -44,6 +44,7 @@ export interface FacetRow {
   frictionCount: number | null;
   bugsCaughtCount: number | null;
   codexErrorsCount: number | null;
+  userSatisfaction: number | null;
   extractedWithModel: string;
   promptVersion: number;
   extractionError: string | null;
@@ -147,6 +148,7 @@ export async function extractOne(
       frictionCount: facet.frictionCount,
       bugsCaughtCount: facet.bugsCaughtCount,
       codexErrorsCount: facet.codexErrorsCount,
+      userSatisfaction: facet.userSatisfaction,
       extractedWithModel: deps.facetModel,
       promptVersion: CURRENT_PROMPT_VERSION,
       extractionError: null,
@@ -175,6 +177,7 @@ function emptyFacetRow(
     frictionCount: null,
     bugsCaughtCount: null,
     codexErrorsCount: null,
+    userSatisfaction: null,
     extractedWithModel: model,
     promptVersion: CURRENT_PROMPT_VERSION,
     extractionError: error,

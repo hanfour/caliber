@@ -20,28 +20,42 @@ export interface SignalHit {
   hit: boolean;
   value?: number;
   evidence?: EvidenceItem[];
+  /** v2: rows that actually carried data for this signal. */
+  sampleCount?: number;
+  /** v2 continuous: points earned after curve mapping (undefined when unusable). */
+  earnedPoints?: number;
+  /** v2 continuous: configured points for this signal. */
+  maxPoints?: number;
 }
 
 export interface SectionResult {
   sectionId: string;
   name: string;
   weight: number;
+  /** v2: which scorer produced this result. Legacy rows lack the field. */
+  mode?: "tiered" | "continuous";
   standardScore: number;
   superiorScore: number;
-  score: number;
+  /** null = insufficient data (continuous only). Tiered is always numeric. */
+  score: number | null;
+  /** v2 continuous: the scale max this section was scored against. */
+  maxScore?: number;
   label: string;
   signals: SignalHit[];
 }
 
 // ─── Score colour helpers ─────────────────────────────────────────────────────
 
-export function scoreColorClass(score: number): string {
+export function scoreColorClass(score: number | null): string {
+  if (score === null) return "text-zinc-500 dark:text-zinc-400";
   if (score >= 100) return "text-sky-600 dark:text-sky-400";
   if (score >= 80) return "text-emerald-600 dark:text-emerald-400";
   return "text-amber-600 dark:text-amber-400";
 }
 
-export function scoreBadgeClass(score: number): string {
+export function scoreBadgeClass(score: number | null): string {
+  if (score === null)
+    return "bg-zinc-100 text-zinc-600 ring-zinc-200 dark:bg-zinc-800/50 dark:text-zinc-400 dark:ring-zinc-700";
   if (score >= 100)
     return "bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800";
   if (score >= 80)
@@ -66,6 +80,9 @@ export function SectionRow({ section, rubricSection }: SectionRowProps) {
     hit: s.hit,
     value: s.value,
     evidence: s.evidence,
+    sampleCount: s.sampleCount,
+    earnedPoints: s.earnedPoints,
+    maxPoints: s.maxPoints,
   }));
 
   const rubricSignals: Record<string, RubricSignal> | undefined = rubricSection
@@ -73,6 +90,7 @@ export function SectionRow({ section, rubricSection }: SectionRowProps) {
     : undefined;
 
   const isSuperior =
+    section.mode !== "continuous" &&
     section.score === section.superiorScore &&
     section.superiorScore > section.standardScore;
 
@@ -96,11 +114,19 @@ export function SectionRow({ section, rubricSection }: SectionRowProps) {
           </div>
         </td>
         <td className="px-4 py-2.5 text-center">
-          <span
-            className={`text-sm font-semibold tabular-nums ${scoreColorClass(section.score)}`}
-          >
-            {section.score}
-          </span>
+          {section.score === null ? (
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-800/50 dark:text-zinc-400 dark:ring-zinc-700">
+              {t("insufficientData")}
+            </span>
+          ) : (
+            <span
+              className={`text-sm font-semibold tabular-nums ${scoreColorClass(section.score)}`}
+            >
+              {section.mode === "continuous"
+                ? `${section.score.toFixed(1)} / ${section.maxScore ?? section.superiorScore}`
+                : section.score}
+            </span>
+          )}
         </td>
         <td className="px-4 py-2.5 text-center text-xs text-muted-foreground tabular-nums">
           {section.weight}%

@@ -69,6 +69,7 @@ describe("runLlmDeepAnalysis metric emission", () => {
     const fakeDb = {} as unknown as Database;
     const report: Report = {
       totalScore: 80,
+      insufficientData: false,
       sectionScores: [],
       signalsSummary: {
         requests: 0,
@@ -138,6 +139,7 @@ describe("runLlmDeepAnalysis metric emission", () => {
 
     const report: Report = {
       totalScore: 80,
+      insufficientData: false,
       sectionScores: [],
       signalsSummary: {
         requests: 0,
@@ -209,6 +211,7 @@ describe("runLlmDeepAnalysis metric emission", () => {
 
     const report: Report = {
       totalScore: 80,
+      insufficientData: false,
       sectionScores: [],
       signalsSummary: {
         requests: 0,
@@ -276,6 +279,7 @@ describe("runLlmDeepAnalysis metric emission", () => {
 
     const report: Report = {
       totalScore: 80,
+      insufficientData: false,
       sectionScores: [],
       signalsSummary: {
         requests: 0,
@@ -345,6 +349,7 @@ describe("runLlmDeepAnalysis metric emission", () => {
 
     const report: Report = {
       totalScore: 80,
+      insufficientData: false,
       sectionScores: [],
       signalsSummary: {
         requests: 0,

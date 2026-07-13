@@ -962,6 +962,7 @@
       "weight": "Weight",
       "label": "Label",
       "superior": "Superior",
+      "insufficientData": "Insufficient data",
       "evidenceTitle": "Signal: {id}",
       "noEvidence": "No evidence quotes available for this section.",
       "requestId": "request_id:",
@@ -1060,7 +1061,8 @@
     },
     "trendChart": {
       "noData": "No data for this period.",
-      "ariaLabel": "30-day score trend"
+      "ariaLabel": "30-day score trend",
+      "passLine": "pass 108"
     },
     "exportDialog": {
       "title": "Export My Data",

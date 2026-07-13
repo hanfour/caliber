@@ -961,6 +961,7 @@
       "weight": "重み",
       "label": "ラベル",
       "superior": "優秀",
+      "insufficientData": "データ不足",
       "evidenceTitle": "シグナル: {id}",
       "noEvidence": "このセクションの証拠引用はありません。",
       "requestId": "request_id:",
@@ -1020,7 +1021,8 @@
     },
     "trendChart": {
       "noData": "この期間のデータがありません。",
-      "ariaLabel": "30 日間スコアトレンド"
+      "ariaLabel": "30 日間スコアトレンド",
+      "passLine": "合格 108"
     },
     "exportDialog": {
       "title": "データをエクスポート",

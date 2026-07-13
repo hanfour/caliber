@@ -154,6 +154,7 @@ const CANNED_FACET_JSON = JSON.stringify({
   frictionCount: 0,
   bugsCaughtCount: 1,
   codexErrorsCount: 0,
+  userSatisfaction: 4,
 });
 
 function makeBody(requestId: string): BodyRow {
@@ -336,8 +337,9 @@ describe("runFacetExtraction — integration", () => {
       expect(row.sessionType).toBe("feature_dev");
       expect(row.outcome).toBe("success");
       expect(row.claudeHelpfulness).toBe(4);
+      expect(row.userSatisfaction).toBe(4);
       expect(row.extractedWithModel).toBe(STUB_FACET_MODEL);
-      expect(row.promptVersion).toBe(1);
+      expect(row.promptVersion).toBe(2);
     }
 
     const ledgers = await db.select().from(llmUsageEvents);

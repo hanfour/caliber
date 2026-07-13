@@ -92,11 +92,13 @@ const STUB_RUBRIC: Rubric = {
 // Minimal rule-based report
 const STUB_RULE_REPORT: Report = {
   totalScore: 75,
+  insufficientData: false,
   sectionScores: [
     {
       sectionId: "quality",
       name: "Quality",
       weight: 100,
+      mode: "tiered",
       standardScore: 100,
       superiorScore: 120,
       score: 75,

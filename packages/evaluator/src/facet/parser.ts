@@ -27,6 +27,7 @@ const FacetSchema = z.object({
   frictionCount: z.number().int().nonnegative(),
   bugsCaughtCount: z.number().int().nonnegative(),
   codexErrorsCount: z.number().int().nonnegative(),
+  userSatisfaction: z.number().int().min(1).max(5),
 });
 
 export type FacetFields = z.infer<typeof FacetSchema>;
@@ -38,6 +39,7 @@ const ALLOWED_KEYS: ReadonlyArray<keyof FacetFields> = [
   "frictionCount",
   "bugsCaughtCount",
   "codexErrorsCount",
+  "userSatisfaction",
 ];
 
 function extractJsonText(raw: string): string {

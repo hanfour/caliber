@@ -33,18 +33,48 @@ import {
   evaluationReports,
   organizations,
   requestBodies,
+  requestBodyFacets,
   rubrics,
   upstreamAccounts,
   usageLogs,
   users,
   type Database,
 } from "@caliber/db";
+import type { Rubric } from "@caliber/evaluator";
 import { encryptBody } from "../../../src/capture/encrypt.js";
 import {
   runRuleBased,
   upsertEvaluationReport,
 } from "../../../src/workers/evaluator/runRuleBased.js";
 import { platformDefaultRubric } from "../../../src/workers/evaluator/fixtures/platformDefault.js";
+
+// Continuous (v2) rubric scoring solely off facet_user_satisfaction, mirroring
+// the `contRubric` shape from packages/evaluator's ruleEngine.test.ts. Used to
+// exercise the null-safe totalScore/insufficientData write path end-to-end.
+const CONTINUOUS_SAT_RUBRIC: Rubric = {
+  name: "continuous-satisfaction-test",
+  version: "2.0.0-test",
+  locale: "en",
+  scale: { max: 120, pass: 108 },
+  sections: [
+    {
+      id: "sat",
+      name: "Satisfaction",
+      weight: "100%",
+      scoring: { mode: "continuous" },
+      minSamples: 2,
+      signals: [
+        {
+          type: "facet_user_satisfaction",
+          id: "usat",
+          gte: 3.5,
+          points: 100,
+          curve: { zeroAt: 2.5, fullAt: 4.5 },
+        },
+      ],
+    },
+  ],
+};
 
 const require = createRequire(import.meta.url);
 const migrationsFolder = path.resolve(
@@ -263,6 +293,30 @@ async function seedRequestBody(requestId: string): Promise<void> {
     clientUserAgent: "test-agent/1.0",
     clientSessionId: null,
     retentionUntil: new Date("2024-07-01T00:00:00.000Z"),
+  });
+}
+
+// Seed a request_body_facets row (FK requires the parent request_bodies row
+// to already exist — call after seedRequestBody). Mirrors the shape written
+// by createFacetWriter, but inserted directly so tests can control
+// userSatisfaction independently of LLM extraction.
+async function seedFacetRow(
+  requestId: string,
+  userSatisfaction: number | null,
+): Promise<void> {
+  await db.insert(requestBodyFacets).values({
+    requestId,
+    orgId,
+    sessionType: null,
+    outcome: null,
+    claudeHelpfulness: null,
+    frictionCount: null,
+    bugsCaughtCount: null,
+    codexErrorsCount: null,
+    userSatisfaction,
+    extractedWithModel: "test-model",
+    promptVersion: 2,
+    extractionError: null,
   });
 }
 
@@ -607,5 +661,75 @@ describe("runRuleBased — integration", () => {
       .from(evaluationReports)
       .where(eq(evaluationReports.id, reportId!));
     expect(rows).toHaveLength(1);
+  });
+
+  it("5. continuous rubric over seeded facet rows (userSatisfaction) → numeric totalScore, insufficientData=false", async () => {
+    const requestIds = ["req-cont-sat-001", "req-cont-sat-002", "req-cont-sat-003"];
+    for (const requestId of requestIds) {
+      await seedUsageLog(requestId);
+      await seedRequestBody(requestId);
+      // user_satisfaction is a smallint column — DB stores integers only
+      // (the 4.5-valued facetRow fixture in ruleEngine.test.ts exercises the
+      // in-memory scoring path, which accepts any number; here we seed a real
+      // row, so use an integer that still clears the curve's fullAt: 4.5).
+      await seedFacetRow(requestId, 5);
+    }
+
+    const result = await runRuleBased({
+      ...makeRuleBasedInput(),
+      rubric: CONTINUOUS_SAT_RUBRIC,
+    });
+
+    expect(result.skipped).toBe(false);
+    expect(result.report.insufficientData).toBe(false);
+    expect(typeof result.report.totalScore).toBe("number");
+    expect(result.report.totalScore).toBeCloseTo(120);
+
+    // Persist and confirm the numeric score round-trips through the decimal column.
+    const reportId = await upsertEvaluationReport(
+      makeUpsertInput(result.report, {
+        rubricVersion: CONTINUOUS_SAT_RUBRIC.version,
+      }),
+    );
+    expect(reportId).toBeTruthy();
+
+    const [row] = await db
+      .select()
+      .from(evaluationReports)
+      .where(eq(evaluationReports.id, reportId!));
+    expect(row!.totalScore).not.toBeNull();
+    expect(Number(row!.totalScore)).toBeCloseTo(120);
+    expect(row!.insufficientData).toBe(false);
+  });
+
+  it("6. continuous rubric with thin samples (< minSamples) → insufficientData=true, totalScore null persisted as NULL", async () => {
+    const requestId = "req-cont-sat-thin-001";
+    await seedUsageLog(requestId);
+    await seedRequestBody(requestId);
+    await seedFacetRow(requestId, 5); // only 1 sample; CONTINUOUS_SAT_RUBRIC.minSamples = 2
+
+    const result = await runRuleBased({
+      ...makeRuleBasedInput(),
+      rubric: CONTINUOUS_SAT_RUBRIC,
+    });
+
+    expect(result.skipped).toBe(false);
+    expect(result.report.insufficientData).toBe(true);
+    expect(result.report.totalScore).toBeNull();
+
+    // Persist and confirm NULL (not the string "null") lands in the decimal column.
+    const reportId = await upsertEvaluationReport(
+      makeUpsertInput(result.report, {
+        rubricVersion: CONTINUOUS_SAT_RUBRIC.version,
+      }),
+    );
+    expect(reportId).toBeTruthy();
+
+    const [row] = await db
+      .select()
+      .from(evaluationReports)
+      .where(eq(evaluationReports.id, reportId!));
+    expect(row!.totalScore).toBeNull();
+    expect(row!.insufficientData).toBe(true);
   });
 });
