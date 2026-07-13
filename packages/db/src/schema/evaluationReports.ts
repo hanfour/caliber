@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, decimal, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, jsonb, timestamp, decimal, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core'
 import { organizations, teams } from './org.js'
 import { users } from './auth.js'
 import { rubrics } from './rubrics.js'
@@ -14,7 +14,7 @@ export const evaluationReports = pgTable('evaluation_reports', {
   periodType: text('period_type').notNull(),
   rubricId: uuid('rubric_id').notNull().references(() => rubrics.id, { onDelete: 'restrict' }),
   rubricVersion: text('rubric_version').notNull(),
-  totalScore: decimal('total_score', { precision: 10, scale: 4 }).notNull(),
+  totalScore: decimal('total_score', { precision: 10, scale: 4 }),
   sectionScores: jsonb('section_scores').notNull(),
   signalsSummary: jsonb('signals_summary').notNull(),
   dataQuality: jsonb('data_quality').notNull(),
@@ -26,6 +26,8 @@ export const evaluationReports = pgTable('evaluation_reports', {
   llmCalledAt: timestamp('llm_called_at', { withTimezone: true }),
   llmCostUsd: decimal('llm_cost_usd', { precision: 20, scale: 10 }),
   llmUpstreamAccountId: uuid('llm_upstream_account_id').references(() => upstreamAccounts.id, { onDelete: 'set null' }),
+  /** v2 (0030): true when the rubric couldn't score for lack of samples. */
+  insufficientData: boolean('insufficient_data').notNull().default(false),
   triggeredBy: text('triggered_by').notNull(),
   triggeredByUser: uuid('triggered_by_user').references(() => users.id, { onDelete: 'set null' }),
   // Phase 1 (0014) — `{ "gateway_events": N, "transcript_events": M, "overlap": K }`.

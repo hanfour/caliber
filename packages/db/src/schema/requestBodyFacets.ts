@@ -39,6 +39,8 @@ export const requestBodyFacets = pgTable(
     frictionCount: integer("friction_count"),
     bugsCaughtCount: integer("bugs_caught_count"),
     codexErrorsCount: integer("codex_errors_count"),
+    /** v2 (0029): LLM-judged user satisfaction 1..5; NULL on prompt-v1 rows. */
+    userSatisfaction: smallint("user_satisfaction"),
     // Phase 1 (0014) transcript-only signals. Populated by the future
     // evaluator-on-evaluator_events cron; NULL on gateway-source-only rows.
     subagentCallCount: integer("subagent_call_count"),
