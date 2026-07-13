@@ -942,7 +942,7 @@
     },
     "report": {
       "loading": "Loading evaluation data…",
-      "noReports": "No evaluation reports found for the last 30 days.",
+      "noReports": "No evaluation reports in this period.",
       "evaluationTitle": "Evaluation",
       "evaluationFor": "Evaluation — {name}",
       "thirtyDayHistory": "30-day score history",

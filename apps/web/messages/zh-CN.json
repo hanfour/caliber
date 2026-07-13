@@ -942,7 +942,7 @@
     },
     "report": {
       "loading": "加载评估数据中…",
-      "noReports": "最近 30 天没有评估报告。",
+      "noReports": "此期间没有评估报告。",
       "evaluationTitle": "评估",
       "evaluationFor": "评估 — {name}",
       "thirtyDayHistory": "30 天分数历史",

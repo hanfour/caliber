@@ -942,7 +942,7 @@
     },
     "report": {
       "loading": "載入評估資料中…",
-      "noReports": "最近 30 天沒有評估報告。",
+      "noReports": "此期間沒有評估報告。",
       "evaluationTitle": "評估",
       "evaluationFor": "評估 — {name}",
       "thirtyDayHistory": "30 天分數歷史",

@@ -942,7 +942,7 @@
     },
     "report": {
       "loading": "평가 데이터 로딩 중…",
-      "noReports": "최근 30일간의 평가 보고서가 없습니다.",
+      "noReports": "이 기간의 평가 보고서가 없습니다.",
       "evaluationTitle": "평가",
       "evaluationFor": "평가 — {name}",
       "thirtyDayHistory": "30일 점수 기록",
