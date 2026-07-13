@@ -23,9 +23,9 @@ import { LlmEvidenceList } from "./LlmEvidenceList";
 import { GeneratedAudienceReport } from "./GeneratedAudienceReport";
 import {
   EvaluationWindowSelect,
-  windowRange,
-  DEFAULT_WINDOW_DAYS,
-  type WindowDays,
+  selectionToRange,
+  DEFAULT_SELECTION,
+  type WindowSelection,
 } from "./EvaluationWindowSelect";
 import {
   scoreBadgeClass,
@@ -46,11 +46,11 @@ export function ProfileEvaluation() {
   // Memoize so the query key is stable across renders. Without this,
   // `new Date()` runs every render and tRPC keeps refetching, which keeps
   // `isLoading` pinned to true and never reveals the empty / loaded state.
-  const [windowDays, setWindowDays] = useState<WindowDays>(DEFAULT_WINDOW_DAYS);
+  const [sel, setSel] = useState<WindowSelection>(DEFAULT_SELECTION);
   const { rangeFrom, rangeTo } = useMemo(() => {
-    const { from, to } = windowRange(windowDays);
+    const { from, to } = selectionToRange(sel);
     return { rangeFrom: from, rangeTo: to };
-  }, [windowDays]);
+  }, [sel]);
 
   const {
     data: latestReport,
@@ -158,8 +158,8 @@ export function ProfileEvaluation() {
           <div className="space-y-1">
             <CardTitle className="text-base">{t("latestScore")}</CardTitle>
             <CardDescription>
-              {t("windowUpdated", {
-                days: windowDays,
+              {t(sel.mode === "custom" ? "windowUpdatedCustom" : "windowUpdated", {
+                days: sel.mode === "preset" ? sel.days : 0,
                 date: new Date(latestReport.periodStart).toLocaleDateString("en-US", {
                   year: "numeric",
                   month: "short",
@@ -168,8 +168,8 @@ export function ProfileEvaluation() {
               })}
             </CardDescription>
           </div>
-          <div className="flex items-center gap-3">
-            <EvaluationWindowSelect value={windowDays} onChange={setWindowDays} />
+          <div className="flex items-start gap-3">
+            <EvaluationWindowSelect value={sel} onChange={setSel} />
             <span
               className={`rounded-full px-3 py-1 text-lg font-bold ring-1 ${scoreBadgeClass(latestScore)}`}
             >

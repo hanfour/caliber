@@ -971,7 +971,13 @@
       "windowSelectLabel": "评估区间",
       "windowOption": "{days} 天",
       "windowUpdated": "{days} 天窗口 · 最后更新 {date}",
-      "windowHistory": "{days} 天分数历史"
+      "windowHistory": "{days} 天分数历史",
+      "windowCustom": "自定义",
+      "windowFrom": "起",
+      "windowTo": "迄",
+      "windowUpdatedCustom": "自定义区间 · 最后更新 {date}",
+      "windowHistoryCustom": "自定义区间分数历史",
+      "rerunMaxWindow": "重跑上限 {days} 天"
     },
     "audienceReport": {
       "userLabel": "个人报告",
@@ -1009,7 +1015,8 @@
       "captureEnabledTitle": "你的账户已启用内容采集。",
       "captureEnabledBodyDays": "与你的 API 密钥关联的请求内容会保留最多 {days} 天(组织可能设置更短的保留期)。每晚的排程任务会自动依组织的评分标准生成评估。",
       "captureEnabledFooter": "如有数据保留问题或要求删除,请联系组织管理员。你也可以使用本页底部的导出与删除选项。",
-      "windowUpdated": "{days} 天窗口 · 期间结束于 {date}"
+      "windowUpdated": "{days} 天窗口 · 期间结束于 {date}",
+      "windowUpdatedCustom": "自定义区间 · 期间结束于 {date}"
     },
     "llmEvidence": {
       "title": "AI 证据",

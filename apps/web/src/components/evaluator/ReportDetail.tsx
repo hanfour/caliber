@@ -23,9 +23,11 @@ import { LlmEvidenceList } from "./LlmEvidenceList";
 import { GeneratedAudienceReport } from "./GeneratedAudienceReport";
 import {
   EvaluationWindowSelect,
-  windowRange,
-  DEFAULT_WINDOW_DAYS,
-  type WindowDays,
+  selectionToRange,
+  rangeDays,
+  RERUN_MAX_DAYS,
+  DEFAULT_SELECTION,
+  type WindowSelection,
 } from "./EvaluationWindowSelect";
 import type { RubricSignal } from "./rubricThreshold";
 
@@ -39,13 +41,18 @@ interface Props {
 
 export function ReportDetail({ orgId, userId, userName }: Props) {
   const t = useTranslations("evaluator.report");
-  const [windowDays, setWindowDays] = useState<WindowDays>(DEFAULT_WINDOW_DAYS);
-  // Memoize on windowDays: a bare `new Date()` in render changes the query key
-  // every render → infinite refetch loop (report never settles, API hammered).
+  const [sel, setSel] = useState<WindowSelection>(DEFAULT_SELECTION);
+  // Memoize on `sel`: a bare `new Date()` in render changes the query key every
+  // render → infinite refetch loop (report never settles, API hammered).
   const { rangeFrom, rangeTo } = useMemo(() => {
-    const { from, to } = windowRange(windowDays);
+    const { from, to } = selectionToRange(sel);
     return { rangeFrom: from, rangeTo: to };
-  }, [windowDays]);
+  }, [sel]);
+  // The rerun backend rejects windows > 30 days; the 90-day preset and long
+  // custom ranges are view-only. +0.01 tolerates float drift on the 30d edge.
+  const rerunAllowed = rangeDays(rangeFrom, rangeTo) <= RERUN_MAX_DAYS + 0.01;
+  const windowLabelKey = sel.mode === "custom" ? "windowUpdatedCustom" : "windowUpdated";
+  const windowLabelDays = sel.mode === "preset" ? sel.days : 0;
 
   const { data: reports, isLoading, error } = trpc.reports.getUser.useQuery({
     orgId,
@@ -108,9 +115,13 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
         <CardHeader className="flex flex-row items-start justify-between space-y-0">
           <div className="space-y-1">
             <CardTitle className="text-base">{t("evaluationTitle")}</CardTitle>
-            <CardDescription>{t("windowHistory", { days: windowDays })}</CardDescription>
+            <CardDescription>
+              {sel.mode === "custom"
+                ? t("windowHistoryCustom")
+                : t("windowHistory", { days: sel.days })}
+            </CardDescription>
           </div>
-          <EvaluationWindowSelect value={windowDays} onChange={setWindowDays} />
+          <EvaluationWindowSelect value={sel} onChange={setSel} />
         </CardHeader>
         <CardContent className="py-6 text-sm text-muted-foreground text-center">
           {t("noReports")}
@@ -154,8 +165,8 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
           <div className="space-y-1">
             <CardTitle className="text-base">{t("evaluationFor", { name: userName })}</CardTitle>
             <CardDescription>
-              {t("windowUpdated", {
-                days: windowDays,
+              {t(windowLabelKey, {
+                days: windowLabelDays,
                 date: new Date(latest.periodStart).toLocaleDateString("en-US", {
                   year: "numeric",
                   month: "short",
@@ -165,8 +176,8 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
             </CardDescription>
           </div>
 
-          <div className="flex items-center gap-3">
-            <EvaluationWindowSelect value={windowDays} onChange={setWindowDays} />
+          <div className="flex items-start gap-3">
+            <EvaluationWindowSelect value={sel} onChange={setSel} />
             <span
               className={`rounded-full px-3 py-1 text-sm font-bold ring-1 ${scoreBadgeClass(latestScore)}`}
             >
@@ -181,7 +192,8 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
                 size="sm"
                 className="gap-1.5"
                 onClick={handleRerun}
-                disabled={rerunMutation.isPending}
+                disabled={rerunMutation.isPending || !rerunAllowed}
+                title={!rerunAllowed ? t("rerunMaxWindow", { days: RERUN_MAX_DAYS }) : undefined}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 {rerunMutation.isPending ? t("queueing") : t("rerunBtn")}
