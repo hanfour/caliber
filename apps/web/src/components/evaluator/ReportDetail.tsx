@@ -49,8 +49,8 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
     const { from, to } = selectionToRange(sel);
     return { rangeFrom: from, rangeTo: to };
   }, [sel]);
-  // The rerun backend rejects windows > 30 days; the 90-day preset and long
-  // custom ranges are view-only. +0.01 tolerates float drift on the 30d edge.
+  // The rerun backend rejects windows > 92 days; longer custom ranges stay
+  // view-only. +0.01 tolerates float drift on the 92-day edge.
   const rerunAllowed = rangeDays(rangeFrom, rangeTo) <= RERUN_MAX_DAYS + 0.01;
   const quarterName = (() => {
     const q = lastCompletedQuarter();
