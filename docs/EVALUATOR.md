@@ -315,7 +315,97 @@ the same prompt version are free. See
 [`runbooks/facet-extraction.md`](./runbooks/facet-extraction.md) and
 [`runbooks/facet-parse-errors.md`](./runbooks/facet-parse-errors.md).
 
-## 11. Further reading
+## 11. Rubric v2 — continuous scoring
+
+> Status: implemented on branch `feat/rubric-v2-continuous-scoring`. Seeded
+> as `is_default=false` — see rollout state below before assuming this is
+> what members are currently scored against.
+
+Full design rationale: [`RUBRIC_V2_DESIGN.md`](./RUBRIC_V2_DESIGN.md).
+
+### Continuous section mode
+
+A rubric section (`rubric.config.sections[i]`) now supports two scoring
+modes via `scoring.mode`. Legacy `tiered` sections are unchanged
+(`standard`/`superior` tiers, always a numeric score). `continuous`
+sections score each signal on a linear curve and sum by weight:
+
+| Field | Where | Meaning |
+|---|---|---|
+| `scoring.mode` | section | `"tiered"` (default) or `"continuous"`. |
+| `points` | signal | Max points this signal contributes if it fully hits (must sum sensibly across a section's signals; schema requires `points` + `curve` on every signal in a continuous section). |
+| `curve.zeroAt` / `curve.fullAt` | signal | Linear map from the signal's raw `value` to a 0–1 subscore. `zeroAt` need not be less than `fullAt` — a descending curve (`zeroAt > fullAt`, e.g. an error-rate signal) inverts automatically. Values are clamped to [0, 1] outside the range. |
+| `minSamples` | section | Minimum facet sample count (`sampleCount`) before a **facet** signal counts as usable; default `5`. Non-facet signals are usable whenever `sampleCount` is `undefined` or `> 0`. |
+| `normalize` | signal (`facet_bugs_caught`, `facet_codex_errors`) | `"per_session"` divides the raw count by session count before curve-scoring, so a member with more sessions isn't penalized/rewarded purely by volume. |
+
+Section score = `scaleMax × Σ(points × subscore over usable signals) / Σ(points over usable signals)`.
+If total configured points is `0`, or usable points fall below half of
+total configured points, the section score is `null` (insufficient data)
+rather than a distorted average over a handful of signals — see below.
+
+### Platform v2 rubric (`packages/evaluator/src/rubrics/platformV2.ts`)
+
+Scale: **max 120, pass 108** (matches the legacy v1 scale so dashboards and
+trend charts don't need a second axis). Three continuous sections, weights
+mirror the ITO quarterly KPI sub-items:
+
+| Section | Weight | `minSamples` | Signal | points | curve (`zeroAt` → `fullAt`) | normalize |
+|---|---|---|---|---|---|---|
+| `efficiency` — Efficiency · AI Interaction | 25% | 5 | `facet_claude_helpfulness` (≥3.5) | 50 | 2.5 → 4.5 | — |
+| | | | `facet_friction_per_session` (≤1.0) | 30 | 3.0 → 0.5 | — |
+| | | | `cache_read_ratio` (≥0.2) | 20 | 0.1 → 0.6 | — |
+| `riskControl` — Quality · AI Risk Control | 50% | 5 | `facet_bugs_caught` (≥0.2) | 45 | 0 → 0.5 | per_session |
+| | | | `facet_codex_errors` (≤0.5) | 30 | 1.0 → 0.1 | per_session |
+| | | | `refusal_rate` (≤0.2) | 25 | 0.3 → 0.05 | — |
+| `satisfaction` — Requester Satisfaction | 25% | 5 | `facet_outcome_success_rate` (≥0.6) | 70 | 0.4 → 0.85 | — |
+| | | | `facet_user_satisfaction` (≥3.5) | 30 | 2.5 → 4.5 | — |
+
+Curve `zeroAt`/`fullAt` values are **initial** — they need dry-run
+calibration against real member data before `is_default` flips (design
+doc §8 step 4).
+
+### Insufficient-data semantics
+
+When a section can't be scored reliably (see the `null` rule above),
+`SectionResult.score` is `null` and `label` is `"insufficient_data"`. If
+**any** section is `null`, the report-level `Report.totalScore` is `null`
+and `Report.insufficientData` is `true` — the report does not silently
+fall back to a partial or zero score. UI surfaces this as an "insufficient
+data" badge (`MemberScoreCell`, `TeamLeaderboard`, `ProfileEvaluation`)
+instead of a number; `src/admin-report.ts` (the CLI report renderer) does
+the same (`"insufficient data"` / `"—"` per section) since it's a
+downstream consumer of the same `Report` shape.
+
+### Keyword hygiene (enforced, not just schema)
+
+Two fixes shipped alongside continuous scoring, both apply to any rubric
+still using `keyword` signals (platform v2 itself no longer uses them):
+
+1. **`noiseFilters` is now actually applied.** Previously the field
+   existed on `rubricSchema` but the engine never read it — noise like
+   `<system-reminder>` or `<task-notification>` wrapper text could
+   trigger keyword hits. `ruleEngine.ts` now strips `rubric.noiseFilters`
+   fragments from scanned text before matching.
+2. **Keyword scans only the latest human turn**, not the whole request
+   body history. `extractLatestHumanText` (honoring `noiseFilters`) pulls
+   just the newest non-`tool_result` user text block instead of the full
+   accumulated conversation — this kills the "snowball" bug where one
+   early message containing a keyword made every later body in the same
+   session match, regardless of what that turn actually said.
+
+### Rollout state
+
+The v2 platform rubric is seeded (migration `0031`) with
+**`is_default=false`** in all three locales (en / zh-Hant / ja) — no
+member is scored against it yet. Flipping the default is intentionally a
+separate, later migration, gated on running `rubrics.dryRun` against real
+member data to calibrate the curve parameters above and confirm the score
+distribution actually spreads out (target band ~90–115, not everyone
+clustered at one value). See [`RUBRIC_V2_DESIGN.md`](./RUBRIC_V2_DESIGN.md) §8 (Migration 與
+rollout) for the full rollout plan. Org admins can still pin v1 or a
+custom rubric in the meantime; v1 is not deleted.
+
+## 12. Further reading
 
 - Design doc: [`.claude/plans/2026-04-20-plan4b-evaluator-design.md`](./.claude/plans/2026-04-20-plan4b-evaluator-design.md)
   — full architecture, score aggregation model, LLM prompt engineering.
