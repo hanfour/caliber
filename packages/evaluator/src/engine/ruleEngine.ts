@@ -268,6 +268,7 @@ function dispatchSignal(
       const result = collectFacetBugsCaught({
         rows: facetRows,
         gte: signal.gte,
+        normalize: signal.normalize,
       });
       return {
         id: signal.id,
@@ -283,6 +284,7 @@ function dispatchSignal(
       const result = collectFacetCodexErrors({
         rows: facetRows,
         lte: signal.lte,
+        normalize: signal.normalize,
       });
       return {
         id: signal.id,

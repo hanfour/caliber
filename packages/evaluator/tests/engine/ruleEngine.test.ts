@@ -658,6 +658,51 @@ describe("scoreWithRules", () => {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(report.sectionScores[0]!.mode).toBe("tiered");
     });
+
+    it("forwards normalize: per_session to facet_bugs_caught so the collector scores a rate, not a raw sum", () => {
+      // Regression for the dropped-`normalize` bug in dispatchSignal: 4 bugs
+      // caught across 20 rows should be scored as a 0.2 per-session rate
+      // (curve zeroAt:0/fullAt:0.5 → subscore 0.4), NOT as the raw sum (4),
+      // which would blow past fullAt and saturate the curve at 1.0.
+      const bugsRubric = {
+        name: "v2-bugs", version: "2.0.0", locale: "en" as const,
+        scale: { max: 120, pass: 108 },
+        sections: [
+          {
+            id: "riskControl",
+            name: "Risk Control",
+            weight: "100%",
+            scoring: { mode: "continuous" as const },
+            minSamples: 2,
+            signals: [
+              {
+                type: "facet_bugs_caught" as const,
+                id: "bugs_caught_rate",
+                gte: 0.2,
+                normalize: "per_session" as const,
+                points: 100,
+                curve: { zeroAt: 0, fullAt: 0.5 },
+              },
+            ],
+          },
+        ],
+      };
+      const bugRow = (bugsCaughtCount: number) => ({
+        sessionType: null, outcome: null, claudeHelpfulness: null,
+        frictionCount: null, bugsCaughtCount, codexErrorsCount: null,
+        userSatisfaction: null,
+      });
+      const facetRows = [
+        ...Array.from({ length: 4 }, () => bugRow(1)),
+        ...Array.from({ length: 16 }, () => bugRow(0)),
+      ];
+      const report = scoreWithRules({ rubric: bugsRubric, usageRows: [], bodyRows: [], facetRows });
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const hit = report.sectionScores[0]!.signals[0]!;
+      expect(hit.value).toBe(0.2); // rate = 4/20, not the raw sum 4
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(report.sectionScores[0]!.score).toBeCloseTo(48); // 120 × (0.2/0.5)
+    });
   });
 
   describe("keyword v2 — latest-human-turn scanning", () => {
