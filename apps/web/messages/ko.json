@@ -1020,7 +1020,8 @@
       "captureEnabledBodyDays": "API 키와 관련된 요청 콘텐츠는 최대 {days}일 동안 보관됩니다(조직이 더 짧은 보관 기간을 구성할 수 있음). 평가는 조직의 루브릭을 사용하여 야간 프로세스에 의해 자동으로 생성됩니다.",
       "captureEnabledFooter": "데이터 보관 또는 삭제 요청에 관한 질문은 조직 관리자에게 문의하세요. 이 페이지 하단의 내보내기 및 삭제 옵션을 사용할 수도 있습니다.",
       "windowUpdated": "{days}일 기간 · 기간 종료 {date}",
-      "windowUpdatedCustom": "사용자 지정 기간 · 기간 종료 {date}"
+      "windowUpdatedCustom": "사용자 지정 기간 · 기간 종료 {date}",
+      "windowUpdatedQuarter": "{quarter} · 기간 종료 {date}"
     },
     "llmEvidence": {
       "title": "AI 근거",
