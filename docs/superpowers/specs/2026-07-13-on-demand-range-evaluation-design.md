@@ -44,10 +44,18 @@ The `> 92 days` case still throws `BAD_REQUEST` ("Window exceeds 92 days").
 
 `apps/web/src/components/evaluator/`:
 
-- **`EvaluationWindowSelect.ts`**: change `RERUN_MAX_DAYS` from `30` to `92`
-  (kept in sync with the backend constant; a one-line comment cross-references
-  it). This also re-enables the rerun button for the 90-day preset, which the
-  30-day guard had disabled.
+- **`EvaluationWindowSelect.ts`**:
+  - Change `RERUN_MAX_DAYS` from `30` to `92` (kept in sync with the backend
+    constant; a one-line comment cross-references it). This also re-enables the
+    rerun button for the 90-day preset, which the 30-day guard had disabled.
+  - Add a **`上季` (last quarter)** option — a new `{ mode: "quarter" }` selection
+    that resolves to the most recent **completed** calendar quarter. `now` in
+    Q3 → Q2 (04/01 00:00 → 06/30 23:59:59.999), computed at the viewer's local
+    time (consistent with the custom picker). Q1 → previous year's Q4. A quarter
+    is ≤ 92 days, so it is always within the rerun cap. Export
+    `lastCompletedQuarter()` returning `{ year, quarter, from, to }`; render it
+    as a fourth segmented button (order: `7天 · 30天 · 90天 · 上季 · 自訂`).
+    Its date range is fixed (no date inputs shown, unlike custom).
 - **`ReportDetail.tsx`**:
   - Add the rerun/generate button to the **empty-state** card (currently it only
     renders the window selector). Wrap it in `RequirePerm({type:"report.rerun",
@@ -58,8 +66,15 @@ The `> 92 days` case still throws `BAD_REQUEST` ("Window exceeds 92 days").
     permits windows up to 92 days.
 
 The button uses the currently-selected range (`rangeFrom`/`rangeTo`), which the
-custom date picker already drives. `rerunAllowed = rangeDays(from,to) <= 92 +
-ε`; the button is disabled with the `rerunMaxWindow` hint beyond that.
+custom date picker and the `上季` preset already drive. `rerunAllowed =
+rangeDays(from,to) <= 92 + ε`; the button is disabled with the `rerunMaxWindow`
+hint beyond that.
+
+Header/empty-state labels for the quarter mode show the quarter name (e.g.
+`2026 Q2 · 最後更新 {date}`) via new i18n keys `windowQuarter` (button),
+`windowUpdatedQuarter`, `windowHistoryQuarter` (+ `evaluator.profileEval.
+windowUpdatedQuarter`) in all four catalogs; `{quarter}` is the computed
+`"YYYY QN"` string.
 
 ### 3. Behaviour / UX notes (no code beyond the above)
 
@@ -86,13 +101,21 @@ custom date picker already drives. `rerunAllowed = rangeDays(from,to) <= 92 +
   rejects a 93-day window; a valid long window enqueues exactly one job.
 - **Web** (`ReportDetail`): the empty-state renders the generate button (behind
   `report.rerun` perm) and it is enabled for a ≤92-day range; the guard disables
-  it beyond 92 days. `EvaluationWindowSelect`: `RERUN_MAX_DAYS === 92`.
+  it beyond 92 days. `EvaluationWindowSelect`: `RERUN_MAX_DAYS === 92`;
+  `lastCompletedQuarter()` returns the correct prior quarter (incl. the Q1 →
+  previous-year-Q4 wrap) and a ≤92-day span; the `上季` button renders and, when
+  active, drives the range without showing date inputs.
 
 ## Files touched
 
-- `apps/api/src/trpc/routers/reports.ts` (cap constant)
-- `apps/web/src/components/evaluator/EvaluationWindowSelect.tsx` (RERUN_MAX_DAYS)
-- `apps/web/src/components/evaluator/ReportDetail.tsx` (empty-state button)
+- `apps/api/src/trpc/routers/reports.ts` (cap constant + message)
+- `apps/web/src/components/evaluator/EvaluationWindowSelect.tsx` (RERUN_MAX_DAYS,
+  `quarter` mode, `lastCompletedQuarter()`, `上季` button)
+- `apps/web/src/components/evaluator/ReportDetail.tsx` (empty-state button,
+  quarter label)
+- `apps/web/src/components/evaluator/ProfileEvaluation.tsx` (quarter label)
+- `apps/web/messages/{en,zh-TW,zh-CN,ko}.json` (windowQuarter/UpdatedQuarter/
+  HistoryQuarter + profileEval.windowUpdatedQuarter)
 - Tests: `apps/api/tests/integration/trpc/reports.mutations.test.ts`,
   `apps/web/tests/components/evaluator/ReportDetail.test.tsx`,
   `apps/web/tests/components/evaluator/EvaluationWindowSelect.test.tsx`
