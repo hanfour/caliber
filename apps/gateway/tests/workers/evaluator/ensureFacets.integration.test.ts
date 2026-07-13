@@ -184,6 +184,7 @@ const CANNED_FACET_TEXT = JSON.stringify({
   frictionCount: 0,
   bugsCaughtCount: 1,
   codexErrorsCount: 0,
+  userSatisfaction: 4,
 });
 
 describe("ensureFacets — end-to-end (real DB + mocked LLM)", () => {
@@ -229,8 +230,9 @@ describe("ensureFacets — end-to-end (real DB + mocked LLM)", () => {
       expect(row.sessionType).toBe("feature_dev");
       expect(row.outcome).toBe("success");
       expect(row.claudeHelpfulness).toBe(4);
+      expect(row.userSatisfaction).toBe(4);
       expect(row.extractedWithModel).toBe("claude-haiku-4-5");
-      expect(row.promptVersion).toBe(1);
+      expect(row.promptVersion).toBe(2);
       expect(row.extractionError).toBeNull();
     }
 
@@ -285,6 +287,6 @@ describe("ensureFacets — end-to-end (real DB + mocked LLM)", () => {
     const row = rows[0]!;
     expect(row.extractionError).toMatch(/^parse_error:/);
     expect(row.sessionType).toBeNull();
-    expect(row.promptVersion).toBe(1);
+    expect(row.promptVersion).toBe(2);
   });
 });
