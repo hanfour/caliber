@@ -18,6 +18,7 @@ import {
   collectFacetOutcomeSuccessRate,
   collectFacetSessionTypeRatio,
   collectFacetUserSatisfaction,
+  extractLatestHumanText,
   type FacetRowInput,
 } from "../signals/index.js";
 import { scoreSection } from "./sectionScorer.js";
@@ -56,26 +57,30 @@ function dispatchSignal(
 ): SignalHit {
   switch (signal.type) {
     case "keyword": {
-      const texts =
-        signal.in === "request_body"
-          ? bodyRows.map((b) => ({
-              text: bodyToString(b.requestBody),
-              id: b.requestId,
-            }))
-          : signal.in === "response_body"
-            ? bodyRows.map((b) => ({
-                text: bodyToString(b.responseBody),
-                id: b.requestId,
-              }))
-            : bodyRows.map((b) => ({
-                text: `${bodyToString(b.requestBody)} ${bodyToString(b.responseBody)}`,
-                id: b.requestId,
-              }));
+      // v2 hygiene (docs/RUBRIC_V2_DESIGN.md §6): request_body/both scan only
+      // the latest genuine human turn (via extractLatestHumanText), honoring
+      // rubric.noiseFilters, so keyword hits measure this turn — not the
+      // accumulated history, system prompt, or tool output.
+      type ScanText = { text: string; id: string };
+      const scanTexts: ScanText[] = [];
+      for (const b of bodyRows) {
+        const human = extractLatestHumanText(b.requestBody, noiseFilters);
+        if (signal.in === "request_body") {
+          if (human !== null) scanTexts.push({ text: human, id: b.requestId });
+        } else if (signal.in === "response_body") {
+          scanTexts.push({ text: bodyToString(b.responseBody), id: b.requestId });
+        } else {
+          const resp = bodyToString(b.responseBody);
+          scanTexts.push({
+            text: human !== null ? `${human} ${resp}` : resp,
+            id: b.requestId,
+          });
+        }
+      }
 
       const allEvidence: NonNullable<SignalHit["evidence"]> = [];
       let bodiesWithHit = 0;
-
-      for (const { text, id } of texts) {
+      for (const { text, id } of scanTexts) {
         const result = collectKeyword({
           body: text,
           terms: signal.terms,
@@ -86,13 +91,15 @@ function dispatchSignal(
         allEvidence.push(...result.evidence);
       }
 
-      // #261: with minRatio, require a fraction of bodies to contain a term so
-      // high-volume telemetry (a term appearing in a handful of 1000s of
-      // bodies) no longer auto-hits. Without it, legacy any-hit is preserved.
+      // #261: with minRatio, require a fraction of scanned texts to contain a
+      // term so high-volume telemetry (a term appearing in a handful of
+      // 1000s of bodies) no longer auto-hits. Without it, legacy any-hit is
+      // preserved. Bodies excluded from scanTexts (no genuine human text for
+      // request_body) do not count toward the denominator.
       const hit =
         signal.minRatio !== undefined
-          ? texts.length > 0 &&
-            bodiesWithHit / texts.length >= signal.minRatio
+          ? scanTexts.length > 0 &&
+            bodiesWithHit / scanTexts.length >= signal.minRatio
           : bodiesWithHit > 0;
 
       return {
@@ -101,7 +108,7 @@ function dispatchSignal(
         hit,
         value: allEvidence.length,
         evidence: allEvidence,
-        sampleCount: texts.length,
+        sampleCount: scanTexts.length,
       };
     }
 

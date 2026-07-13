@@ -207,7 +207,11 @@ describe("scoreWithRules", () => {
         clientSessionId: null,
         requestParams: null,
         responseBody: null,
-        requestBody: { text: "What are my options here?" },
+        requestBody: {
+          messages: [
+            { role: "user", content: "What are my options here?" },
+          ],
+        },
       },
     ];
     const report = scoreWithRules({ rubric, usageRows: [], bodyRows: bodies });
@@ -253,7 +257,14 @@ describe("scoreWithRules", () => {
         clientSessionId: null,
         requestParams: null,
         responseBody: null,
-        requestBody: { text: i < hitCount ? "please refactor this" : "hello" },
+        requestBody: {
+          messages: [
+            {
+              role: "user",
+              content: i < hitCount ? "please refactor this" : "hello",
+            },
+          ],
+        },
       }));
     }
 
@@ -646,6 +657,52 @@ describe("scoreWithRules", () => {
       expect(report.insufficientData).toBe(false);
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(report.sectionScores[0]!.mode).toBe("tiered");
+    });
+  });
+
+  describe("keyword v2 — latest-human-turn scanning", () => {
+    const kwRubric = {
+      name: "kw", version: "1.0.0", locale: "en" as const,
+      sections: [{
+        id: "s", name: "S", weight: "100%",
+        standard: { score: 100, label: "Std", criteria: [] },
+        superior: { score: 120, label: "Sup", criteria: [] },
+        signals: [{
+          type: "keyword" as const, id: "kw", in: "request_body" as const,
+          terms: ["refactor"], caseSensitive: false, minRatio: 0.5,
+        }],
+      }],
+    };
+
+    const bodyWith = (requestId: string, messages: unknown[]) => ({
+      requestId, stopReason: null, clientUserAgent: null, clientSessionId: null,
+      requestParams: null, responseBody: null, requestBody: { messages },
+    });
+
+    it("history mentions no longer snowball into later turns", () => {
+      // 3 個 body 共用同一段含 "refactor" 的歷史，但只有第 1 個的「最新 user turn」提到 refactor
+      const history = [
+        { role: "user", content: [{ type: "text", text: "refactor this" }] },
+        { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      ];
+      const bodies = [
+        bodyWith("r1", [{ role: "user", content: [{ type: "text", text: "refactor this" }] }]),
+        bodyWith("r2", [...history, { role: "user", content: [{ type: "text", text: "add tests" }] }]),
+        bodyWith("r3", [...history, { role: "user", content: [{ type: "text", text: "ship it" }] }]),
+      ];
+      const report = scoreWithRules({ rubric: kwRubric, usageRows: [], bodyRows: bodies });
+      // 1/3 < 0.5 → 不 hit → section 停在 standard
+      expect(report.sectionScores[0]!.signals[0]!.hit).toBe(false);
+    });
+
+    it("pure tool_result turns are excluded from the minRatio denominator", () => {
+      const bodies = [
+        bodyWith("r1", [{ role: "user", content: [{ type: "text", text: "please refactor" }] }]),
+        bodyWith("r2", [{ role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "refactor refactor" }] }]),
+      ];
+      const report = scoreWithRules({ rubric: kwRubric, usageRows: [], bodyRows: bodies });
+      // 分母 1（r2 無真人文字）→ 1/1 >= 0.5 → hit
+      expect(report.sectionScores[0]!.signals[0]!.hit).toBe(true);
     });
   });
 });
