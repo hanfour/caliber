@@ -12,6 +12,7 @@ const VALID = {
   frictionCount: 0,
   bugsCaughtCount: 1,
   codexErrorsCount: 0,
+  userSatisfaction: 4,
 };
 
 describe("parseFacet", () => {
@@ -72,5 +73,38 @@ describe("parseFacet", () => {
     const noisy = "Here is the result:\n" + JSON.stringify(VALID);
     const out = parseFacet(noisy);
     expect(out).toEqual(VALID);
+  });
+
+  it("parses userSatisfaction and rejects out-of-range values (v2)", () => {
+    const ok = parseFacet(JSON.stringify({
+      sessionType: "bug_fix",
+      outcome: "success",
+      claudeHelpfulness: 4,
+      frictionCount: 0,
+      bugsCaughtCount: 1,
+      codexErrorsCount: 0,
+      userSatisfaction: 5,
+    }));
+    expect(ok.userSatisfaction).toBe(5);
+
+    expect(() => parseFacet(JSON.stringify({
+      sessionType: "bug_fix",
+      outcome: "success",
+      claudeHelpfulness: 4,
+      frictionCount: 0,
+      bugsCaughtCount: 1,
+      codexErrorsCount: 0,
+      userSatisfaction: 0,
+    }))).toThrow(FacetValidationError);
+
+    // Missing userSatisfaction → validation error (v2 required field)
+    expect(() => parseFacet(JSON.stringify({
+      sessionType: "bug_fix",
+      outcome: "success",
+      claudeHelpfulness: 4,
+      frictionCount: 0,
+      bugsCaughtCount: 1,
+      codexErrorsCount: 0,
+    }))).toThrow(FacetValidationError);
   });
 });

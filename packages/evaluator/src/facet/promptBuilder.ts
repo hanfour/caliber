@@ -1,4 +1,4 @@
-export const CURRENT_PROMPT_VERSION = 1;
+export const CURRENT_PROMPT_VERSION = 2;
 
 export interface Turn {
   role: "user" | "assistant";
@@ -20,23 +20,28 @@ Schema:
   "claudeHelpfulness": 1 | 2 | 3 | 4 | 5,
   "frictionCount":     non-negative integer,
   "bugsCaughtCount":   non-negative integer,
-  "codexErrorsCount":  non-negative integer
+  "codexErrorsCount":  non-negative integer,
+  "userSatisfaction":  1 | 2 | 3 | 4 | 5
 }
 
 Definitions:
 - frictionCount: user-visible pain points (misunderstanding, rework, confusion)
 - bugsCaughtCount: defects Claude identified in user's code
 - codexErrorsCount: tool/parse errors from Claude's own output
+- userSatisfaction: how satisfied the user appears with the final outcome,
+  judged from closing tone and whether they accepted/used the result
+  (5 = explicit satisfaction or silent acceptance and moving on;
+   1 = explicit frustration or abandoning the approach)
 
 Examples:
 Example 1 (feature_dev success):
-{"sessionType":"feature_dev","outcome":"success","claudeHelpfulness":5,"frictionCount":0,"bugsCaughtCount":1,"codexErrorsCount":0}
+{"sessionType":"feature_dev","outcome":"success","claudeHelpfulness":5,"frictionCount":0,"bugsCaughtCount":1,"codexErrorsCount":0,"userSatisfaction":5}
 
 Example 2 (bug_fix failure):
-{"sessionType":"bug_fix","outcome":"failure","claudeHelpfulness":2,"frictionCount":3,"bugsCaughtCount":0,"codexErrorsCount":2}
+{"sessionType":"bug_fix","outcome":"failure","claudeHelpfulness":2,"frictionCount":3,"bugsCaughtCount":0,"codexErrorsCount":2,"userSatisfaction":2}
 
 Example 3 (exploration abandoned):
-{"sessionType":"exploration","outcome":"abandoned","claudeHelpfulness":3,"frictionCount":1,"bugsCaughtCount":0,"codexErrorsCount":0}`;
+{"sessionType":"exploration","outcome":"abandoned","claudeHelpfulness":3,"frictionCount":1,"bugsCaughtCount":0,"codexErrorsCount":0,"userSatisfaction":3}`;
 
 function approxTokens(s: string): number {
   // ~4 chars per token rule of thumb for English/code mix
