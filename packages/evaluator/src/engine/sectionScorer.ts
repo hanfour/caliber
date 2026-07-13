@@ -40,6 +40,7 @@ export function scoreSection(section: Section, hits: SignalHit[]): SectionResult
     sectionId: section.id,
     name: section.name,
     weight,
+    mode: "tiered",
     standardScore: standard.score,
     superiorScore: superior.score,
     score,
