@@ -4,7 +4,13 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "outDir": "./dist",
-    "rootDir": "./src",
+    // The published CLI lives at the repo root and is intentionally outside the
+    // pnpm workspace, so it reaches into sibling package sources directly (e.g.
+    // src/admin-report.ts imports ../packages/evaluator/src). rootDir must be the
+    // repo root so those imports don't trip TS6059; the `build` script already
+    // passes `--rootDir .` for the same reason. tsc here only typechecks
+    // (--noEmit) — esbuild produces the actual bundle — so this has no emit impact.
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
