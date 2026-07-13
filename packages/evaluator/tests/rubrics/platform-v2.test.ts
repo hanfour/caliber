@@ -82,4 +82,35 @@ describe("platform rubric v2", () => {
     expect(r.totalScore).toBeNull();
     expect(r.insufficientData).toBe(true);
   });
+
+  it("locale rubrics do not share nested references with the en rubric (immutability hazard)", () => {
+    // ZhHant/Ja are built by spreading platformRubricV2En; if their nested
+    // objects/arrays are the same reference, mutating one locale's signal in
+    // place (e.g. a future calibration pass) silently corrupts every locale.
+    for (const locale of [platformRubricV2ZhHant, platformRubricV2Ja]) {
+      expect(locale.scale).not.toBe(platformRubricV2En.scale);
+      expect(locale.noiseFilters).not.toBe(platformRubricV2En.noiseFilters);
+      expect(locale.sections).not.toBe(platformRubricV2En.sections);
+      for (let i = 0; i < locale.sections.length; i++) {
+        expect(locale.sections[i]).not.toBe(platformRubricV2En.sections[i]);
+        expect(locale.sections[i]!.signals).not.toBe(platformRubricV2En.sections[i]!.signals);
+        for (let j = 0; j < locale.sections[i]!.signals.length; j++) {
+          expect(locale.sections[i]!.signals[j]).not.toBe(
+            platformRubricV2En.sections[i]!.signals[j],
+          );
+        }
+      }
+
+      // Content must still match en (minus name/description/locale), proving
+      // the clone is a deep structural copy, not a divergent rebuild.
+      expect(locale.scale).toEqual(platformRubricV2En.scale);
+      expect(locale.noiseFilters).toEqual(platformRubricV2En.noiseFilters);
+      expect(locale.sections.map((s) => s.id)).toEqual(
+        platformRubricV2En.sections.map((s) => s.id),
+      );
+      expect(locale.sections.map((s) => s.signals)).toEqual(
+        platformRubricV2En.sections.map((s) => s.signals),
+      );
+    }
+  });
 });

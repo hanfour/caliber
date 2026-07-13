@@ -112,13 +112,18 @@ export const platformRubricV2En: Rubric = {
   ],
 };
 
+// zh-Hant/ja are independent deep clones of the en rubric (not `{ ...en }`
+// spreads), so nested `signals`/`scale`/`noiseFilters` are never shared
+// references across locales — mutating one locale in place (e.g. a future
+// calibration pass) must never corrupt the others.
+const zhHantClone = structuredClone(platformRubricV2En);
 export const platformRubricV2ZhHant: Rubric = {
-  ...platformRubricV2En,
+  ...zhHantClone,
   name: "平台預設 v2 — 連續 facet 計分",
   description:
     "以 LLM 逐 session 判讀的 facets 連續計分；鏡射季評分 KPI 子項（效率／風控／需求方滿意）",
   locale: "zh-Hant",
-  sections: platformRubricV2En.sections.map((s) => ({
+  sections: zhHantClone.sections.map((s) => ({
     ...s,
     name:
       s.id === "efficiency"
@@ -129,13 +134,14 @@ export const platformRubricV2ZhHant: Rubric = {
   })),
 };
 
+const jaClone = structuredClone(platformRubricV2En);
 export const platformRubricV2Ja: Rubric = {
-  ...platformRubricV2En,
+  ...jaClone,
   name: "プラットフォームデフォルト v2 — 連続ファセットスコアリング",
   description:
     "LLMがセッション毎に判定したファセットによる連続スコアリング；四半期KPIサブ項目（効率／リスク管理／依頼者満足）を反映",
   locale: "ja",
-  sections: platformRubricV2En.sections.map((s) => ({
+  sections: jaClone.sections.map((s) => ({
     ...s,
     name:
       s.id === "efficiency"
