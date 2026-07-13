@@ -89,7 +89,7 @@ export function selectionToRange(sel: WindowSelection): {
   return windowRange(sel.days);
 }
 
-/** Whole days spanned by a range (used to gate the ≤30-day rerun). */
+/** Whole days spanned by a range (used to gate the rerun to RERUN_MAX_DAYS). */
 export function rangeDays(from: string, to: string): number {
   return (new Date(to).getTime() - new Date(from).getTime()) / DAY_MS;
 }
