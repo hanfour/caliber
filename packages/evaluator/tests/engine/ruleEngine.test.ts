@@ -322,6 +322,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -330,6 +331,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -357,6 +359,7 @@ describe("scoreWithRules", () => {
             frictionCount: 0,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -365,6 +368,7 @@ describe("scoreWithRules", () => {
             frictionCount: 1,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -388,6 +392,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: 2,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -396,6 +401,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: 2,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -419,6 +425,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: 2,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -427,6 +434,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: 1,
+            userSatisfaction: null,
           },
         ],
       });
@@ -454,6 +462,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -462,6 +471,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: null,
@@ -470,6 +480,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
@@ -498,6 +509,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: "feature_dev",
@@ -506,6 +518,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
           {
             sessionType: "bug_fix",
@@ -514,6 +527,7 @@ describe("scoreWithRules", () => {
             frictionCount: null,
             bugsCaughtCount: null,
             codexErrorsCount: null,
+            userSatisfaction: null,
           },
         ],
       });
