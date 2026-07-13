@@ -218,6 +218,13 @@
       "when": 1783699000001,
       "tag": "0030_reports_insufficient_data",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1783699000002,
+      "tag": "0031_seed_platform_rubric_v2",
+      "breakpoints": true
     }
   ]
 }
