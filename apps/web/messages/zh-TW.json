@@ -967,7 +967,11 @@
       "requestId": "request_id:",
       "noSignals": "此區段沒有記錄任何訊號。",
       "actualValue": "實測值: {value}",
-      "thresholdLabel": "門檻值:"
+      "thresholdLabel": "門檻值:",
+      "windowSelectLabel": "評估區間",
+      "windowOption": "{days} 天",
+      "windowUpdated": "{days} 天視窗 · 最後更新 {date}",
+      "windowHistory": "{days} 天分數歷史"
     },
     "audienceReport": {
       "userLabel": "個人報告",
@@ -1004,7 +1008,8 @@
       "captureNotEnabledHint": "未收集任何評估資料。如有疑問請聯絡管理員。",
       "captureEnabledTitle": "你的帳戶已啟用內容擷取。",
       "captureEnabledBodyDays": "與你的 API 金鑰關聯的請求內容會保留最多 {days} 天(組織可能設定更短的保留期)。每晚的排程任務會自動依組織的評核標準產生評估。",
-      "captureEnabledFooter": "如有資料保留問題或要求刪除,請聯絡組織管理員。你也可以使用本頁底部的匯出與刪除選項。"
+      "captureEnabledFooter": "如有資料保留問題或要求刪除,請聯絡組織管理員。你也可以使用本頁底部的匯出與刪除選項。",
+      "windowUpdated": "{days} 天視窗 · 期間結束於 {date}"
     },
     "llmEvidence": {
       "title": "AI 佐證",

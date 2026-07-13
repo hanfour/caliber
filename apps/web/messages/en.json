@@ -967,7 +967,11 @@
       "requestId": "request_id:",
       "noSignals": "No signals recorded for this section.",
       "actualValue": "measured: {value}",
-      "thresholdLabel": "threshold:"
+      "thresholdLabel": "threshold:",
+      "windowSelectLabel": "Evaluation window",
+      "windowOption": "{days}d",
+      "windowUpdated": "{days}-day window · last updated {date}",
+      "windowHistory": "{days}-day score history"
     },
     "audienceReport": {
       "userLabel": "Personal report",
@@ -1004,7 +1008,8 @@
       "captureNotEnabledHint": "No evaluation data is being collected. Contact your administrator if you have questions.",
       "captureEnabledTitle": "Content capture is enabled for your account.",
       "captureEnabledBodyDays": "Request content associated with your API key is retained for up to {days} days (your organization may configure a shorter retention window). Evaluations are generated automatically by a nightly process using your organization's rubric.",
-      "captureEnabledFooter": "For questions about data retention or to request deletion, contact your organization administrator. You can also use the export and deletion options at the bottom of this page."
+      "captureEnabledFooter": "For questions about data retention or to request deletion, contact your organization administrator. You can also use the export and deletion options at the bottom of this page.",
+      "windowUpdated": "{days}-day window · period ending {date}"
     },
     "llmEvidence": {
       "title": "AI evidence",

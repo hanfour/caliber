@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -21,6 +21,12 @@ import { DataProvenanceCard } from "./DataProvenanceCard";
 import { FacetSummaryCard } from "./FacetSummaryCard";
 import { LlmEvidenceList } from "./LlmEvidenceList";
 import { GeneratedAudienceReport } from "./GeneratedAudienceReport";
+import {
+  EvaluationWindowSelect,
+  windowRange,
+  DEFAULT_WINDOW_DAYS,
+  type WindowDays,
+} from "./EvaluationWindowSelect";
 import type { RubricSignal } from "./rubricThreshold";
 
 // ─── Main ReportDetail component ───────────────────────────────────────────────
@@ -33,13 +39,13 @@ interface Props {
 
 export function ReportDetail({ orgId, userId, userName }: Props) {
   const t = useTranslations("evaluator.report");
-  // Memoize: a bare `new Date()` in render changes the query key every render →
-  // infinite refetch loop (report never settles, API hammered).
+  const [windowDays, setWindowDays] = useState<WindowDays>(DEFAULT_WINDOW_DAYS);
+  // Memoize on windowDays: a bare `new Date()` in render changes the query key
+  // every render → infinite refetch loop (report never settles, API hammered).
   const { rangeFrom, rangeTo } = useMemo(() => {
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    return { rangeFrom: thirtyDaysAgo.toISOString(), rangeTo: now.toISOString() };
-  }, []);
+    const { from, to } = windowRange(windowDays);
+    return { rangeFrom: from, rangeTo: to };
+  }, [windowDays]);
 
   const { data: reports, isLoading, error } = trpc.reports.getUser.useQuery({
     orgId,
@@ -99,9 +105,12 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
   if (!reports || reports.length === 0) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("evaluationTitle")}</CardTitle>
-          <CardDescription>{t("thirtyDayHistory")}</CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+          <div className="space-y-1">
+            <CardTitle className="text-base">{t("evaluationTitle")}</CardTitle>
+            <CardDescription>{t("windowHistory", { days: windowDays })}</CardDescription>
+          </div>
+          <EvaluationWindowSelect value={windowDays} onChange={setWindowDays} />
         </CardHeader>
         <CardContent className="py-6 text-sm text-muted-foreground text-center">
           {t("noReports")}
@@ -145,7 +154,8 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
           <div className="space-y-1">
             <CardTitle className="text-base">{t("evaluationFor", { name: userName })}</CardTitle>
             <CardDescription>
-              {t("thirtyDayWindow", {
+              {t("windowUpdated", {
+                days: windowDays,
                 date: new Date(latest.periodStart).toLocaleDateString("en-US", {
                   year: "numeric",
                   month: "short",
@@ -156,6 +166,7 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
           </div>
 
           <div className="flex items-center gap-3">
+            <EvaluationWindowSelect value={windowDays} onChange={setWindowDays} />
             <span
               className={`rounded-full px-3 py-1 text-sm font-bold ring-1 ${scoreBadgeClass(latestScore)}`}
             >

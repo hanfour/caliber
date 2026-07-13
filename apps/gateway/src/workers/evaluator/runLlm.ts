@@ -17,6 +17,13 @@ export const LLM_KEY_REDIS_PREFIX = "caliber:gw:llm-eval-key:";
 export const LLM_COST_LOOKUP_MAX_ATTEMPTS = 3;
 export const LLM_COST_LOOKUP_DELAY_MS = 250;
 
+// The two audience reports + evidence + section adjustments form a large JSON
+// object; token-dense locales (e.g. zh-TW) push it well past 4k. At 4000 the
+// response hit `stop_reason: max_tokens` mid-string → truncated JSON → parse
+// failure → the whole LLM report was silently dropped. 8000 comfortably fits a
+// fully-populated response (schema caps every array, so the size is bounded).
+export const LLM_EVAL_MAX_TOKENS = 8000;
+
 export interface LlmMetrics {
   gwEvalLlmFailedTotal?: { inc: (labels: { reason: string }) => void };
   gwEvalLlmParseFailedTotal?: { inc: () => void };
@@ -106,7 +113,7 @@ export async function runLlmDeepAnalysis(
     const url = `${input.gatewayBaseUrl.replace(/\/$/, "")}/v1/messages`;
     const body = {
       model: orgRow.llmEvalModel,
-      max_tokens: 4000,
+      max_tokens: LLM_EVAL_MAX_TOKENS,
       system: prompt.system,
       messages: prompt.messages,
     };

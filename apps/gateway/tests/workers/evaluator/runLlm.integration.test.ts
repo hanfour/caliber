@@ -40,6 +40,7 @@ import type { BodyRow, Report, Rubric } from "@caliber/evaluator";
 import {
   runLlmDeepAnalysis,
   LLM_KEY_REDIS_PREFIX,
+  LLM_EVAL_MAX_TOKENS,
 } from "../../../src/workers/evaluator/runLlm.js";
 
 const require = createRequire(import.meta.url);
@@ -518,5 +519,23 @@ describe("runLlmDeepAnalysis — integration", () => {
     expect(
       (init!.headers as Record<string, string>)["x-caliber-eval-account-id"],
     ).toBeUndefined();
+  });
+
+  it("9. loopback request carries max_tokens large enough for the full report", async () => {
+    // The two audience reports overflow 4000 output tokens in token-dense
+    // locales → truncated JSON → parse failure. Guard the higher budget.
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${orgId}`, STUB_RAW_KEY);
+    const fetchSpy = makeCapturingFetchOk("req-llm-maxtokens-001");
+
+    const result = await runLlmDeepAnalysis({
+      ...makeBaseInput(),
+      fetchImpl: fetchSpy as unknown as typeof fetch,
+    });
+
+    expect(result).not.toBeNull();
+    const [, init] = fetchSpy.mock.calls[0]!;
+    const body = JSON.parse(init!.body as string) as { max_tokens: number };
+    expect(body.max_tokens).toBe(LLM_EVAL_MAX_TOKENS);
+    expect(LLM_EVAL_MAX_TOKENS).toBeGreaterThanOrEqual(8000);
   });
 });
