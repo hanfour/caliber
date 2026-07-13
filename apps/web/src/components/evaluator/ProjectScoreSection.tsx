@@ -77,13 +77,18 @@ function ProjectKeyReport({ apiKeyId, isRevoked }: ProjectKeyReportProps) {
     );
   }
 
-  const latestScore = parseFloat(latest.totalScore);
+  const latestScore = latest.totalScore === null ? null : parseFloat(latest.totalScore);
+  const isInsufficientData = latestScore === null || latest.insufficientData;
 
   // Build 30-day trend series: oldest → newest (immutable copy before reverse).
-  const trendSeries: ScorePoint[] = [...(range ?? [])].reverse().map((r) => ({
-    date: new Date(r.periodStart).toISOString().slice(0, 10),
-    score: parseFloat(r.totalScore),
-  }));
+  // Reports with a null/insufficient score are skipped — there's nothing to plot.
+  const trendSeries: ScorePoint[] = [...(range ?? [])]
+    .reverse()
+    .filter((r) => r.totalScore !== null)
+    .map((r) => ({
+      date: new Date(r.periodStart).toISOString().slice(0, 10),
+      score: parseFloat(r.totalScore as string),
+    }));
 
   const sectionScores: SectionResult[] = Array.isArray(latest.sectionScores)
     ? (latest.sectionScores as SectionResult[])
@@ -128,7 +133,7 @@ function ProjectKeyReport({ apiKeyId, isRevoked }: ProjectKeyReportProps) {
           <span
             className={`rounded-full px-3 py-1 text-sm font-bold ring-1 ${scoreBadgeClass(latestScore)}`}
           >
-            {latestScore.toFixed(1)}
+            {isInsufficientData ? tReport("insufficientData") : latestScore!.toFixed(1)}
           </span>
         </CardHeader>
         <CardContent>

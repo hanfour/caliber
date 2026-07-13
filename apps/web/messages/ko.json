@@ -962,6 +962,7 @@
       "weight": "가중치",
       "label": "레이블",
       "superior": "탁월함",
+      "insufficientData": "데이터 부족",
       "evidenceTitle": "신호: {id}",
       "noEvidence": "이 섹션의 증거 인용을 사용할 수 없습니다.",
       "requestId": "request_id:",
@@ -1060,7 +1061,8 @@
     },
     "trendChart": {
       "noData": "이 기간에 대한 데이터가 없습니다.",
-      "ariaLabel": "30일 점수 추세"
+      "ariaLabel": "30일 점수 추세",
+      "passLine": "합격 108"
     },
     "exportDialog": {
       "title": "내 데이터 내보내기",

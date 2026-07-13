@@ -962,6 +962,7 @@
       "weight": "权重",
       "label": "标签",
       "superior": "优异",
+      "insufficientData": "数据不足",
       "evidenceTitle": "信号:{id}",
       "noEvidence": "此分段无可用引用证据。",
       "requestId": "request_id:",
@@ -1060,7 +1061,8 @@
     },
     "trendChart": {
       "noData": "本期间无数据。",
-      "ariaLabel": "30 天分数趋势"
+      "ariaLabel": "30 天分数趋势",
+      "passLine": "及格 108"
     },
     "exportDialog": {
       "title": "导出我的数据",

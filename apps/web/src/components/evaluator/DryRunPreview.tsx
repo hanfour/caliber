@@ -59,6 +59,7 @@ interface PreviewCardProps {
 function PreviewCard({ rubric, result }: PreviewCardProps) {
   const { preview } = result;
   const t = useTranslations("evaluator.rubrics.dryRunPreview");
+  const tReport = useTranslations("evaluator.report");
 
   return (
     <div className="space-y-4">
@@ -78,9 +79,15 @@ function PreviewCard({ rubric, result }: PreviewCardProps) {
       <div className="rounded-lg border border-border p-4 space-y-2">
         <div className="flex items-baseline justify-between">
           <span className="text-sm font-semibold">{t("totalScore")}</span>
-          <span className="text-2xl font-bold tabular-nums">{preview.totalScore}</span>
+          {preview.totalScore === null ? (
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-800/50 dark:text-zinc-400 dark:ring-zinc-700">
+              {tReport("insufficientData")}
+            </span>
+          ) : (
+            <span className="text-2xl font-bold tabular-nums">{preview.totalScore}</span>
+          )}
         </div>
-        <ScoreBar score={preview.totalScore} max={120} />
+        {preview.totalScore !== null && <ScoreBar score={preview.totalScore} max={120} />}
       </div>
 
       {/* Per-section breakdown */}
@@ -90,19 +97,28 @@ function PreviewCard({ rubric, result }: PreviewCardProps) {
             {t("sectionBreakdown")}
           </h3>
           <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-            {preview.sectionScores.map((sec) => (
-              <div key={sec.sectionId} className="px-4 py-3 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{sec.name}</span>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{sec.weight}%</span>
-                    <span className="font-semibold text-foreground tabular-nums">{sec.score}</span>
+            {preview.sectionScores.map((sec) => {
+              const sectionMax = sec.maxScore ?? sec.superiorScore;
+              return (
+                <div key={sec.sectionId} className="px-4 py-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{sec.name}</span>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>{sec.weight}%</span>
+                      {sec.score === null ? (
+                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-800/50 dark:text-zinc-400 dark:ring-zinc-700">
+                          {tReport("insufficientData")}
+                        </span>
+                      ) : (
+                        <span className="font-semibold text-foreground tabular-nums">{sec.score}</span>
+                      )}
+                    </div>
                   </div>
+                  {sec.score !== null && <ScoreBar score={sec.score} max={sectionMax} />}
+                  <p className="text-xs text-muted-foreground">{sec.label}</p>
                 </div>
-                <ScoreBar score={sec.score} max={sec.superiorScore} />
-                <p className="text-xs text-muted-foreground">{sec.label}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

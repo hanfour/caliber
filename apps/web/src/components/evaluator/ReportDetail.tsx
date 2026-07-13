@@ -160,14 +160,17 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
 
   // Latest report (reports ordered periodStart desc — index 0 is most recent)
   const latest = reports[0]!;
-  const latestScore = parseFloat(latest.totalScore);
+  const latestScore = latest.totalScore === null ? null : parseFloat(latest.totalScore);
+  const isInsufficientData = latestScore === null || latest.insufficientData;
 
-  // Build 30-day trend series: one point per report, oldest → newest
+  // Build 30-day trend series: one point per report, oldest → newest.
+  // Reports with a null/insufficient score are skipped — there's nothing to plot.
   const trendSeries: ScorePoint[] = [...reports]
     .reverse()
+    .filter((r) => r.totalScore !== null)
     .map((r) => ({
       date: new Date(r.periodStart).toISOString().slice(0, 10),
-      score: parseFloat(r.totalScore),
+      score: parseFloat(r.totalScore as string),
     }));
 
   // Parse sectionScores from jsonb (stored as SectionResult[])
@@ -209,7 +212,7 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
             <span
               className={`rounded-full px-3 py-1 text-sm font-bold ring-1 ${scoreBadgeClass(latestScore)}`}
             >
-              {latestScore.toFixed(1)}
+              {isInsufficientData ? t("insufficientData") : latestScore!.toFixed(1)}
             </span>
 
             <RequirePerm

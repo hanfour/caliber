@@ -12,6 +12,12 @@ export interface BreakdownSignal {
   hit: boolean;
   value?: number;
   evidence?: EvidenceItem[];
+  /** v2: rows that actually carried data for this signal. */
+  sampleCount?: number;
+  /** v2 continuous: points earned after curve mapping (undefined when unusable). */
+  earnedPoints?: number;
+  /** v2 continuous: configured points for this signal. */
+  maxPoints?: number;
 }
 
 interface Props {
@@ -54,6 +60,12 @@ export function SignalBreakdown({ signals, rubricSignals }: Props) {
               {s.value != null && (
                 <span className="text-[10px] text-muted-foreground tabular-nums">
                   {t("actualValue", { value: s.value })}
+                </span>
+              )}
+              {s.earnedPoints != null && (
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  {s.earnedPoints.toFixed(1)} / {s.maxPoints} pts
+                  {s.sampleCount !== undefined && ` n=${s.sampleCount}`}
                 </span>
               )}
             </div>

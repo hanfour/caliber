@@ -53,4 +53,21 @@ describe("formatThreshold", () => {
   it("unknown/malformed → empty string (graceful)", () => {
     expect(formatThreshold({ type: "mystery", id: "x" } as never)).toBe("");
   });
+
+  it("facet_user_satisfaction gte → mean satisfaction ≥ n", () => {
+    expect(
+      formatThreshold({ type: "facet_user_satisfaction", id: "x", gte: 3.5 }),
+    ).toBe("mean satisfaction ≥ 3.5");
+  });
+
+  it("signal with curve → appends · curve zeroAt→fullAt", () => {
+    expect(
+      formatThreshold({
+        type: "facet_user_satisfaction",
+        id: "x",
+        gte: 3.5,
+        curve: { zeroAt: 2.5, fullAt: 4.5 },
+      }),
+    ).toBe("mean satisfaction ≥ 3.5 · curve 2.5→4.5");
+  });
 });

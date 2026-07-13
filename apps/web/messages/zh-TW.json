@@ -962,6 +962,7 @@
       "weight": "權重",
       "label": "標籤",
       "superior": "優異",
+      "insufficientData": "資料不足",
       "evidenceTitle": "訊號:{id}",
       "noEvidence": "此區段無可用引用證據。",
       "requestId": "request_id:",
@@ -1060,7 +1061,8 @@
     },
     "trendChart": {
       "noData": "本期間無資料。",
-      "ariaLabel": "30 天分數趨勢"
+      "ariaLabel": "30 天分數趨勢",
+      "passLine": "及格 108"
     },
     "exportDialog": {
       "title": "匯出我的資料",

@@ -64,4 +64,35 @@ describe("SignalBreakdown", () => {
     render(<SignalBreakdown signals={[]} />);
     expect(screen.getByText(/No signals/i)).toBeInTheDocument();
   });
+
+  it("renders earnedPoints / maxPoints and sample count for continuous signals", () => {
+    render(
+      <SignalBreakdown
+        signals={[
+          {
+            id: "helpfulness",
+            type: "facet_claude_helpfulness",
+            hit: true,
+            value: 4.2,
+            earnedPoints: 42.5,
+            maxPoints: 50,
+            sampleCount: 18,
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/42\.5 \/ 50 pts/)).toBeInTheDocument();
+    expect(screen.getByText(/n=18/)).toBeInTheDocument();
+  });
+
+  it("omits points/sample rendering when earnedPoints is absent (tiered signal)", () => {
+    render(
+      <SignalBreakdown
+        signals={[{ id: "iter", type: "iteration_count", hit: true, value: 5 }]}
+        rubricSignals={rubricSignals}
+      />,
+    );
+    expect(screen.queryByText(/pts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/n=/)).not.toBeInTheDocument();
+  });
 });

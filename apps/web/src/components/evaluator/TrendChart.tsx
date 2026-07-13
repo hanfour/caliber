@@ -17,6 +17,7 @@ const PLOT_H = VIEWBOX_H - PAD_TOP - PAD_BOTTOM;
 
 const SCORE_MIN = 0;
 const SCORE_MAX = 120;
+const PASS_SCORE = 108;
 
 export interface ScorePoint {
   date: string; // ISO or "YYYY-MM-DD"
@@ -61,7 +62,7 @@ function buildAreaPath(points: ScorePoint[]): string {
 }
 
 // Y-axis tick values
-const Y_TICKS = [0, 40, 80, 100, 120];
+const Y_TICKS = [0, 40, 80, 108, 120];
 
 export function TrendChart({ series, teamSeries }: Props) {
   const t = useTranslations("evaluator.trendChart");
@@ -126,6 +127,29 @@ export function TrendChart({ series, teamSeries }: Props) {
           </g>
         );
       })}
+
+      {/* 108 pass line — drawn separately from the Y-axis grid so it stands
+          out in amber regardless of which grid ticks are shown. */}
+      <line
+        x1={PAD_LEFT}
+        y1={toY(PASS_SCORE)}
+        x2={PAD_LEFT + PLOT_W}
+        y2={toY(PASS_SCORE)}
+        stroke="rgb(251 191 36)"
+        strokeWidth="1.5"
+        strokeDasharray="6 3"
+        className="stroke-amber-400"
+      />
+      <text
+        x={PAD_LEFT + PLOT_W}
+        y={toY(PASS_SCORE) - 3}
+        textAnchor="end"
+        fontSize="9"
+        fill="rgb(251 191 36)"
+        className="fill-amber-500"
+      >
+        {t("passLine")}
+      </text>
 
       {/* Area fill under member line */}
       <path d={areaPath} fill={`url(#${gradId})`} />
