@@ -1,4 +1,5 @@
 import type { Evidence, KeywordInput, SignalResult } from "./types.js";
+import { stripInvalidJsonbChars } from "../util/jsonbText.js";
 
 const CONTEXT_CHARS = 80;
 
@@ -20,7 +21,9 @@ export function collectKeyword(input: KeywordInput): SignalResult {
       const end = Math.min(body.length, found + needle.length + CONTEXT_CHARS);
       evidence.push({
         requestId,
-        quote: body.slice(start, end),
+        // Slicing by code-unit offset can cut an emoji's surrogate pair in half;
+        // a lone surrogate breaks the report's jsonb write. Strip it here.
+        quote: stripInvalidJsonbChars(body.slice(start, end)),
         offset: found,
       });
       idx = found + needle.length;

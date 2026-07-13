@@ -20,6 +20,7 @@ import {
 } from "@caliber/db";
 import { decryptBody } from "../../capture/encrypt.js";
 import {
+  deepStripInvalidJsonbChars,
   scoreWithRules,
   type BodyRow,
   type Report,
@@ -289,9 +290,16 @@ export async function upsertEvaluationReport(
     rubricId: input.rubricId,
     rubricVersion: input.rubricVersion,
     totalScore: String(input.report.totalScore),
-    // jsonb columns — cast to unknown to satisfy Drizzle's strict typing
-    sectionScores: input.report.sectionScores as unknown,
-    signalsSummary: input.report.signalsSummary as unknown,
+    // jsonb columns — cast to unknown to satisfy Drizzle's strict typing.
+    // deepStrip guards the write boundary: any lone UTF-16 surrogate / NUL in
+    // free text (e.g. sliced evidence quotes) would otherwise fail the whole
+    // jsonb upsert. dataQuality is pure numbers, so it needs no sanitizing.
+    sectionScores: deepStripInvalidJsonbChars(
+      input.report.sectionScores,
+    ) as unknown,
+    signalsSummary: deepStripInvalidJsonbChars(
+      input.report.signalsSummary,
+    ) as unknown,
     dataQuality: input.report.dataQuality as unknown,
     triggeredBy: input.triggeredBy,
     triggeredByUser: input.triggeredByUser,
@@ -306,10 +314,11 @@ export async function upsertEvaluationReport(
   const withLlm = input.llm
     ? {
         ...base,
-        llmNarrative: input.llm.narrative,
-        llmUserReport: input.llm.userReport,
-        llmAdminReport: input.llm.adminReport,
-        llmEvidence: input.llm.evidence as unknown,
+        // LLM-generated text can also carry lone surrogates → sanitize.
+        llmNarrative: deepStripInvalidJsonbChars(input.llm.narrative),
+        llmUserReport: deepStripInvalidJsonbChars(input.llm.userReport),
+        llmAdminReport: deepStripInvalidJsonbChars(input.llm.adminReport),
+        llmEvidence: deepStripInvalidJsonbChars(input.llm.evidence) as unknown,
         llmModel: input.llm.model,
         llmCalledAt: input.llm.calledAt,
         llmCostUsd: String(input.llm.costUsd),

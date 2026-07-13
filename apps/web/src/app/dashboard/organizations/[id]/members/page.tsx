@@ -98,7 +98,12 @@ export default function MembersTab() {
                       </AvatarFallback>
                     </Avatar>
                     <div>
-                      <div className="font-medium">{m.name ?? m.email}</div>
+                      <Link
+                        href={`/dashboard/organizations/${identifier}/members/${m.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {m.name ?? m.email}
+                      </Link>
                       <div className="text-xs text-muted-foreground">
                         {m.email}
                       </div>
