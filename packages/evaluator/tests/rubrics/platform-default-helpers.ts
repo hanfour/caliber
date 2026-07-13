@@ -61,6 +61,11 @@ export function assertPlatformDefaultStructure(rubricJson: unknown) {
 export function scoreStandard(rubricJson: unknown): number {
   const r = rubricSchema.parse(rubricJson);
   const report = scoreWithRules({ rubric: r, usageRows: [], bodyRows: [] });
+  if (report.totalScore === null) {
+    throw new Error(
+      "expected legacy tiered rubric to produce a numeric totalScore, got insufficientData",
+    );
+  }
   return report.totalScore;
 }
 
@@ -112,5 +117,10 @@ export function scoreSuperior(rubricJson: unknown): number {
   ];
 
   const report = scoreWithRules({ rubric: r, usageRows: usage, bodyRows: bodies });
+  if (report.totalScore === null) {
+    throw new Error(
+      "expected legacy tiered rubric to produce a numeric totalScore, got insufficientData",
+    );
+  }
   return report.totalScore;
 }

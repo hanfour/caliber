@@ -563,4 +563,89 @@ describe("scoreWithRules", () => {
       expect(reportLte.totalScore).toBe(120);
     });
   });
+
+  // ── Rubric v2 — continuous scoring integration ──────────────────────────
+  const contRubric = {
+    name: "v2",
+    version: "2.0.0",
+    locale: "en" as const,
+    scale: { max: 120, pass: 108 },
+    sections: [
+      {
+        id: "sat",
+        name: "Satisfaction",
+        weight: "100%",
+        scoring: { mode: "continuous" as const },
+        minSamples: 2,
+        signals: [
+          {
+            type: "facet_user_satisfaction" as const,
+            id: "usat",
+            gte: 3.5,
+            points: 100,
+            curve: { zeroAt: 2.5, fullAt: 4.5 },
+          },
+        ],
+      },
+    ],
+  };
+
+  const facetRow = (userSatisfaction: number | null) => ({
+    sessionType: null, outcome: null, claudeHelpfulness: null,
+    frictionCount: null, bugsCaughtCount: null, codexErrorsCount: null,
+    userSatisfaction,
+  });
+
+  describe("scoreWithRules v2 continuous", () => {
+    it("scores a continuous rubric from facet rows on the 120 scale", () => {
+      const report = scoreWithRules({
+        rubric: contRubric,
+        usageRows: [],
+        bodyRows: [],
+        facetRows: [facetRow(4.5), facetRow(4.5), facetRow(4.5)],
+      });
+      expect(report.totalScore).toBeCloseTo(120);
+      expect(report.insufficientData).toBe(false);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(report.sectionScores[0]!.mode).toBe("continuous");
+    });
+
+    it("yields a mid-scale score for mid-scale inputs (no more all-or-nothing)", () => {
+      const report = scoreWithRules({
+        rubric: contRubric,
+        usageRows: [],
+        bodyRows: [],
+        facetRows: [facetRow(3.5), facetRow(3.5)],
+      });
+      expect(report.totalScore).toBeCloseTo(60); // subscore 0.5 → 120×0.5
+    });
+
+    it("returns null totalScore + insufficientData when samples are too thin", () => {
+      const report = scoreWithRules({
+        rubric: contRubric,
+        usageRows: [],
+        bodyRows: [],
+        facetRows: [facetRow(5)], // 1 < minSamples 2
+      });
+      expect(report.totalScore).toBeNull();
+      expect(report.insufficientData).toBe(true);
+    });
+
+    it("keeps legacy tiered rubrics working (insufficientData always false)", () => {
+      const tieredRubric = {
+        name: "v1", version: "1.0.0", locale: "en" as const,
+        sections: [{
+          id: "risk", name: "Risk", weight: "100%",
+          standard: { score: 100, label: "Std", criteria: [] },
+          superior: { score: 120, label: "Sup", criteria: [] },
+          signals: [{ type: "refusal_rate" as const, id: "rr", lte: 0.2 }],
+        }],
+      };
+      const report = scoreWithRules({ rubric: tieredRubric, usageRows: [], bodyRows: [] });
+      expect(report.totalScore).toBe(120); // 空 bodies → refusal hit:true → 全 signal 命中 → superior（既有 v1 行為）
+      expect(report.insufficientData).toBe(false);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(report.sectionScores[0]!.mode).toBe("tiered");
+    });
+  });
 });

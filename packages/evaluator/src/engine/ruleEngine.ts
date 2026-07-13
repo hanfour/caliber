@@ -17,9 +17,11 @@ import {
   collectFacetCodexErrors,
   collectFacetOutcomeSuccessRate,
   collectFacetSessionTypeRatio,
+  collectFacetUserSatisfaction,
   type FacetRowInput,
 } from "../signals/index.js";
 import { scoreSection } from "./sectionScorer.js";
+import { scoreSectionContinuous } from "./continuousScorer.js";
 import type { SignalHit, DataQuality, Report } from "./types.js";
 import type { Metrics } from "../metrics/aggregator.js";
 import type { UaBucket } from "../signals/uaBucket.js";
@@ -50,6 +52,7 @@ function dispatchSignal(
   usageRows: UsageRow[],
   bodyRows: BodyRow[],
   facetRows: FacetRowInput[],
+  noiseFilters: string[],
 ): SignalHit {
   switch (signal.type) {
     case "keyword": {
@@ -98,6 +101,7 @@ function dispatchSignal(
         hit,
         value: allEvidence.length,
         evidence: allEvidence,
+        sampleCount: texts.length,
       };
     }
 
@@ -115,6 +119,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -126,6 +131,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -141,6 +147,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -155,6 +162,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -169,6 +177,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -183,6 +192,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -197,6 +207,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -211,6 +222,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -226,6 +238,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -240,6 +253,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -254,6 +268,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -268,6 +283,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -282,6 +298,7 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
@@ -297,18 +314,22 @@ function dispatchSignal(
         hit: result.hit,
         value: result.value,
         evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
 
     case "facet_user_satisfaction": {
-      // Interim: rows carry no userSatisfaction until the facet pipeline
-      // lands; the collector is wired in the continuous-scoring integration.
+      const result = collectFacetUserSatisfaction({
+        rows: facetRows,
+        gte: signal.gte,
+      });
       return {
         id: signal.id,
         type: signal.type,
-        hit: false,
-        value: 0,
-        evidence: [],
+        hit: result.hit,
+        value: result.value,
+        evidence: result.evidence,
+        sampleCount: result.sampleCount,
       };
     }
   }
@@ -338,23 +359,31 @@ function computeDataQuality(
 export function scoreWithRules(input: ScoreWithRulesInput): Report {
   const { rubric, usageRows, bodyRows, truncatedRequestIds } = input;
   const facetRows: FacetRowInput[] = input.facetRows ?? [];
+  const scaleMax = rubric.scale?.max ?? 120;
 
   const metrics = aggregate({ usageRows, bodyRows });
 
   const sectionScores = rubric.sections.map((section) => {
     const hits: SignalHit[] = section.signals.map((signal) =>
-      dispatchSignal(signal, metrics, usageRows, bodyRows, facetRows),
+      dispatchSignal(signal, metrics, usageRows, bodyRows, facetRows, rubric.noiseFilters ?? []),
     );
-    return scoreSection(section, hits);
+    return section.scoring?.mode === "continuous"
+      ? scoreSectionContinuous(section, hits, scaleMax)
+      : scoreSection(section, hits);
   });
 
-  const totalWeight = sectionScores.reduce((sum, s) => sum + s.weight, 0);
-  const weightedSum = sectionScores.reduce(
-    (sum, s) => sum + s.score * s.weight,
-    0,
-  );
-  const rawTotal = totalWeight === 0 ? 0 : weightedSum / totalWeight;
-  const totalScore = Math.min(120, Math.max(0, rawTotal));
+  const insufficientData = sectionScores.some((s) => s.score === null);
+
+  let totalScore: number | null = null;
+  if (!insufficientData) {
+    const totalWeight = sectionScores.reduce((sum, s) => sum + s.weight, 0);
+    const weightedSum = sectionScores.reduce(
+      (sum, s) => sum + (s.score as number) * s.weight,
+      0,
+    );
+    const rawTotal = totalWeight === 0 ? 0 : weightedSum / totalWeight;
+    totalScore = Math.min(scaleMax, Math.max(0, rawTotal));
+  }
 
   const dataQuality = computeDataQuality(
     usageRows,
@@ -362,10 +391,5 @@ export function scoreWithRules(input: ScoreWithRulesInput): Report {
     truncatedRequestIds,
   );
 
-  return {
-    totalScore,
-    sectionScores,
-    signalsSummary: metrics,
-    dataQuality,
-  };
+  return { totalScore, insufficientData, sectionScores, signalsSummary: metrics, dataQuality };
 }
