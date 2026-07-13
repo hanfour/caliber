@@ -65,4 +65,13 @@ describe("ReportDetail", () => {
     expect(screen.getByText(/Data provenance/i)).toBeInTheDocument();
     expect(screen.getByText(/1823/)).toBeInTheDocument();
   });
+
+  it("shows a generate button on the empty state (report.rerun perm)", () => {
+    getUser.mockReturnValue({ data: [], isLoading: false, error: null });
+    rubricGet.mockReturnValue({ data: null });
+    render(<ReportDetail orgId="org-1" userId="u-1" userName="Steve" />);
+    expect(
+      screen.getByText(/Generate report for this range|產生此區間報告/i),
+    ).toBeInTheDocument();
+  });
 });

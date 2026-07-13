@@ -27,6 +27,7 @@ import {
   rangeDays,
   RERUN_MAX_DAYS,
   DEFAULT_SELECTION,
+  lastCompletedQuarter,
   type WindowSelection,
 } from "./EvaluationWindowSelect";
 import type { RubricSignal } from "./rubricThreshold";
@@ -48,11 +49,21 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
     const { from, to } = selectionToRange(sel);
     return { rangeFrom: from, rangeTo: to };
   }, [sel]);
-  // The rerun backend rejects windows > 30 days; the 90-day preset and long
-  // custom ranges are view-only. +0.01 tolerates float drift on the 30d edge.
+  // The rerun backend rejects windows > 92 days; longer custom ranges stay
+  // view-only. +0.01 tolerates float drift on the 92-day edge.
   const rerunAllowed = rangeDays(rangeFrom, rangeTo) <= RERUN_MAX_DAYS + 0.01;
-  const windowLabelKey = sel.mode === "custom" ? "windowUpdatedCustom" : "windowUpdated";
-  const windowLabelDays = sel.mode === "preset" ? sel.days : 0;
+  const quarterName = (() => {
+    const q = lastCompletedQuarter();
+    return `${q.year} Q${q.quarter}`;
+  })();
+  const windowLabelKey =
+    sel.mode === "custom"
+      ? "windowUpdatedCustom"
+      : sel.mode === "quarter"
+        ? "windowUpdatedQuarter"
+        : "windowUpdated";
+  const windowLabelValues: Record<string, string | number> =
+    sel.mode === "preset" ? { days: sel.days } : sel.mode === "quarter" ? { quarter: quarterName } : {};
 
   const { data: reports, isLoading, error } = trpc.reports.getUser.useQuery({
     orgId,
@@ -110,21 +121,38 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
   }
 
   if (!reports || reports.length === 0) {
+    const emptyDesc =
+      sel.mode === "custom"
+        ? t("windowHistoryCustom")
+        : sel.mode === "quarter"
+          ? t("windowHistoryQuarter", { quarter: quarterName })
+          : t("windowHistory", { days: sel.days });
     return (
       <Card>
         <CardHeader className="flex flex-row items-start justify-between space-y-0">
           <div className="space-y-1">
             <CardTitle className="text-base">{t("evaluationTitle")}</CardTitle>
-            <CardDescription>
-              {sel.mode === "custom"
-                ? t("windowHistoryCustom")
-                : t("windowHistory", { days: sel.days })}
-            </CardDescription>
+            <CardDescription>{emptyDesc}</CardDescription>
           </div>
           <EvaluationWindowSelect value={sel} onChange={setSel} />
         </CardHeader>
-        <CardContent className="py-6 text-sm text-muted-foreground text-center">
-          {t("noReports")}
+        <CardContent className="space-y-3 py-6 text-center text-sm text-muted-foreground">
+          <p>{t("noReports")}</p>
+          <RequirePerm
+            action={{ type: "report.rerun", orgId, targetUserId: userId, periodStart: rangeFrom }}
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleRerun}
+              disabled={rerunMutation.isPending || !rerunAllowed}
+              title={!rerunAllowed ? t("rerunMaxWindow", { days: RERUN_MAX_DAYS }) : undefined}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {rerunMutation.isPending ? t("queueing") : t("generateBtn")}
+            </Button>
+          </RequirePerm>
         </CardContent>
       </Card>
     );
@@ -166,7 +194,7 @@ export function ReportDetail({ orgId, userId, userName }: Props) {
             <CardTitle className="text-base">{t("evaluationFor", { name: userName })}</CardTitle>
             <CardDescription>
               {t(windowLabelKey, {
-                days: windowLabelDays,
+                ...windowLabelValues,
                 date: new Date(latest.periodStart).toLocaleDateString("en-US", {
                   year: "numeric",
                   month: "short",

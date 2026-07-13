@@ -977,7 +977,11 @@
       "windowTo": "迄",
       "windowUpdatedCustom": "自定义区间 · 最后更新 {date}",
       "windowHistoryCustom": "自定义区间分数历史",
-      "rerunMaxWindow": "重跑上限 {days} 天"
+      "rerunMaxWindow": "重跑上限 {days} 天",
+      "windowQuarter": "上季度",
+      "windowUpdatedQuarter": "{quarter} · 最后更新 {date}",
+      "windowHistoryQuarter": "{quarter} 分数历史",
+      "generateBtn": "生成此区间报告"
     },
     "audienceReport": {
       "userLabel": "个人报告",
@@ -1016,7 +1020,8 @@
       "captureEnabledBodyDays": "与你的 API 密钥关联的请求内容会保留最多 {days} 天(组织可能设置更短的保留期)。每晚的排程任务会自动依组织的评分标准生成评估。",
       "captureEnabledFooter": "如有数据保留问题或要求删除,请联系组织管理员。你也可以使用本页底部的导出与删除选项。",
       "windowUpdated": "{days} 天窗口 · 期间结束于 {date}",
-      "windowUpdatedCustom": "自定义区间 · 期间结束于 {date}"
+      "windowUpdatedCustom": "自定义区间 · 期间结束于 {date}",
+      "windowUpdatedQuarter": "{quarter} · 期间结束于 {date}"
     },
     "llmEvidence": {
       "title": "AI 证据",

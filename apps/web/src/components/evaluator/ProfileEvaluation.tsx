@@ -25,6 +25,7 @@ import {
   EvaluationWindowSelect,
   selectionToRange,
   DEFAULT_SELECTION,
+  lastCompletedQuarter,
   type WindowSelection,
 } from "./EvaluationWindowSelect";
 import {
@@ -158,14 +159,32 @@ export function ProfileEvaluation() {
           <div className="space-y-1">
             <CardTitle className="text-base">{t("latestScore")}</CardTitle>
             <CardDescription>
-              {t(sel.mode === "custom" ? "windowUpdatedCustom" : "windowUpdated", {
-                days: sel.mode === "preset" ? sel.days : 0,
-                date: new Date(latestReport.periodStart).toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                }),
-              })}
+              {(() => {
+                const quarterName = (() => {
+                  const q = lastCompletedQuarter();
+                  return `${q.year} Q${q.quarter}`;
+                })();
+                const key =
+                  sel.mode === "custom"
+                    ? "windowUpdatedCustom"
+                    : sel.mode === "quarter"
+                      ? "windowUpdatedQuarter"
+                      : "windowUpdated";
+                const values: Record<string, string | number> =
+                  sel.mode === "preset"
+                    ? { days: sel.days }
+                    : sel.mode === "quarter"
+                      ? { quarter: quarterName }
+                      : {};
+                return t(key, {
+                  ...values,
+                  date: new Date(latestReport.periodStart).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  }),
+                });
+              })()}
             </CardDescription>
           </div>
           <div className="flex items-start gap-3">

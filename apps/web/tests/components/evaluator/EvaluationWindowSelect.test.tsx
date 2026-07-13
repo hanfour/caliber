@@ -10,6 +10,7 @@ import {
   WINDOW_PRESETS,
   DEFAULT_SELECTION,
   RERUN_MAX_DAYS,
+  lastCompletedQuarter,
   type WindowSelection,
 } from "@/components/evaluator/EvaluationWindowSelect";
 
@@ -49,7 +50,28 @@ describe("range helpers", () => {
 
   it("defaults to the 30-day preset", () => {
     expect(DEFAULT_SELECTION).toEqual({ mode: "preset", days: 30 });
-    expect(RERUN_MAX_DAYS).toBe(30);
+  });
+
+  it("RERUN_MAX_DAYS is one quarter (92 days)", () => {
+    expect(RERUN_MAX_DAYS).toBe(92);
+  });
+
+  it("lastCompletedQuarter returns a prior, ≤92-day quarter", () => {
+    const q = lastCompletedQuarter();
+    expect(q.quarter).toBeGreaterThanOrEqual(1);
+    expect(q.quarter).toBeLessThanOrEqual(4);
+    const span = rangeDays(q.from, q.to);
+    expect(span).toBeGreaterThan(89);
+    expect(span).toBeLessThanOrEqual(92);
+    // The quarter is fully in the past.
+    expect(new Date(q.to).getTime()).toBeLessThan(Date.now());
+  });
+
+  it("selectionToRange resolves the quarter mode to the last quarter", () => {
+    const q = lastCompletedQuarter();
+    const r = selectionToRange({ mode: "quarter" });
+    expect(r.from).toBe(q.from);
+    expect(r.to).toBe(q.to);
   });
 });
 
@@ -62,9 +84,25 @@ describe("EvaluationWindowSelect", () => {
       />,
     );
     const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(WINDOW_PRESETS.length + 1);
+    expect(buttons).toHaveLength(WINDOW_PRESETS.length + 2);
     const active = buttons.find((b) => b.getAttribute("aria-pressed") === "true");
     expect(active?.textContent).toContain("30");
+  });
+
+  it("renders a 上季 button that emits the quarter selection", async () => {
+    const onChange = vi.fn<(s: WindowSelection) => void>();
+    render(
+      <EvaluationWindowSelect value={{ mode: "preset", days: 30 }} onChange={onChange} />,
+    );
+    // Presets (3) + 上季 (quarter) + 自訂 (custom) = 5 buttons.
+    // Tests stub next-intl against the English catalogue (see tests/setup.ts),
+    // so the button renders its English copy ("Last quarter") even though the
+    // production zh-TW/zh-CN/ko/en catalogues each carry the localized label
+    // (zh-TW: "上季").
+    expect(screen.getAllByRole("button")).toHaveLength(5);
+    const quarter = screen.getByText("Last quarter");
+    await userEvent.click(quarter);
+    expect(onChange).toHaveBeenCalledWith({ mode: "quarter" });
   });
 
   it("emits a preset selection when a preset is clicked", async () => {

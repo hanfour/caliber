@@ -612,7 +612,11 @@ export const reportsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const startMs = new Date(input.periodStart).getTime();
       const endMs = new Date(input.periodEnd).getTime();
-      const WINDOW_LIMIT_MS = 30 * 24 * 60 * 60 * 1000;
+      // One quarter — the evaluator reads/decrypts every request_body in the
+      // window, so this bounds a single on-demand evaluation. Keep in sync with
+      // the web RERUN_MAX_DAYS in EvaluationWindowSelect.tsx.
+      const MAX_RERUN_WINDOW_DAYS = 92;
+      const WINDOW_LIMIT_MS = MAX_RERUN_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
       if (endMs <= startMs) {
         throw new TRPCError({
@@ -623,7 +627,7 @@ export const reportsRouter = router({
       if (endMs - startMs > WINDOW_LIMIT_MS) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Window exceeds 30 days",
+          message: "Window exceeds 92 days",
         });
       }
 

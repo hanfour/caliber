@@ -365,9 +365,9 @@ describe("reports router — mutation endpoints", () => {
     expect(enqueuedUserIds).toContain(m2.id);
   });
 
-  // ── Test 4: rerun rejects window > 30 days ────────────────────────────────────
+  // ── Test 4: rerun rejects window > 92 days ────────────────────────────────────
 
-  it("rerun throws BAD_REQUEST when window exceeds 30 days", async () => {
+  it("rerun throws BAD_REQUEST when window exceeds 92 days", async () => {
     const org = await makeOrg(t.db);
     const admin = await makeUser(t.db, {
       role: "org_admin",
@@ -384,11 +384,11 @@ describe("reports router — mutation endpoints", () => {
         scope: "user",
         targetId: member.id,
         periodStart: "2025-01-01T00:00:00.000Z",
-        periodEnd: "2025-02-15T00:00:00.000Z", // > 30 days
+        periodEnd: "2025-05-15T00:00:00.000Z", // > 92 days
       }),
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
-      message: "Window exceeds 30 days",
+      message: "Window exceeds 92 days",
     });
   });
 
@@ -472,7 +472,7 @@ describe("reports router — mutation endpoints", () => {
     expect(mockAdd.mock.calls[0]![1].keyNameSnapshot).toBeTruthy();
   });
 
-  it("rerun scope=key respects the ≤30-day window guard (BAD_REQUEST)", async () => {
+  it("rerun scope=key respects the ≤92-day window guard (BAD_REQUEST)", async () => {
     const org = await makeOrg(t.db);
     const admin = await makeUser(t.db, {
       role: "org_admin",
@@ -490,9 +490,9 @@ describe("reports router — mutation endpoints", () => {
         scope: "key",
         apiKeyId,
         periodStart: "2025-01-01T00:00:00.000Z",
-        periodEnd: "2025-02-15T00:00:00.000Z", // > 30 days
+        periodEnd: "2025-05-15T00:00:00.000Z", // > 92 days
       }),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Window exceeds 30 days" });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Window exceeds 92 days" });
   });
 
   it("rerun scope=key for a key in another org → NOT_FOUND (anti-enumeration)", async () => {
@@ -517,6 +517,60 @@ describe("reports router — mutation endpoints", () => {
         periodEnd: "2025-03-07T00:00:00.000Z",
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // ── Window cap: 92 days (one quarter) ────────────────────────────────────────
+
+  it("rerun accepts a 90-day window (within the 92-day cap)", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const member = await makeUser(t.db, { orgId: org.id });
+
+    const mockAdd = vi.fn().mockResolvedValue({});
+    const fakeQueue: EvaluatorQueue = { add: mockAdd };
+
+    const adminCaller = await callerFor({
+      db: t.db,
+      userId: admin.id,
+      evaluatorQueue: fakeQueue,
+    });
+    const result = await adminCaller.reports.rerun({
+      orgId: org.id,
+      scope: "user",
+      targetId: member.id,
+      periodStart: "2025-04-01T00:00:00.000Z",
+      periodEnd: "2025-06-30T00:00:00.000Z", // 90 days
+    });
+
+    expect(result.enqueued).toBe(1);
+    expect(mockAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it("rerun rejects a window longer than 92 days", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const member = await makeUser(t.db, { orgId: org.id });
+
+    const adminCaller = await callerFor({ db: t.db, userId: admin.id });
+    await expect(
+      adminCaller.reports.rerun({
+        orgId: org.id,
+        scope: "user",
+        targetId: member.id,
+        periodStart: "2025-01-01T00:00:00.000Z",
+        periodEnd: "2025-04-15T00:00:00.000Z", // 104 days
+      }),
+    ).rejects.toThrow(/Window exceeds 92 days/);
   });
 
   // ── Test 6: exportOwn returns reports + body metadata (no decrypted content) ──
