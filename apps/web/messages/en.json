@@ -977,7 +977,8 @@
       "windowTo": "To",
       "windowUpdatedCustom": "Custom range · last updated {date}",
       "windowHistoryCustom": "Custom-range score history",
-      "rerunMaxWindow": "Rerun covers at most {days} days"
+      "rerunMaxWindow": "Rerun covers at most {days} days",
+      "windowQuarter": "Last quarter"
     },
     "audienceReport": {
       "userLabel": "Personal report",

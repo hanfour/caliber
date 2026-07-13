@@ -977,7 +977,8 @@
       "windowTo": "迄",
       "windowUpdatedCustom": "自定义区间 · 最后更新 {date}",
       "windowHistoryCustom": "自定义区间分数历史",
-      "rerunMaxWindow": "重跑上限 {days} 天"
+      "rerunMaxWindow": "重跑上限 {days} 天",
+      "windowQuarter": "上季度"
     },
     "audienceReport": {
       "userLabel": "个人报告",
