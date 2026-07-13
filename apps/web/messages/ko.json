@@ -978,7 +978,10 @@
       "windowUpdatedCustom": "사용자 지정 기간 · 마지막 업데이트 {date}",
       "windowHistoryCustom": "사용자 지정 기간 점수 기록",
       "rerunMaxWindow": "재평가는 최대 {days}일",
-      "windowQuarter": "지난 분기"
+      "windowQuarter": "지난 분기",
+      "windowUpdatedQuarter": "{quarter} · 마지막 업데이트 {date}",
+      "windowHistoryQuarter": "{quarter} 점수 기록",
+      "generateBtn": "이 기간의 보고서 생성"
     },
     "audienceReport": {
       "userLabel": "개인 보고서",

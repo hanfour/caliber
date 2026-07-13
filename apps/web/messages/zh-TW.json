@@ -978,7 +978,10 @@
       "windowUpdatedCustom": "自訂區間 · 最後更新 {date}",
       "windowHistoryCustom": "自訂區間分數歷史",
       "rerunMaxWindow": "重跑上限 {days} 天",
-      "windowQuarter": "上季"
+      "windowQuarter": "上季",
+      "windowUpdatedQuarter": "{quarter} · 最後更新 {date}",
+      "windowHistoryQuarter": "{quarter} 分數歷史",
+      "generateBtn": "產生此區間報告"
     },
     "audienceReport": {
       "userLabel": "個人報告",

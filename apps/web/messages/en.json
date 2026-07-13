@@ -978,7 +978,10 @@
       "windowUpdatedCustom": "Custom range · last updated {date}",
       "windowHistoryCustom": "Custom-range score history",
       "rerunMaxWindow": "Rerun covers at most {days} days",
-      "windowQuarter": "Last quarter"
+      "windowQuarter": "Last quarter",
+      "windowUpdatedQuarter": "{quarter} · last updated {date}",
+      "windowHistoryQuarter": "{quarter} score history",
+      "generateBtn": "Generate report for this range"
     },
     "audienceReport": {
       "userLabel": "Personal report",
