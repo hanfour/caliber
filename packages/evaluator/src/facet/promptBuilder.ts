@@ -31,7 +31,7 @@ Definitions:
 - userSatisfaction: how satisfied the user appears with the final outcome,
   judged from closing tone and whether they accepted/used the result
   (5 = explicit satisfaction or silent acceptance and moving on;
-   1 = explicit frustration or abandoning the approach)
+   3 = mixed or unclear; 2 = abandoning the approach; 1 = explicit frustration)
 
 Examples:
 Example 1 (feature_dev success):
@@ -41,7 +41,7 @@ Example 2 (bug_fix failure):
 {"sessionType":"bug_fix","outcome":"failure","claudeHelpfulness":2,"frictionCount":3,"bugsCaughtCount":0,"codexErrorsCount":2,"userSatisfaction":2}
 
 Example 3 (exploration abandoned):
-{"sessionType":"exploration","outcome":"abandoned","claudeHelpfulness":3,"frictionCount":1,"bugsCaughtCount":0,"codexErrorsCount":0,"userSatisfaction":3}`;
+{"sessionType":"exploration","outcome":"abandoned","claudeHelpfulness":3,"frictionCount":1,"bugsCaughtCount":0,"codexErrorsCount":0,"userSatisfaction":2}`;
 
 function approxTokens(s: string): number {
   // ~4 chars per token rule of thumb for English/code mix

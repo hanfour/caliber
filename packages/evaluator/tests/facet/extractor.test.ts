@@ -112,6 +112,7 @@ describe("extractOne — deterministic failures (write row with extractionError)
     expect(row.sessionType).toBeNull();
     expect(row.outcome).toBeNull();
     expect(row.claudeHelpfulness).toBeNull();
+    expect(row.userSatisfaction).toBeNull();
     expect(row.promptVersion).toBe(CURRENT_PROMPT_VERSION);
     expect(row.extractedWithModel).toBe("claude-haiku-4-5");
   });
