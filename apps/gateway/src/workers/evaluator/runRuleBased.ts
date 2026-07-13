@@ -149,6 +149,7 @@ export async function runRuleBased(
       sourceBreakdown,
       report: {
         totalScore: 0,
+        insufficientData: false,
         sectionScores: [],
         signalsSummary: {
           requests: 0,
@@ -250,6 +251,7 @@ export async function runRuleBased(
             frictionCount: requestBodyFacets.frictionCount,
             bugsCaughtCount: requestBodyFacets.bugsCaughtCount,
             codexErrorsCount: requestBodyFacets.codexErrorsCount,
+            userSatisfaction: requestBodyFacets.userSatisfaction,
           })
           .from(requestBodyFacets)
           .where(inArray(requestBodyFacets.requestId, requestIds));
@@ -289,7 +291,9 @@ export async function upsertEvaluationReport(
     periodType: input.periodType,
     rubricId: input.rubricId,
     rubricVersion: input.rubricVersion,
-    totalScore: String(input.report.totalScore),
+    totalScore:
+      input.report.totalScore === null ? null : String(input.report.totalScore),
+    insufficientData: input.report.insufficientData,
     // jsonb columns — cast to unknown to satisfy Drizzle's strict typing.
     // deepStrip guards the write boundary: any lone UTF-16 surrogate / NUL in
     // free text (e.g. sliced evidence quotes) would otherwise fail the whole

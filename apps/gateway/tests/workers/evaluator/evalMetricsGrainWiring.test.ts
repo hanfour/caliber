@@ -34,6 +34,7 @@ vi.mock(
       skipped: false,
       report: {
         totalScore: 72,
+        insufficientData: false,
         sectionScores: [],
         signalsSummary: {
           requests: 10,

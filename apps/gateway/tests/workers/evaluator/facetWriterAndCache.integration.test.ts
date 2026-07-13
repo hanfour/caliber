@@ -183,6 +183,7 @@ describe("createFacetWriter + createFacetCacheReader (integration)", () => {
       frictionCount: 1,
       bugsCaughtCount: 2,
       codexErrorsCount: 0,
+      userSatisfaction: 4,
       extractedWithModel: "claude-haiku-4-5",
       promptVersion: 1,
       extractionError: null,
@@ -204,6 +205,7 @@ describe("createFacetWriter + createFacetCacheReader (integration)", () => {
     expect(row.frictionCount).toBe(1);
     expect(row.bugsCaughtCount).toBe(2);
     expect(row.codexErrorsCount).toBe(0);
+    expect(row.userSatisfaction).toBe(4);
     expect(row.extractedWithModel).toBe("claude-haiku-4-5");
     expect(row.promptVersion).toBe(1);
     expect(row.extractionError).toBeNull();
@@ -225,6 +227,7 @@ describe("createFacetWriter + createFacetCacheReader (integration)", () => {
       frictionCount: 5,
       bugsCaughtCount: 0,
       codexErrorsCount: 3,
+      userSatisfaction: 2,
       extractedWithModel: "claude-haiku-4-5",
       promptVersion: 1,
       extractionError: null,
@@ -242,6 +245,7 @@ describe("createFacetWriter + createFacetCacheReader (integration)", () => {
       frictionCount: 0,
       bugsCaughtCount: 0,
       codexErrorsCount: 0,
+      userSatisfaction: 5,
       extractedWithModel: "claude-sonnet-4-6",
       promptVersion: 2,
       extractionError: null,
@@ -258,6 +262,7 @@ describe("createFacetWriter + createFacetCacheReader (integration)", () => {
     expect(row.sessionType).toBe("feature_dev");
     expect(row.outcome).toBe("success");
     expect(row.claudeHelpfulness).toBe(5);
+    expect(row.userSatisfaction).toBe(5);
     expect(row.extractedWithModel).toBe("claude-sonnet-4-6");
 
     expect((await reader(requestId))!.promptVersion).toBe(2);
@@ -277,6 +282,7 @@ describe("createFacetWriter + createFacetCacheReader (integration)", () => {
       frictionCount: null,
       bugsCaughtCount: null,
       codexErrorsCount: null,
+      userSatisfaction: null,
       extractedWithModel: "claude-haiku-4-5",
       promptVersion: 1,
       extractionError: "parse_error: Invalid JSON: Unexpected token",
@@ -308,6 +314,7 @@ describe("createFacetWriter + createFacetCacheReader (integration)", () => {
       frictionCount: 1,
       bugsCaughtCount: 0,
       codexErrorsCount: 0,
+      userSatisfaction: 3,
       extractedWithModel: "claude-haiku-4-5",
       promptVersion: 1,
       extractionError: null,

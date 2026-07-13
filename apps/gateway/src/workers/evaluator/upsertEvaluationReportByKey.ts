@@ -87,7 +87,9 @@ export async function upsertEvaluationReportByKey(
     periodType: input.periodType,
     rubricId: input.rubricId,
     rubricVersion: input.rubricVersion,
-    totalScore: String(input.report.totalScore),
+    totalScore:
+      input.report.totalScore === null ? null : String(input.report.totalScore),
+    insufficientData: input.report.insufficientData,
     // jsonb columns — cast to unknown to satisfy Drizzle's strict typing.
     // deepStrip removes lone UTF-16 surrogates / NUL that would fail the upsert
     // (see runRuleBased). dataQuality is pure numbers, so it needs no sanitizing.
