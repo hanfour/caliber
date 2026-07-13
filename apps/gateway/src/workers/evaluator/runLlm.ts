@@ -149,9 +149,12 @@ export async function runLlmDeepAnalysis(
       return null;
     }
 
+    // Correlation id for the cost/upstream lookup below. A missing header only
+    // loses cost attribution — it must NOT discard the report (a missing
+    // x-request-id silently dropped EVERY LLM report before the gateway began
+    // emitting it).
     const requestId =
-      res.headers.get("x-request-id") ?? res.headers.get("X-Request-Id");
-    if (!requestId) return null;
+      res.headers.get("x-request-id") ?? res.headers.get("X-Request-Id") ?? "";
 
     const upstreamJson: unknown = await res.json();
 
@@ -169,7 +172,8 @@ export async function runLlmDeepAnalysis(
     // 6. Pull cost back from usage_logs (wait for the row to materialize)
     let costUsd = 0;
     let upstreamAccountId: string | null = null;
-    for (let i = 0; i < LLM_COST_LOOKUP_MAX_ATTEMPTS; i++) {
+    // Only correlate when we actually have an id; skip cleanly otherwise.
+    for (let i = 0; requestId && i < LLM_COST_LOOKUP_MAX_ATTEMPTS; i++) {
       const row = await input.db
         .select({
           totalCost: usageLogs.totalCost,

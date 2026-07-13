@@ -89,6 +89,25 @@ describe("parseLlmResponse", () => {
     if (r.ok) expect(r.userReport.title).toContain("development report");
   });
 
+  it("extracts JSON when the model wraps it in prose", () => {
+    const raw =
+      "Here is the evaluation report you requested:\n\n" +
+      JSON.stringify(validResponse) +
+      "\n\nLet me know if you need anything else.";
+    const r = parseLlmResponse(raw);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.userReport.title).toContain("development report");
+  });
+
+  it("extracts JSON from a code fence embedded in prose", () => {
+    const raw =
+      "Sure — here you go:\n```json\n" +
+      JSON.stringify(validResponse) +
+      "\n```\nDone.";
+    const r = parseLlmResponse(raw);
+    expect(r.ok).toBe(true);
+  });
+
   it("returns ok:false on malformed JSON string", () => {
     const r = parseLlmResponse("{not json at all");
     expect(r.ok).toBe(false);

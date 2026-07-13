@@ -538,4 +538,26 @@ describe("runLlmDeepAnalysis — integration", () => {
     expect(body.max_tokens).toBe(LLM_EVAL_MAX_TOKENS);
     expect(LLM_EVAL_MAX_TOKENS).toBeGreaterThanOrEqual(8000);
   });
+
+  it("10. missing x-request-id → still returns the report (cost attribution skipped)", async () => {
+    // A missing correlation header must NOT discard the whole LLM report — that
+    // silently dropped every eval before the gateway emitted x-request-id.
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${orgId}`, STUB_RAW_KEY);
+    const fetchNoId: typeof fetch = async () =>
+      new Response(JSON.stringify(VALID_ANTHROPIC_RESPONSE), {
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+      });
+
+    const result = await runLlmDeepAnalysis({
+      ...makeBaseInput(),
+      fetchImpl: fetchNoId,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.userReport.title).toBe("Your engineering report");
+    expect(result!.costUsd).toBe(0);
+    expect(result!.upstreamAccountId).toBeNull();
+    expect(result!.requestId).toBe("");
+  });
 });

@@ -40,6 +40,23 @@ describe("gateway server", () => {
     await app.close();
   });
 
+  it("emits an x-request-id response header (evaluator loopback correlation)", async () => {
+    const app = await buildServer({
+      env: makeEnv({
+        ENABLE_GATEWAY: "true",
+        GATEWAY_BASE_URL: "http://localhost:3002",
+        REDIS_URL: "redis://localhost:6379",
+        CREDENTIAL_ENCRYPTION_KEY: "a".repeat(64),
+        API_KEY_HASH_PEPPER: "b".repeat(64),
+      }),
+      db: {} as never,
+      redis: new RedisMock() as unknown as Redis,
+    });
+    const res = await app.inject({ method: "GET", url: "/health" });
+    expect(res.headers["x-request-id"]).toBeTruthy();
+    await app.close();
+  });
+
   it('returns {status:"disabled"} when ENABLE_GATEWAY=false', async () => {
     const app = await buildServer({ env: makeEnv() });
     const res = await app.inject({ method: "GET", url: "/health" });

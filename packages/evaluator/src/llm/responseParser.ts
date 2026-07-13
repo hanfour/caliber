@@ -97,14 +97,29 @@ export function parseLlmResponse(input: unknown): ParseResult {
   return { ok: true, ...result.data };
 }
 
+function tryParse(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return undefined; // JSON.parse never yields undefined for valid input
+  }
+}
+
 function coerceToObject(input: unknown): unknown {
   if (typeof input === "string") {
-    const stripped = input.trim().replace(FENCE, "$1").trim();
-    try {
-      return JSON.parse(stripped);
-    } catch {
-      return null;
+    const trimmed = input.trim();
+    // 1. Whole string is a ```json fence or bare JSON.
+    const direct = tryParse(trimmed.replace(FENCE, "$1").trim());
+    if (direct !== undefined) return direct;
+    // 2. Model wrapped the JSON in prose ("Here is the report: {…}") or a
+    //    non-anchored fence. Extract the outermost {…} object and parse that.
+    const first = trimmed.indexOf("{");
+    const last = trimmed.lastIndexOf("}");
+    if (first !== -1 && last > first) {
+      const embedded = tryParse(trimmed.slice(first, last + 1));
+      if (embedded !== undefined) return embedded;
     }
+    return null;
   }
   if (input === null || input === undefined) return null;
   if (typeof input !== "object") return null;

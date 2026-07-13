@@ -163,6 +163,17 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
   // (e.g. the BYOK `platformForGatewayRoute` throw on an unmapped route, or a
   // route catch block's terminal `throw err`). See errorHandler.ts.
   app.setErrorHandler(gatewayErrorHandler);
+  // Expose the gateway's own request id (genReqId UUID, the usage_logs key) so
+  // internal callers can correlate their row — the evaluator loopback reads
+  // `x-request-id` to look up the eval call's cost + upstream. Without this the
+  // /v1/messages passthrough only forwarded the upstream's `request-id`, so the
+  // evaluator saw no `x-request-id` and silently dropped every LLM report.
+  // Non-hijacked responses only (streaming clients don't need it).
+  app.addHook("onSend", async (request, reply) => {
+    if (!reply.hasHeader("x-request-id")) {
+      reply.header("x-request-id", request.id);
+    }
+  });
   await app.register(metricsPlugin);
   app.get("/health", async () =>
     enabled ? { status: "ok" } : { status: "disabled" },
