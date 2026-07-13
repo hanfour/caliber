@@ -24,17 +24,24 @@ export function shouldScoreSuperior(section: Section, hits: SignalHit[]): boolea
 }
 
 export function scoreSection(section: Section, hits: SignalHit[]): SectionResult {
+  const { standard, superior } = section;
+  if (!standard || !superior) {
+    throw new Error(
+      `tiered section "${section.id}" is missing standard/superior tiers`,
+    );
+  }
+
   const weight = parseWeight(section.weight);
   const superiorReached = shouldScoreSuperior(section, hits);
-  const score = superiorReached ? section.superior.score : section.standard.score;
-  const label = superiorReached ? section.superior.label : section.standard.label;
+  const score = superiorReached ? superior.score : standard.score;
+  const label = superiorReached ? superior.label : standard.label;
 
   return {
     sectionId: section.id,
     name: section.name,
     weight,
-    standardScore: section.standard.score,
-    superiorScore: section.superior.score,
+    standardScore: standard.score,
+    superiorScore: superior.score,
     score,
     label,
     signals: hits,

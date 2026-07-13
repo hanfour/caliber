@@ -299,6 +299,18 @@ function dispatchSignal(
         evidence: result.evidence,
       };
     }
+
+    case "facet_user_satisfaction": {
+      // Interim: rows carry no userSatisfaction until the facet pipeline
+      // lands; the collector is wired in the continuous-scoring integration.
+      return {
+        id: signal.id,
+        type: signal.type,
+        hit: false,
+        value: 0,
+        evidence: [],
+      };
+    }
   }
 }
 
