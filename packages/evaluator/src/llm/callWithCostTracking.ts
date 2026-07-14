@@ -46,6 +46,21 @@ export interface CostTrackingDeps {
   insertLedger: (row: LedgerRow) => Promise<void>;
 }
 
+/**
+ * A ledger write failed AFTER a successful (paid) LLM call. Marked transient
+ * so consumers (e.g. the facet extractor) retry next pass instead of writing
+ * a permanent error row for what is usually a recoverable DB condition.
+ */
+export class LedgerWriteError extends Error {
+  readonly name = "LedgerWriteError";
+  readonly transient = true;
+  constructor(cause: unknown) {
+    super(
+      `ledger write failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+}
+
 export async function callWithCostTracking(
   params: LlmCallParams,
   deps: CostTrackingDeps,
@@ -74,16 +89,20 @@ export async function callWithCostTracking(
     response.usage.output_tokens,
   );
 
-  await deps.insertLedger({
-    orgId: params.orgId,
-    eventType: params.eventType,
-    model: params.model,
-    tokensInput: response.usage.input_tokens,
-    tokensOutput: response.usage.output_tokens,
-    costUsd: actualCost,
-    refType: params.refType,
-    refId: params.refId,
-  });
+  try {
+    await deps.insertLedger({
+      orgId: params.orgId,
+      eventType: params.eventType,
+      model: params.model,
+      tokensInput: response.usage.input_tokens,
+      tokensOutput: response.usage.output_tokens,
+      costUsd: actualCost,
+      refType: params.refType,
+      refId: params.refId,
+    });
+  } catch (e) {
+    throw new LedgerWriteError(e);
+  }
 
   return { response, cost: actualCost };
 }

@@ -88,6 +88,9 @@ function classifyDeterministicError(e: unknown): string | null {
 
 function isTransientApiError(e: unknown): boolean {
   if (!(e instanceof Error)) return false;
+  // Typed transient errors (e.g. LedgerWriteError — the LLM call succeeded,
+  // only accounting failed) must not poison the prompt-version cache.
+  if ((e as { transient?: boolean }).transient === true) return true;
   const status = (e as { status?: number }).status;
   if (typeof status !== "number") return false;
   // 429 = upstream rate-limited: writing a row would poison the prompt-version

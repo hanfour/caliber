@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { BodyRow } from "@caliber/evaluator";
-import { bodyRowToFacetSession } from "../../../src/workers/evaluator/bodyToFacetSession.js";
+import { bodyRowToFacetSession, isGatewayRequestId } from "../../../src/workers/evaluator/bodyToFacetSession.js";
 
 const ORG_ID = "11111111-1111-1111-1111-111111111111";
 
@@ -177,5 +177,22 @@ describe("bodyRowToFacetSession", () => {
 
     const session = bodyRowToFacetSession(body, ORG_ID);
     expect(session).toBeNull();
+  });
+});
+
+describe("isGatewayRequestId", () => {
+  it("accepts gateway-issued UUID request ids", () => {
+    expect(isGatewayRequestId("4cc24acf-6824-4f79-ab45-33ad964d5b11")).toBe(true);
+  });
+
+  it("rejects transcript-derived tx-* ids (not persistable: FK + uuid ledger ref)", () => {
+    expect(
+      isGatewayRequestId("tx-01fe8fa7-65d2-4551-9ea4-0171d47eb01a-a48e4dba-635c-49e2-b0ba-c13a7d4bb7ae"),
+    ).toBe(false);
+  });
+
+  it("rejects other non-UUID ids (e.g. seeded test rows like req-4ie)", () => {
+    expect(isGatewayRequestId("req-4ie")).toBe(false);
+    expect(isGatewayRequestId("")).toBe(false);
   });
 });

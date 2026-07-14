@@ -255,3 +255,21 @@ describe("extractOne — misc", () => {
     expect(args.estimatedInputTokens).toBeLessThan(10_000);
   });
 });
+
+describe("extractOne — ledger write failure is transient (no poisoned row)", () => {
+  it("returns null and does NOT write a row when the ledger insert fails", async () => {
+    const { LedgerWriteError } = await import("../../src/llm/callWithCostTracking");
+    const insertFacet = vi.fn().mockResolvedValue(undefined);
+    const deps: FacetCallDeps = {
+      callWithCostTracking: vi
+        .fn()
+        .mockRejectedValue(new LedgerWriteError(new Error("uuid parse"))) as unknown as FacetCallDeps["callWithCostTracking"],
+      insertFacet,
+      facetModel: "claude-haiku-4-5",
+    };
+
+    const out = await extractOne(makeSession(), deps);
+    expect(out).toBeNull();
+    expect(insertFacet).not.toHaveBeenCalled();
+  });
+});

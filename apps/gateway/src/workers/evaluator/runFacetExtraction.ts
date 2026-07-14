@@ -41,7 +41,10 @@ import { createFacetLlmClient } from "./facetLlmClient.js";
 import { createFacetWriter } from "./facetWriter.js";
 import { createLedgerWriter } from "./ledgerWriter.js";
 import { wrapEnforceBudget } from "./enforceBudgetWithMetrics.js";
-import { bodyRowToFacetSession } from "./bodyToFacetSession.js";
+import {
+  bodyRowToFacetSession,
+  isGatewayRequestId,
+} from "./bodyToFacetSession.js";
 import type { GatewayMetrics } from "../../plugins/metrics.js";
 
 /** Default concurrency — tuned to balance Anthropic rate limits vs throughput. */
@@ -130,8 +133,13 @@ export async function runFacetExtraction(
   }
 
   // Adapt bodies → sessions; drop ones with no usable conversation.
+  // Non-UUID request ids (transcript-derived tx-*, seeded test rows) are
+  // skipped up front: their facet rows can never be persisted (FK into
+  // request_bodies + uuid ledger ref_id), so extracting them burns a paid
+  // LLM call per body on EVERY eval run.
   const sessions: FacetSession[] = [];
   for (const b of input.bodies) {
+    if (!isGatewayRequestId(b.requestId)) continue;
     const s = bodyRowToFacetSession(b, input.orgId);
     if (s) sessions.push(s);
   }
