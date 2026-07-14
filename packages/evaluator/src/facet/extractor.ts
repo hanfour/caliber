@@ -89,7 +89,10 @@ function classifyDeterministicError(e: unknown): string | null {
 function isTransientApiError(e: unknown): boolean {
   if (!(e instanceof Error)) return false;
   const status = (e as { status?: number }).status;
-  return typeof status === "number" && status >= 500 && status < 600;
+  if (typeof status !== "number") return false;
+  // 429 = upstream rate-limited: writing a row would poison the prompt-version
+  // cache permanently for a condition that clears on its own — retry next pass.
+  return status === 429 || (status >= 500 && status < 600);
 }
 
 /**

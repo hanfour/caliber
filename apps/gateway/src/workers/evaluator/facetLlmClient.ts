@@ -11,16 +11,17 @@
  * gateway pipeline) consistent across facet calls and deep-analysis calls.
  *
  * Error semantics:
- *   - On 5xx the thrown Error carries `status` so `extractOne` (in the
- *     evaluator) can classify it as transient and skip writing a row.
- *   - On 4xx / fetch failure / missing API key, throws a plain Error which
- *     `extractOne` treats as deterministic (writes an error row to avoid
+ *   - Non-2xx throws an Error carrying `status`; `extractOne` (in the
+ *     evaluator) classifies 429/5xx as transient (skip row, retry next pass)
+ *     and other statuses as deterministic (writes an error row to avoid
  *     retrying the same prompt_version).
+ *   - Fetch failure / missing API key throw plain Errors (deterministic).
  */
 
 import type { Redis } from "ioredis";
 import type { LlmClient } from "@caliber/evaluator";
 import { LLM_KEY_REDIS_PREFIX } from "./runLlm.js";
+import { EVAL_PIN_HEADER } from "../../runtime/evalAccountPin.js";
 
 export interface FacetLlmClientDeps {
   redis: Redis;
@@ -28,6 +29,14 @@ export interface FacetLlmClientDeps {
   gatewayBaseUrl: string;
   /** Org id used to look up the LLM eval API key in Redis. */
   orgId: string;
+  /**
+   * The org's pinned eval upstream (`organizations.llm_eval_account_id`).
+   * Without the pin the loopback call falls through to normal scheduling,
+   * which has no pool-eligible upstream in single-owner deployments →
+   * every facet call 503s (`no_upstream_available`). Same mechanism
+   * `runLlmDeepAnalysis` already uses.
+   */
+  evalAccountId?: string | null;
   /** For test injection — overrides global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -58,6 +67,9 @@ export function createFacetLlmClient(deps: FacetLlmClientDeps): LlmClient {
             Authorization: `Bearer ${rawKey}`,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
+            ...(deps.evalAccountId
+              ? { [EVAL_PIN_HEADER]: deps.evalAccountId }
+              : {}),
           },
           body: JSON.stringify({
             model,
