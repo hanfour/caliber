@@ -106,6 +106,7 @@ export async function runFacetExtraction(
     .select({
       llmFacetEnabled: organizations.llmFacetEnabled,
       llmFacetModel: organizations.llmFacetModel,
+      llmEvalAccountId: organizations.llmEvalAccountId,
     })
     .from(organizations)
     .where(eq(organizations.id, input.orgId))
@@ -168,6 +169,7 @@ export async function runFacetExtraction(
     redis: input.redis,
     gatewayBaseUrl: input.gatewayBaseUrl,
     orgId: input.orgId,
+    evalAccountId: org.llmEvalAccountId,
     fetchImpl: input.fetchImpl,
   });
 

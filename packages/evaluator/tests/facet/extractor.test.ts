@@ -209,6 +209,21 @@ describe("extractOne — transient failures (skip row, retry next pass)", () => 
     expect(out).toBeNull();
     expect(insertFacet).not.toHaveBeenCalled();
   });
+
+  it("returns null and does NOT write a row on 429 rate limit (upstream will recover)", async () => {
+    const apiError = Object.assign(new Error("Facet LLM call non-2xx: 429"), {
+      status: 429,
+    });
+    const { deps, insertFacet } = makeDeps({
+      callWithCostTracking: (vi.fn().mockRejectedValue(
+        apiError,
+      )) as unknown as FacetCallDeps["callWithCostTracking"],
+    });
+
+    const out = await extractOne(makeSession(), deps);
+    expect(out).toBeNull();
+    expect(insertFacet).not.toHaveBeenCalled();
+  });
 });
 
 describe("extractOne — misc", () => {
