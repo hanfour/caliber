@@ -20,6 +20,21 @@ import type { FacetSession, Turn } from "@caliber/evaluator";
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True only for gateway-issued (UUID) request ids. Facet rows can only be
+ * persisted for these: `request_body_facets.request_id` FKs into
+ * `request_bodies`, and `llm_usage_events.ref_id` is a `uuid` column.
+ * Transcript-derived rows (`tx-<session>-<event>`) and any other synthetic
+ * ids would make a PAID facet-extraction call whose result can never be
+ * written — on every eval run (observed live 2026-07-14).
+ */
+export function isGatewayRequestId(requestId: string): boolean {
+  return UUID_RE.test(requestId);
+}
+
 /**
  * Flatten Anthropic message content (string or block-array) into a single
  * string. Skips image blocks; surfaces tool_use/tool_result blocks with a

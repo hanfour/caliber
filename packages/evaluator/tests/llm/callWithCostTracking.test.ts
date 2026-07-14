@@ -209,3 +209,36 @@ describe("callWithCostTracking — error paths (D4: no ledger on api/budget erro
     await expect(p).rejects.toBeInstanceOf(FakeBudgetError);
   });
 });
+
+describe("ledger write failure (v2 calibration fix)", () => {
+  it("wraps insertLedger failures in a transient LedgerWriteError", async () => {
+    const mockLlmClient = {
+      call: vi.fn().mockResolvedValue({
+        text: "response body",
+        usage: { input_tokens: 500, output_tokens: 100 },
+      }),
+    };
+    const failingLedger = vi
+      .fn()
+      .mockRejectedValue(new Error('invalid input syntax for type uuid: "tx-abc"'));
+
+    await expect(
+      callWithCostTracking(
+        {
+          orgId: "org-1",
+          eventType: "facet_extraction",
+          model: "claude-haiku-4-5",
+          refType: "request_body_facet",
+          refId: "tx-abc",
+          prompt: { system: "s", user: "u", maxTokens: 256 },
+          estimatedInputTokens: 500,
+        },
+        {
+          llmClient: mockLlmClient,
+          enforceBudget: vi.fn().mockResolvedValue(undefined),
+          insertLedger: failingLedger,
+        },
+      ),
+    ).rejects.toMatchObject({ name: "LedgerWriteError", transient: true });
+  });
+});
