@@ -68,6 +68,12 @@ export const serverEnvSchema = z
      * org levels.
      */
     ENABLE_FACET_EXTRACTION: booleanUnion.default(false),
+    /**
+     * Dark-launch kill switch for GitHub delivery sync (PR1). Off by
+     * default. When `true`, the gateway starts the 6-hourly github-sync
+     * interval + worker and requires REDIS_URL + CREDENTIAL_ENCRYPTION_KEY
+     * to be set at startup (the PAT vault and BullMQ queue both need them).
+     */
     ENABLE_GITHUB_DELIVERY: booleanUnion.default(false),
     /**
      * Per-project scoring (PR2). Default-ON kill-switch for the deep-analysis

@@ -36,6 +36,12 @@ export interface QueueLike {
     data: unknown,
     opts?: { jobId?: string },
   ): Promise<unknown>;
+  /**
+   * Optional: BullMQ's real `Queue#remove` (see below). Optional so fakes
+   * that don't implement it still typecheck — `enqueueGithubSync` treats a
+   * missing `remove` as "skip the pre-add cleanup".
+   */
+  remove?(jobId: string): Promise<unknown>;
   close?(): Promise<void>;
 }
 
@@ -65,6 +71,23 @@ export async function enqueueGithubSync(
 ): Promise<{ jobId: string }> {
   const validated = GithubSyncJobPayload.parse(payload);
   const jobId = buildGithubSyncJobId(validated);
+  // BullMQ dedups `add` against the job hash for ANY jobId that still
+  // exists — including completed/failed jobs, not just active ones — and
+  // that hash is only pruned lazily (on another job in the same queue
+  // completing), so our time-component-free jobId would otherwise dedup
+  // every tick/syncNow after the first forever. Removing the stale hash
+  // first restores "one run per trigger" semantics. `remove` is a no-op
+  // for an active/locked job, so an in-flight sync still correctly dedups
+  // the add that follows it — this only clears completed/failed hashes.
+  // Best-effort: a remove failure (e.g. transient Redis blip) must never
+  // block the add.
+  try {
+    await queue.remove?.(jobId);
+  } catch {
+    // swallow — see comment above. The add below still proceeds; worst
+    // case this particular trigger dedups against a stale hash and the
+    // next tick tries again.
+  }
   await queue.add(GITHUB_SYNC_JOB_NAME, validated, { jobId });
   return { jobId };
 }

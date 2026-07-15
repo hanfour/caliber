@@ -3,7 +3,7 @@
  * evaluator/cron.ts (bodyPurge, billingAudit): run once at start,
  * then on a fixed interval; deterministic jobIds dedup overlaps.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { githubConnections, organizations } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import { enqueueGithubSync, type QueueLike } from "./queue.js";
@@ -43,6 +43,12 @@ export function startGithubSyncInterval(
         and(
           eq(githubConnections.deliveryEnabled, true),
           isNull(organizations.deletedAt),
+          // Spec: "auth_error ... pauses the schedule" — a connection whose
+          // PAT is rejected/revoked must stop being retried every tick until
+          // the operator fixes it. Recovery already exists: setConnection
+          // (githubDelivery.setConnection) resets status back to "ok" on a
+          // successful re-probe, which re-admits the org here.
+          ne(githubConnections.status, "auth_error"),
         ),
       );
     for (const row of rows) {

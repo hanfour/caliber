@@ -6,6 +6,9 @@
  * never processes jobs). Verifies:
  *   - one dedup'd job per org with an enabled connection
  *   - disabled connections are skipped
+ *   - connections with status "auth_error" are skipped (spec: auth_error
+ *     pauses the schedule; recovery is via setConnection resetting status
+ *     back to "ok")
  *   - deterministic jobId via `buildGithubSyncJobId`
  *   - every enqueued job carries `triggeredBy: "interval"`
  *
@@ -106,9 +109,13 @@ describe("startGithubSyncInterval", () => {
     const orgA = await insertOrg(db);
     const orgB = await insertOrg(db);
     const orgC = await insertOrg(db);
+    const orgD = await insertOrg(db);
     await insertConnection(db, orgA.id);
     await insertConnection(db, orgB.id, { deliveryEnabled: false });
     await insertConnection(db, orgC.id);
+    // Spec: "auth_error ... pauses the schedule" — must not be enqueued
+    // until setConnection recovers it back to status "ok".
+    await insertConnection(db, orgD.id, { status: "auth_error" });
 
     const added: Array<{ name: string; data: unknown; opts?: { jobId?: string } }> = [];
     const queue = {

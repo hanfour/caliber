@@ -23,6 +23,7 @@ import {
 } from "@testcontainers/redis";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { eq } from "drizzle-orm";
 import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -204,9 +205,32 @@ describe("createGithubSyncWorker", () => {
         await new Promise((r) => setTimeout(r, 250));
       }
       expect(rows).toHaveLength(1);
+
+      // Regression (C1): BullMQ's `add` dedups against the job hash for
+      // ANY jobId that still exists — including a COMPLETED job, per
+      // removeOnComplete: { age: 86400, count: 500 } — and our jobId
+      // (`ghsync_v1_{orgId}`) has no time component. Without
+      // remove-before-add in enqueueGithubSync, this second enqueue for
+      // the same org would be silently deduped and the row would never
+      // reappear, hanging this poll until the 15s budget expires.
+      await db
+        .delete(githubPullRequests)
+        .where(eq(githubPullRequests.orgId, org.id));
+
+      await enqueueGithubSync(queue, { orgId: org.id, triggeredBy: "manual" });
+      const deadline2 = Date.now() + 15_000;
+      let rows2: Array<{ orgId: string }> = [];
+      while (Date.now() < deadline2) {
+        rows2 = (await db.select().from(githubPullRequests)).filter(
+          (r) => r.orgId === org.id,
+        );
+        if (rows2.length > 0) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(rows2).toHaveLength(1);
     } finally {
       await worker.close();
       await queue.close();
     }
-  }, 30_000);
+  }, 45_000);
 });

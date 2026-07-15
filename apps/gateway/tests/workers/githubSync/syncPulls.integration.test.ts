@@ -28,7 +28,6 @@ import { createRequire } from "node:module";
 import {
   organizations,
   githubPullRequests,
-  githubReviews,
   type Database,
 } from "@caliber/db";
 import {

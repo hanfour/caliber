@@ -35,6 +35,11 @@ export interface GithubSyncQueue {
     data: unknown,
     opts?: { jobId?: string },
   ): Promise<unknown>;
+  /**
+   * Optional: BullMQ's real `Queue#remove` (see syncNow below). Optional so
+   * fakes/test doubles that don't implement it still typecheck.
+   */
+  remove?(jobId: string): Promise<unknown>;
 }
 
 const orgIdInput = z.object({ orgId: z.string().uuid() });
@@ -213,6 +218,19 @@ export const githubDeliveryRouter = router({
     if (!queue) return { enqueued: false, testMode: true as const };
 
     const jobId = buildGithubSyncJobId({ orgId: input.orgId });
+    // BullMQ dedups `add` against the job hash for any jobId that still
+    // exists — including completed/failed jobs, not just active ones — and
+    // our jobId has no time component. Without removing the stale hash
+    // first, a second syncNow (or the interval tick) after the first job
+    // completes would silently no-op forever. `remove` is a no-op for an
+    // active/locked job, so an in-flight sync still correctly dedups the
+    // add that follows it. Best-effort: a remove failure must never block
+    // the add. (Keep in lockstep with apps/gateway's enqueueGithubSync.)
+    try {
+      await queue.remove?.(jobId);
+    } catch {
+      // swallow — see comment above.
+    }
     await queue.add(
       GITHUB_SYNC_JOB_NAME,
       { orgId: input.orgId, triggeredBy: "manual" },
