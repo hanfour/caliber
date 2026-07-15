@@ -143,10 +143,12 @@ export async function buildServer() {
 
   // Shared BullMQ Redis connection for the evaluator + github-sync queues.
   // Whichever block below runs first (evaluator, then github-sync) creates
-  // the connection and owns quitting it on shutdown; the other block reuses
-  // it via `bullmqRedis` when both feature flags are enabled, avoiding a
-  // second physical connection for what both blocks agree are identical
-  // options ({ enableAutoPipelining: true, maxRetriesPerRequest: 3 }).
+  // the connection; the other block reuses it via `bullmqRedis` when both
+  // feature flags are enabled, avoiding a second physical connection for
+  // what both blocks agree are identical options
+  // ({ enableAutoPipelining: true, maxRetriesPerRequest: 3 }). Teardown is
+  // NOT registered per-block — see the single consolidated onClose hook
+  // below, which is the only thing that quits this connection.
   let bullmqRedis: Redis | undefined;
 
   // Instantiate the evaluator BullMQ queue when the feature flag is on.
@@ -171,20 +173,15 @@ export async function buildServer() {
         removeOnFail: { age: 7 * 86400 },
       },
     });
-    app.addHook("onClose", async () => {
-      await evaluatorQueue?.close();
-    });
   }
 
   // Instantiate the github-sync BullMQ queue when the feature flag is on.
   // Reuses the evaluator block's `bullmqRedis` connection above when both
-  // features are enabled; otherwise creates an identical connection here
-  // (and owns quitting it on shutdown, since the evaluator block didn't).
+  // features are enabled; otherwise creates an identical connection here.
   // Skipped entirely when ENABLE_GITHUB_DELIVERY=false or REDIS_URL is
   // absent — githubDelivery.syncNow will gracefully return testMode:true.
   let githubSyncQueue: Queue | undefined;
   if (env.ENABLE_GITHUB_DELIVERY && env.REDIS_URL) {
-    const ownsConnection = !bullmqRedis;
     if (!bullmqRedis) {
       bullmqRedis = new Redis(env.REDIS_URL, {
         enableAutoPipelining: true,
@@ -204,11 +201,31 @@ export async function buildServer() {
         removeOnFail: { age: 7 * 86400 },
       },
     });
+  }
+
+  // Consolidated teardown for both BullMQ queues plus the shared connection
+  // they may run on — registered as ONE hook (not one per queue) so the
+  // close order is explicit in source rather than relying on Fastify's
+  // "onClose hooks run LIFO" behavior across separately-registered hooks.
+  // Same pattern as apps/gateway/src/server.ts's wireEvaluatorPipeline.
+  // Previously each block above quit the connection only if it believed it
+  // "owned" it (`ownsConnection = !bullmqRedis`); that was always false for
+  // whichever block ran second, so with both ENABLE_EVALUATOR and
+  // ENABLE_GITHUB_DELIVERY on, NEITHER block quit the shared connection and
+  // it leaked past shutdown. Both queue.close() calls must resolve before
+  // bullmqRedis.quit() — otherwise BullMQ's own in-flight close commands
+  // would race a connection that's already quitting.
+  if (bullmqRedis) {
     app.addHook("onClose", async () => {
-      await githubSyncQueue?.close();
-      if (ownsConnection) {
-        await bullmqRedis?.quit().catch(() => {});
-      }
+      await evaluatorQueue?.close().catch((err: Error) => {
+        app.log.warn({ err: err.message }, "evaluator queue close failed");
+      });
+      await githubSyncQueue?.close().catch((err: Error) => {
+        app.log.warn({ err: err.message }, "github-sync queue close failed");
+      });
+      await bullmqRedis?.quit().catch((err: Error) => {
+        app.log.warn({ err: err.message }, "bullmq redis quit failed");
+      });
     });
   }
 

@@ -75,48 +75,90 @@ export const githubDeliveryRouter = router({
         throw err;
       }
 
-      const existing = (
-        await ctx.db
-          .select({ id: githubConnections.id })
-          .from(githubConnections)
-          .where(eq(githubConnections.orgId, input.orgId))
-          .limit(1)
-      )[0];
-      // Salt binding: sealed with the row id — reuse it on update.
-      const id = existing?.id ?? randomUUID();
-      const sealed = encryptCredential({
-        masterKeyHex,
-        accountId: id,
-        plaintext: input.token,
-      });
       const tokenLast4 = input.token.slice(-4);
 
-      await ctx.db
-        .insert(githubConnections)
-        .values({
-          id,
-          orgId: input.orgId,
-          ownerLogin: input.ownerLogin,
-          nonce: sealed.nonce,
-          ciphertext: sealed.ciphertext,
-          authTag: sealed.authTag,
-          tokenLast4,
-          repoAllowlist: input.repoAllowlist ?? null,
-        })
-        .onConflictDoUpdate({
-          target: githubConnections.orgId,
-          set: {
+      // Salt-binding TOCTOU: the SELECT below and the upsert are not atomic,
+      // so two concurrent first-writes for the same org can each generate
+      // their own randomUUID() and encrypt with different salts. Whichever
+      // INSERT loses the race resolves as an UPDATE against the WINNER's row
+      // id, which would overwrite the ciphertext with bytes sealed under the
+      // loser's (never-persisted) salt — an undecryptable PAT, since the
+      // gateway derives the salt from the persisted row id. Wrapping in a
+      // transaction and reading back the id the upsert actually kept (via
+      // RETURNING) lets us detect that divergence and self-heal: re-encrypt
+      // with the real persisted id and overwrite the sealed columns. This is
+      // safe without extra locking because ON CONFLICT DO UPDATE already
+      // takes a row-level lock on the conflicting row that is held for the
+      // rest of this transaction, so no third writer can interleave between
+      // the divergence check and the corrective UPDATE below.
+      await ctx.db.transaction(async (tx) => {
+        const existing = (
+          await tx
+            .select({ id: githubConnections.id })
+            .from(githubConnections)
+            .where(eq(githubConnections.orgId, input.orgId))
+            .limit(1)
+        )[0];
+        // Salt binding: sealed with the row id — reuse it on update.
+        const id = existing?.id ?? randomUUID();
+        const sealed = encryptCredential({
+          masterKeyHex,
+          accountId: id,
+          plaintext: input.token,
+        });
+
+        const [upserted] = await tx
+          .insert(githubConnections)
+          .values({
+            id,
+            orgId: input.orgId,
             ownerLogin: input.ownerLogin,
             nonce: sealed.nonce,
             ciphertext: sealed.ciphertext,
             authTag: sealed.authTag,
             tokenLast4,
             repoAllowlist: input.repoAllowlist ?? null,
-            status: "ok",
-            lastSyncError: null,
-            updatedAt: new Date(),
-          },
-        });
+          })
+          .onConflictDoUpdate({
+            target: githubConnections.orgId,
+            set: {
+              ownerLogin: input.ownerLogin,
+              nonce: sealed.nonce,
+              ciphertext: sealed.ciphertext,
+              authTag: sealed.authTag,
+              tokenLast4,
+              repoAllowlist: input.repoAllowlist ?? null,
+              status: "ok",
+              lastSyncError: null,
+              updatedAt: new Date(),
+            },
+          })
+          .returning({ id: githubConnections.id });
+        if (!upserted) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "failed to upsert github connection",
+          });
+        }
+        const persistedId = upserted.id;
+
+        if (persistedId !== id) {
+          const resealed = encryptCredential({
+            masterKeyHex,
+            accountId: persistedId,
+            plaintext: input.token,
+          });
+          await tx
+            .update(githubConnections)
+            .set({
+              nonce: resealed.nonce,
+              ciphertext: resealed.ciphertext,
+              authTag: resealed.authTag,
+              updatedAt: new Date(),
+            })
+            .where(eq(githubConnections.id, persistedId));
+        }
+      });
 
       return {
         ownerLogin: input.ownerLogin,
