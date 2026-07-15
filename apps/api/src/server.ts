@@ -27,6 +27,12 @@ import {
   EVALUATOR_QUEUE_PREFIX,
 } from "./trpc/routers/reports.js";
 
+// ─── github-sync queue constants (duplicated from apps/gateway to avoid
+// cross-app import) ──────────────────────────────────────────────────────
+// TODO: extract to a shared @caliber/queue package to eliminate this duplication.
+const GITHUB_SYNC_QUEUE_NAME = "github-sync";
+const GITHUB_SYNC_QUEUE_PREFIX = "caliber:gw";
+
 // When the gateway is disabled, no router actually reaches Redis (every
 // gateway-aware router short-circuits to NOT_FOUND via ensureGatewayEnabled).
 // We still need to satisfy the TrpcContext.redis type, so we hand back a proxy
@@ -135,21 +141,29 @@ export async function buildServer() {
   await app.register(cliAdminReportRoutes(env, redis));
   await app.register(cliAdminPoolRoutes(env, redis));
 
+  // Shared BullMQ Redis connection for the evaluator + github-sync queues.
+  // Whichever block below runs first (evaluator, then github-sync) creates
+  // the connection and owns quitting it on shutdown; the other block reuses
+  // it via `bullmqRedis` when both feature flags are enabled, avoiding a
+  // second physical connection for what both blocks agree are identical
+  // options ({ enableAutoPipelining: true, maxRetriesPerRequest: 3 }).
+  let bullmqRedis: Redis | undefined;
+
   // Instantiate the evaluator BullMQ queue when the feature flag is on.
   // Skipped entirely when ENABLE_EVALUATOR=false or REDIS_URL is absent —
   // reports.rerun will gracefully return testMode:true in those cases.
   let evaluatorQueue: Queue | undefined;
   if (env.ENABLE_EVALUATOR && env.REDIS_URL) {
-    const evaluatorRedis = new Redis(env.REDIS_URL, {
+    bullmqRedis = new Redis(env.REDIS_URL, {
       enableAutoPipelining: true,
       maxRetriesPerRequest: 3,
     });
-    evaluatorRedis.on("error", (err: Error) => {
+    bullmqRedis.on("error", (err: Error) => {
       app.log.warn({ err: err.message }, "evaluator redis error");
     });
     evaluatorQueue = new Queue(EVALUATOR_QUEUE_NAME, {
       prefix: EVALUATOR_QUEUE_PREFIX,
-      connection: evaluatorRedis,
+      connection: bullmqRedis,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: "exponential", delay: 1000 },
@@ -159,6 +173,42 @@ export async function buildServer() {
     });
     app.addHook("onClose", async () => {
       await evaluatorQueue?.close();
+    });
+  }
+
+  // Instantiate the github-sync BullMQ queue when the feature flag is on.
+  // Reuses the evaluator block's `bullmqRedis` connection above when both
+  // features are enabled; otherwise creates an identical connection here
+  // (and owns quitting it on shutdown, since the evaluator block didn't).
+  // Skipped entirely when ENABLE_GITHUB_DELIVERY=false or REDIS_URL is
+  // absent — githubDelivery.syncNow will gracefully return testMode:true.
+  let githubSyncQueue: Queue | undefined;
+  if (env.ENABLE_GITHUB_DELIVERY && env.REDIS_URL) {
+    const ownsConnection = !bullmqRedis;
+    if (!bullmqRedis) {
+      bullmqRedis = new Redis(env.REDIS_URL, {
+        enableAutoPipelining: true,
+        maxRetriesPerRequest: 3,
+      });
+      bullmqRedis.on("error", (err: Error) => {
+        app.log.warn({ err: err.message }, "github-sync redis error");
+      });
+    }
+    githubSyncQueue = new Queue(GITHUB_SYNC_QUEUE_NAME, {
+      prefix: GITHUB_SYNC_QUEUE_PREFIX,
+      connection: bullmqRedis,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 1000 },
+        removeOnComplete: { age: 86400, count: 500 },
+        removeOnFail: { age: 7 * 86400 },
+      },
+    });
+    app.addHook("onClose", async () => {
+      await githubSyncQueue?.close();
+      if (ownsConnection) {
+        await bullmqRedis?.quit().catch(() => {});
+      }
     });
   }
 
@@ -181,7 +231,12 @@ export async function buildServer() {
         prefix: "",
         trpcOptions: {
           router: appRouter,
-          createContext: createContextFactory({ env, redis, evaluatorQueue }),
+          createContext: createContextFactory({
+            env,
+            redis,
+            evaluatorQueue,
+            githubSyncQueue,
+          }),
           // errorFormatter is set on initTRPC.create() in trpc/procedures.ts —
           // setting it here on the adapter is silently ignored by tRPC v11.
           onError: ({

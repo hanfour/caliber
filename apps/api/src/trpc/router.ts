@@ -17,6 +17,7 @@ import { reportsRouter } from "./routers/reports.js";
 import { evaluatorRouter } from "./routers/evaluator.js";
 import { devicesRouter } from "./routers/devices.js";
 import { sessionsRouter } from "./routers/sessions.js";
+import { githubDeliveryRouter } from "./routers/githubDelivery.js";
 
 export const appRouter = router({
   me: meRouter,
@@ -37,6 +38,7 @@ export const appRouter = router({
   evaluator: evaluatorRouter,
   devices: devicesRouter,
   sessions: sessionsRouter,
+  githubDelivery: githubDeliveryRouter,
 });
 
 export type AppRouter = typeof appRouter;
