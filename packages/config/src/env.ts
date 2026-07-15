@@ -68,6 +68,7 @@ export const serverEnvSchema = z
      * org levels.
      */
     ENABLE_FACET_EXTRACTION: booleanUnion.default(false),
+    ENABLE_GITHUB_DELIVERY: booleanUnion.default(false),
     /**
      * Per-project scoring (PR2). Default-ON kill-switch for the deep-analysis
      * budget *enforcement* (the pre-call halt gate). When `true` (default), an
