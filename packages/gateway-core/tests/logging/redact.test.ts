@@ -95,6 +95,22 @@ describe("maskCredentialMaterial", () => {
       "the sk-ant prefix means anthropic",
     );
   });
+
+  it("masks fine-grained GitHub PATs", () => {
+    const input =
+      "boom github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOP failed";
+    const out = maskCredentialMaterial(input);
+    expect(out).not.toContain("github_pat_11ABCDEFG");
+    expect(out).toContain("[REDACTED-GITHUB-PAT]");
+  });
+
+  it("masks classic ghp_/gho_ style GitHub tokens", () => {
+    const out = maskCredentialMaterial(
+      "auth ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 rejected",
+    );
+    expect(out).not.toContain("ghp_AbCdEfGh");
+    expect(out).toContain("[REDACTED-GITHUB-TOKEN]");
+  });
 });
 
 describe("safeErrorMessage", () => {
