@@ -57,6 +57,9 @@ import {
   startIdempotencyPurgeCron,
   type IdempotencyPurgeCronHandle,
 } from "./workers/idempotencyPurge.js";
+import { createGithubSyncQueue } from "./workers/githubSync/queue.js";
+import { createGithubSyncWorker } from "./workers/githubSync/worker.js";
+import { startGithubSyncInterval } from "./workers/githubSync/interval.js";
 import { ModelRegistry } from "./models/modelRegistry.js";
 import { buildRefreshDeps } from "./models/registryWiring.js";
 
@@ -275,6 +278,14 @@ export async function buildServer(opts: BuildOpts): Promise<FastifyInstance> {
       app.log.info(
         "ENABLE_EVALUATOR=false — body capture, evaluator pipeline, and evaluator crons are disabled",
       );
+    }
+
+    // github-sync subsystem (PR1): queue + worker + 6h interval, gated on
+    // ENABLE_GITHUB_DELIVERY (defense-in-depth, mirrors the evaluator gate
+    // above). Unlike the evaluator, PR1 has no separate cron block — the
+    // interval is wired inside wireGithubSyncPipeline itself.
+    if (opts.env.ENABLE_GITHUB_DELIVERY) {
+      await wireGithubSyncPipeline(app, opts.env);
     }
   } else {
     app.log.debug(
@@ -686,6 +697,69 @@ async function wireEvaluatorPipeline(
         "evaluator bullmq redis quit failed (likely already closed)",
       );
     });
+  });
+}
+
+/**
+ * Build the dedicated BullMQ Redis connection + Queue + Worker + 6h sync
+ * interval for the github-sync subsystem (PR1) and wire onClose teardown.
+ * Bundled into a single function (unlike the evaluator's split
+ * pipeline/cron wiring) because PR1 has no separate body-capture step —
+ * the queue, worker, and interval are all this subsystem needs.
+ *
+ * Uses a separate Redis connection from other pipelines (same rationale as
+ * wireEvaluatorPipeline: BullMQ Lua scripts cannot share the prefixed
+ * `fastify.redis` client).
+ */
+async function wireGithubSyncPipeline(
+  app: FastifyInstance,
+  env: ServerEnv,
+): Promise<void> {
+  if (!env.REDIS_URL) {
+    throw new Error("ENABLE_GITHUB_DELIVERY requires REDIS_URL");
+  }
+  const masterKeyHex = env.CREDENTIAL_ENCRYPTION_KEY;
+  if (!masterKeyHex) {
+    throw new Error("ENABLE_GITHUB_DELIVERY requires CREDENTIAL_ENCRYPTION_KEY");
+  }
+
+  const githubRedis = new Redis(env.REDIS_URL, {
+    enableAutoPipelining: true,
+    maxRetriesPerRequest: null,
+  });
+  githubRedis.on("error", (err) => {
+    app.log.warn({ err }, "github-sync redis error");
+  });
+
+  const queue = createGithubSyncQueue({ connection: githubRedis });
+  const worker = createGithubSyncWorker({
+    connection: githubRedis,
+    db: app.db,
+    masterKeyHex,
+  });
+  const cronHandle = startGithubSyncInterval({
+    db: app.db,
+    queue,
+    logger: app.log,
+  });
+
+  app.addHook("onClose", async () => {
+    cronHandle.stop();
+    try {
+      await worker.close();
+    } catch (err) {
+      app.log.warn({ err }, "github-sync worker close failed");
+    }
+    try {
+      await queue.close();
+    } catch (err) {
+      app.log.debug({ err }, "github-sync queue close failed");
+    }
+    try {
+      await githubRedis.quit();
+    } catch (err) {
+      app.log.debug({ err }, "github-sync redis quit failed");
+    }
   });
 }
 
