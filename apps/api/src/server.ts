@@ -3,9 +3,13 @@ import { LOG_REDACT_PATHS } from "@caliber/gateway-core";
 import rateLimit from "@fastify/rate-limit";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { Redis } from "ioredis";
-import { Queue } from "bullmq";
 import { parseServerEnv } from "@caliber/config/env";
 import { setGlobalLocaleErrorMap } from "@caliber/i18n-validation/server";
+import {
+  createEvaluatorQueue,
+  createGithubSyncQueue,
+  createGithubDeliveryQueue,
+} from "@caliber/queue";
 import { healthRoutes } from "./rest/health.js";
 import { deviceAuthRoutes } from "./rest/deviceAuth.js";
 import { cliAdminReportRoutes } from "./rest/cliAdminReport.js";
@@ -22,18 +26,6 @@ import { appRouter } from "./trpc/router.js";
 import { createContextFactory } from "./trpc/context.js";
 import { buildTrpcErrorLogPayload } from "./trpc/onErrorLog.js";
 import { trpcTooManyRequestsBody } from "./trpc/rateLimitError.js";
-import {
-  EVALUATOR_QUEUE_NAME,
-  EVALUATOR_QUEUE_PREFIX,
-} from "./trpc/routers/reports.js";
-
-// ─── github-sync / github-delivery queue constants (duplicated from
-// apps/gateway to avoid cross-app import) ──────────────────────────────────
-// TODO: extract to a shared @caliber/queue package to eliminate this duplication.
-const GITHUB_SYNC_QUEUE_NAME = "github-sync";
-const GITHUB_SYNC_QUEUE_PREFIX = "caliber:gw";
-const GITHUB_DELIVERY_QUEUE_NAME = "github-delivery";
-const GITHUB_DELIVERY_QUEUE_PREFIX = "caliber:gw";
 
 // When the gateway is disabled, no router actually reaches Redis (every
 // gateway-aware router short-circuits to NOT_FOUND via ensureGatewayEnabled).
@@ -156,7 +148,7 @@ export async function buildServer() {
   // Instantiate the evaluator BullMQ queue when the feature flag is on.
   // Skipped entirely when ENABLE_EVALUATOR=false or REDIS_URL is absent —
   // reports.rerun will gracefully return testMode:true in those cases.
-  let evaluatorQueue: Queue | undefined;
+  let evaluatorQueue: ReturnType<typeof createEvaluatorQueue> | undefined;
   if (env.ENABLE_EVALUATOR && env.REDIS_URL) {
     bullmqRedis = new Redis(env.REDIS_URL, {
       enableAutoPipelining: true,
@@ -165,16 +157,7 @@ export async function buildServer() {
     bullmqRedis.on("error", (err: Error) => {
       app.log.warn({ err: err.message }, "evaluator redis error");
     });
-    evaluatorQueue = new Queue(EVALUATOR_QUEUE_NAME, {
-      prefix: EVALUATOR_QUEUE_PREFIX,
-      connection: bullmqRedis,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 1000 },
-        removeOnComplete: { age: 86400, count: 500 },
-        removeOnFail: { age: 7 * 86400 },
-      },
-    });
+    evaluatorQueue = createEvaluatorQueue({ connection: bullmqRedis });
   }
 
   // Instantiate the github-sync BullMQ queue when the feature flag is on.
@@ -182,7 +165,7 @@ export async function buildServer() {
   // features are enabled; otherwise creates an identical connection here.
   // Skipped entirely when ENABLE_GITHUB_DELIVERY=false or REDIS_URL is
   // absent — githubDelivery.syncNow will gracefully return testMode:true.
-  let githubSyncQueue: Queue | undefined;
+  let githubSyncQueue: ReturnType<typeof createGithubSyncQueue> | undefined;
   if (env.ENABLE_GITHUB_DELIVERY && env.REDIS_URL) {
     if (!bullmqRedis) {
       bullmqRedis = new Redis(env.REDIS_URL, {
@@ -193,16 +176,7 @@ export async function buildServer() {
         app.log.warn({ err: err.message }, "github-sync redis error");
       });
     }
-    githubSyncQueue = new Queue(GITHUB_SYNC_QUEUE_NAME, {
-      prefix: GITHUB_SYNC_QUEUE_PREFIX,
-      connection: bullmqRedis,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 1000 },
-        removeOnComplete: { age: 86400, count: 500 },
-        removeOnFail: { age: 7 * 86400 },
-      },
-    });
+    githubSyncQueue = createGithubSyncQueue({ connection: bullmqRedis });
   }
 
   // Instantiate the github-delivery BullMQ queue when the feature flag is
@@ -210,7 +184,9 @@ export async function buildServer() {
   // any of them are enabled; otherwise creates an identical connection
   // here. Skipped entirely when ENABLE_GITHUB_DELIVERY=false or REDIS_URL is
   // absent — githubDelivery.generate will gracefully return testMode:true.
-  let githubDeliveryQueue: Queue | undefined;
+  let githubDeliveryQueue:
+    | ReturnType<typeof createGithubDeliveryQueue>
+    | undefined;
   if (env.ENABLE_GITHUB_DELIVERY && env.REDIS_URL) {
     if (!bullmqRedis) {
       bullmqRedis = new Redis(env.REDIS_URL, {
@@ -221,15 +197,8 @@ export async function buildServer() {
         app.log.warn({ err: err.message }, "github-delivery redis error");
       });
     }
-    githubDeliveryQueue = new Queue(GITHUB_DELIVERY_QUEUE_NAME, {
-      prefix: GITHUB_DELIVERY_QUEUE_PREFIX,
+    githubDeliveryQueue = createGithubDeliveryQueue({
       connection: bullmqRedis,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 1000 },
-        removeOnComplete: { age: 86400, count: 500 },
-        removeOnFail: { age: 7 * 86400 },
-      },
     });
   }
 

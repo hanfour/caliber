@@ -4,8 +4,8 @@ import {
   GithubDeliveryJobPayload,
   buildGithubDeliveryJobId,
   enqueueGithubDelivery,
-} from "../../src/workers/githubDelivery/queue.js";
-import type { QueueLike } from "../../src/workers/githubSync/queue.js";
+  type QueueLike,
+} from "../src/index.js";
 
 const ORG = "0b7e7d1e-0000-4000-8000-000000000001";
 const USER = "0b7e7d1e-0000-4000-8000-000000000002";

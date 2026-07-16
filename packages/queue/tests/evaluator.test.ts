@@ -21,7 +21,7 @@ import {
   EVALUATOR_DEFAULT_JOB_OPTIONS,
   buildQueueOptions,
   type QueueLike,
-} from "../../src/workers/evaluator/queue.js";
+} from "../src/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
