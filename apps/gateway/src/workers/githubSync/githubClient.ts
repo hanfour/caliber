@@ -35,6 +35,7 @@ export interface GithubApiPullDetail {
   updated_at: string;
   merged_at: string | null;
   closed_at: string | null;
+  body?: string | null;
 }
 
 export interface GithubApiReview {
@@ -42,6 +43,12 @@ export interface GithubApiReview {
   user: GithubApiUser | null;
   state: string; // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING
   submitted_at: string | null;
+}
+
+export interface GithubApiReviewComment {
+  body: string;
+  user: GithubApiUser | null;
+  path?: string;
 }
 
 export interface GithubApiIssue {
@@ -84,10 +91,15 @@ export interface GithubClient {
     sinceIso: string | null,
   ): Promise<GithubApiPullListItem[]>;
   getPull(repoFullName: string, number: number): Promise<GithubApiPullDetail>;
+  getPullDiff(repoFullName: string, number: number): Promise<string>;
   listReviews(
     repoFullName: string,
     number: number,
   ): Promise<GithubApiReview[]>;
+  listReviewComments(
+    repoFullName: string,
+    number: number,
+  ): Promise<GithubApiReviewComment[]>;
   listIssuesSince(
     repoFullName: string,
     sinceIso: string | null,
@@ -129,7 +141,20 @@ export function createGithubClient(opts: GithubClientOptions): GithubClient {
     return handleResponse(res, path);
   }
 
-  async function handleResponse(res: Response, path: string): Promise<unknown> {
+  /** GET with a per-request `accept` header override, returning raw text
+   * instead of parsed JSON (e.g. `application/vnd.github.diff`). Shares the
+   * same status-check taxonomy as the JSON path via `checkStatus`. */
+  async function requestText(path: string, accept: string): Promise<string> {
+    const url = new URL(`${baseUrl}${path}`);
+    const res = await fetchFn(url.toString(), {
+      method: "GET",
+      headers: { ...headers, accept },
+    });
+    checkStatus(res, path);
+    return res.text();
+  }
+
+  function checkStatus(res: Response, path: string): void {
     if (res.status === 401) {
       throw new GithubAuthError(`github token rejected (401) for ${path}`);
     }
@@ -159,6 +184,10 @@ export function createGithubClient(opts: GithubClientOptions): GithubClient {
     if (!res.ok) {
       throw new GithubHttpError(res.status, `github api ${res.status} for ${path}`);
     }
+  }
+
+  async function handleResponse(res: Response, path: string): Promise<unknown> {
+    checkStatus(res, path);
     return res.json();
   }
 
@@ -237,6 +266,13 @@ export function createGithubClient(opts: GithubClientOptions): GithubClient {
       )) as GithubApiPullDetail;
     },
 
+    async getPullDiff(repoFullName, number) {
+      return requestText(
+        `/repos/${repoFullName}/pulls/${number}`,
+        "application/vnd.github.diff",
+      );
+    },
+
     async listReviews(repoFullName, number) {
       const out: GithubApiReview[] = [];
       for await (const chunk of pages(
@@ -244,6 +280,17 @@ export function createGithubClient(opts: GithubClientOptions): GithubClient {
         {},
       )) {
         out.push(...(chunk as GithubApiReview[]));
+      }
+      return out;
+    },
+
+    async listReviewComments(repoFullName, number) {
+      const out: GithubApiReviewComment[] = [];
+      for await (const chunk of pages(
+        `/repos/${repoFullName}/pulls/${number}/comments`,
+        {},
+      )) {
+        out.push(...(chunk as GithubApiReviewComment[]));
       }
       return out;
     },

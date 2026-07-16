@@ -83,7 +83,13 @@ function throwingClientStub(): GithubClient {
     getPull: async () => {
       throw new Error("unused");
     },
+    getPullDiff: async () => {
+      throw new Error("unused");
+    },
     listReviews: async () => {
+      throw new Error("unused");
+    },
+    listReviewComments: async () => {
       throw new Error("unused");
     },
     listIssuesSince: async () => {

@@ -17,6 +17,17 @@ function jsonRes(
   });
 }
 
+function textRes(
+  body: string,
+  status = 200,
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(body, {
+    status,
+    headers: { "content-type": "text/plain", ...headers },
+  });
+}
+
 /** fetchImpl returning queued responses in order. */
 function fetchQueue(...responses: Response[]): ReturnType<typeof vi.fn> {
   const fn = vi.fn();
@@ -201,5 +212,44 @@ describe("createGithubClient", () => {
 
     const bad = fetchQueue(jsonRes({ errors: [{ message: "nope" }] }));
     await expect(client(bad).graphql("query {}", {})).rejects.toThrow("nope");
+  });
+
+  it("getPullDiff sends the diff accept header and returns raw text", async () => {
+    const diffBody = "diff --git a/x b/x\n+1";
+    const fetchImpl = fetchQueue(textRes(diffBody));
+    const diff = await client(fetchImpl).getPullDiff("acme/web", 42);
+    expect(diff).toBe(diffBody);
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toContain("/repos/acme/web/pulls/42");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["accept"]).toBe("application/vnd.github.diff");
+  });
+
+  it("getPullDiff: 401 on the text path still maps to GithubAuthError (shared taxonomy)", async () => {
+    const fetchImpl = fetchQueue(textRes("Bad credentials", 401));
+    await expect(
+      client(fetchImpl).getPullDiff("acme/web", 42),
+    ).rejects.toBeInstanceOf(GithubAuthError);
+  });
+
+  it("listReviewComments paginates (100 then <100) and returns bodies", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      body: `comment ${i}`,
+      user: { id: 1, login: "alice" },
+      path: "src/a.ts",
+    }));
+    const page2 = [
+      { body: "comment last", user: { id: 2, login: "bob" }, path: "src/b.ts" },
+    ];
+    const fetchImpl = fetchQueue(jsonRes(page1), jsonRes(page2));
+    const comments = await client(fetchImpl).listReviewComments("acme/web", 42);
+    expect(comments).toHaveLength(101);
+    expect(comments[0]!.body).toBe("comment 0");
+    expect(comments[100]!.body).toBe("comment last");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const urls = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls.map((c) =>
+      String(c[0]),
+    );
+    expect(urls[0]).toContain("/repos/acme/web/pulls/42/comments");
   });
 });
