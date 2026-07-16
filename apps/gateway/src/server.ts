@@ -60,6 +60,9 @@ import {
 import { createGithubSyncQueue } from "./workers/githubSync/queue.js";
 import { createGithubSyncWorker } from "./workers/githubSync/worker.js";
 import { startGithubSyncInterval } from "./workers/githubSync/interval.js";
+import { createGithubDeliveryQueue } from "./workers/githubDelivery/queue.js";
+import { createGithubDeliveryWorker } from "./workers/githubDelivery/worker.js";
+import { startGithubDeliveryCron } from "./workers/githubDelivery/weeklyCron.js";
 import { ModelRegistry } from "./models/modelRegistry.js";
 import { buildRefreshDeps } from "./models/registryWiring.js";
 
@@ -743,17 +746,43 @@ async function wireGithubSyncPipeline(
     logger: app.log,
   });
 
+  // github-delivery (PR2): shares this pipeline's dedicated redis
+  // connection + masterKeyHex; wired after the sync queue/worker/interval
+  // so sync stays the primary subsystem this function documents.
+  const deliveryQueue = createGithubDeliveryQueue({ connection: githubRedis });
+  const deliveryWorker = createGithubDeliveryWorker({
+    connection: githubRedis,
+    db: app.db,
+    masterKeyHex,
+  });
+  const deliveryCronHandle = startGithubDeliveryCron({
+    db: app.db,
+    queue: deliveryQueue,
+    logger: app.log,
+  });
+
   app.addHook("onClose", async () => {
     cronHandle.stop();
+    deliveryCronHandle.stop();
     try {
       await worker.close();
     } catch (err) {
       app.log.warn({ err }, "github-sync worker close failed");
     }
     try {
+      await deliveryWorker.close();
+    } catch (err) {
+      app.log.warn({ err }, "github-delivery worker close failed");
+    }
+    try {
       await queue.close();
     } catch (err) {
       app.log.debug({ err }, "github-sync queue close failed");
+    }
+    try {
+      await deliveryQueue.close();
+    } catch (err) {
+      app.log.debug({ err }, "github-delivery queue close failed");
     }
     try {
       await githubRedis.quit();
