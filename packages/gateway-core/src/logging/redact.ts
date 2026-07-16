@@ -93,6 +93,10 @@ const CREDENTIAL_PATTERNS: ReadonlyArray<{
   { regex: /sk-[A-Za-z0-9_-]{20,}/g, replacement: "[REDACTED-OPENAI-KEY]" },
   // Gateway-issued user keys (ak_ prefix, 64 hex chars)
   { regex: /ak_[A-Za-z0-9]{40,}/g, replacement: "[REDACTED-GATEWAY-KEY]" },
+  // GitHub fine-grained PAT (github_pat_<22 chars>_<59 chars>)
+  { regex: /github_pat_[A-Za-z0-9_]{20,}/g, replacement: "[REDACTED-GITHUB-PAT]" },
+  // GitHub classic/app tokens: ghp_ gho_ ghu_ ghs_ ghr_
+  { regex: /gh[pousr]_[A-Za-z0-9]{20,}/g, replacement: "[REDACTED-GITHUB-TOKEN]" },
   // Authorization: Bearer <token>
   {
     regex: /Bearer\s+[A-Za-z0-9._-]{16,}/g,

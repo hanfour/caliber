@@ -99,6 +99,7 @@ export const defaultTestEnv: ServerEnv = {
   ENABLE_PROJECT_EVALUATION: false,
   EVALUATOR_MAX_PROJECT_KEYS_PER_USER: 20,
   MAX_PROJECT_KEYS_PER_ORG: 50,
+  ENABLE_GITHUB_DELIVERY: false,
 };
 
 // ioredis-mock honors keyPrefix the same way the real client does, so tests

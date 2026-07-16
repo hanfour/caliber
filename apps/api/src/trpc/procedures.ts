@@ -16,6 +16,7 @@ import {
 import { DEFAULT_LOCALE, type Locale } from "@caliber/i18n-validation";
 import type { TrpcContext, TrpcLogger } from "./context.js";
 import type { EvaluatorQueue } from "./routers/reports.js";
+import type { GithubSyncQueue } from "./routers/githubDelivery.js";
 
 // errorFormatter must be passed to initTRPC.create() so it's woven into the
 // router shape — passing it via the fastify adapter's trpcOptions is silently
@@ -99,6 +100,7 @@ interface ProtectedCtx {
   ipAddress: string | null;
   logger: TrpcLogger;
   evaluatorQueue?: EvaluatorQueue;
+  githubSyncQueue?: GithubSyncQueue;
 }
 
 // Narrow user/perm to non-null by returning a new ctx object (tRPC v11 uses the
@@ -122,6 +124,7 @@ export const protectedProcedure = publicProcedure.use(async ({ ctx, next }) => {
       ipAddress: ctx.ipAddress,
       logger: ctx.logger,
       evaluatorQueue: ctx.evaluatorQueue,
+      githubSyncQueue: ctx.githubSyncQueue,
     },
   });
 });

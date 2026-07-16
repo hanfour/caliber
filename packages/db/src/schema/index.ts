@@ -24,3 +24,6 @@ export * from "./clientSessions.js";
 export * from "./clientEvents.js";
 export * from "./orgRedactionPatterns.js";
 export * from "./idempotencyRecords.js";
+export * from "./githubConnections.js";
+export * from "./githubActivity.js";
+export * from "./githubDeliveryReports.js";
