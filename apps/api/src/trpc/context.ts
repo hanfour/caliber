@@ -6,7 +6,10 @@ import type { ServerEnv } from "@caliber/config";
 import type { Locale } from "@caliber/i18n-validation";
 import { LOCALE_COOKIE, resolveLocale } from "@caliber/i18n-validation";
 import type { EvaluatorQueue } from "./routers/reports.js";
-import type { GithubSyncQueue } from "./routers/githubDelivery.js";
+import type {
+  GithubSyncQueue,
+  GithubDeliveryQueue,
+} from "./routers/githubDelivery.js";
 
 // Parse a single cookie value out of the raw `Cookie:` header. Implemented
 // inline rather than relying on @fastify/cookie's `req.cookies` type
@@ -78,6 +81,11 @@ export interface TrpcContext {
   // or no REDIS_URL is configured (e.g. test mode without a queue). The
   // githubDelivery.syncNow handler falls back to testMode when undefined.
   githubSyncQueue?: GithubSyncQueue;
+  // BullMQ Queue for github-delivery (per-member report generation) jobs.
+  // Undefined when ENABLE_GITHUB_DELIVERY=false or no REDIS_URL is
+  // configured (e.g. test mode without a queue). The githubDelivery.generate
+  // handler falls back to testMode when undefined.
+  githubDeliveryQueue?: GithubDeliveryQueue;
 }
 
 export interface CreateContextDeps {
@@ -85,6 +93,7 @@ export interface CreateContextDeps {
   redis: Redis;
   evaluatorQueue?: EvaluatorQueue;
   githubSyncQueue?: GithubSyncQueue;
+  githubDeliveryQueue?: GithubDeliveryQueue;
 }
 
 // Factory: bind the parsed env + shared redis client at server-startup time,
@@ -113,6 +122,7 @@ export function createContextFactory(deps: CreateContextDeps) {
       logger: opts.req.log,
       evaluatorQueue: deps.evaluatorQueue,
       githubSyncQueue: deps.githubSyncQueue,
+      githubDeliveryQueue: deps.githubDeliveryQueue,
     };
   };
 }

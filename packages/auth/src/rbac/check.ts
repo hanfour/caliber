@@ -270,5 +270,8 @@ export function can(perm: UserPermissions, action: Action): boolean {
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "github.manage":
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
+    case "delivery.read_user":
+      if (action.targetUserId === perm.userId) return true;
+      return rolesAt(perm, "organization", action.orgId).has("org_admin");
   }
 }
