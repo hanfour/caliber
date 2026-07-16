@@ -1,16 +1,27 @@
 /**
- * GitHub delivery connection management (PR1, spec 2026-07-15).
- * Admin-gated via RBAC action github.manage (org_admin only).
- * The PAT is write-only: sealed with encryptCredential (salt = row id)
- * and never returned or logged. Queue constants are duplicated from the
- * gateway module (same precedent as reports.ts:27-28 — TODO @caliber/queue).
+ * GitHub delivery connection management (PR1) + report/activity reads and
+ * on-demand generation (PR2, spec 2026-07-15).
+ * Connection management + `generate` are admin-gated via RBAC action
+ * github.manage (org_admin only). `getReport`/`listActivity` are gated via
+ * delivery.read_user (self or org_admin). The PAT is write-only: sealed with
+ * encryptCredential (salt = row id) and never returned or logged. Report
+ * reads use explicit safe-field selects — llm columns beyond llmStatus are
+ * never selected. Queue constants are duplicated from the gateway module
+ * (same precedent as reports.ts:27-28 — TODO @caliber/queue).
  */
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lte } from "drizzle-orm";
 import { can, type UserPermissions } from "@caliber/auth";
-import { githubConnections } from "@caliber/db";
+import {
+  accounts,
+  githubConnections,
+  githubDeliveryReports,
+  githubIssues,
+  githubPullRequests,
+  githubReviews,
+} from "@caliber/db";
 import { encryptCredential } from "@caliber/gateway-core";
 import { router } from "../procedures.js";
 import { githubProcedure } from "./_githubGate.js";
@@ -42,8 +53,38 @@ export interface GithubSyncQueue {
   remove?(jobId: string): Promise<unknown>;
 }
 
+// ─── GitHub delivery queue constants (duplicated from apps/gateway's
+// workers/githubDelivery/queue.ts to avoid cross-app import) ──────────────
+// TODO: extract to a shared @caliber/queue package to eliminate this duplication.
+const GITHUB_DELIVERY_JOB_NAME = "github-delivery";
+const MAX_GENERATE_WINDOW_DAYS = 92;
+/** Keep in lockstep with apps/gateway/src/workers/githubDelivery/queue.ts. */
+function buildGithubDeliveryJobId(input: {
+  orgId: string;
+  userId: string;
+  periodStart: string;
+}): string {
+  return ["ghdel", "v1", input.orgId, input.userId, input.periodStart]
+    .join("_")
+    .replaceAll(":", "-");
+}
+
+export interface GithubDeliveryQueue {
+  add(
+    name: string,
+    data: unknown,
+    opts?: { jobId?: string },
+  ): Promise<unknown>;
+  /**
+   * Optional: BullMQ's real `Queue#remove` (see generate below). Optional so
+   * fakes/test doubles that don't implement it still typecheck.
+   */
+  remove?(jobId: string): Promise<unknown>;
+}
+
 const orgIdInput = z.object({ orgId: z.string().uuid() });
 const OWNER_LOGIN_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const dateInput = z.string().datetime();
 
 function assertCanManage(perm: UserPermissions, orgId: string): void {
   if (!can(perm, { type: "github.manage", orgId })) {
@@ -238,4 +279,258 @@ export const githubDeliveryRouter = router({
     );
     return { enqueued: true as const, jobId };
   }),
+
+  generate: githubProcedure
+    .input(
+      orgIdInput.extend({
+        userId: z.string().uuid(),
+        from: dateInput,
+        to: dateInput,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertCanManage(ctx.perm, input.orgId);
+
+      const fromMs = new Date(input.from).getTime();
+      const toMs = new Date(input.to).getTime();
+      if (toMs <= fromMs) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "to must be after from",
+        });
+      }
+      const windowLimitMs = MAX_GENERATE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+      if (toMs - fromMs > windowLimitMs) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Window exceeds 92 days",
+        });
+      }
+
+      const exists = (
+        await ctx.db
+          .select({ id: githubConnections.id })
+          .from(githubConnections)
+          .where(eq(githubConnections.orgId, input.orgId))
+          .limit(1)
+      )[0];
+      if (!exists) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const queue = ctx.githubDeliveryQueue;
+      if (!queue) return { enqueued: false, testMode: true as const };
+
+      const payload = {
+        orgId: input.orgId,
+        userId: input.userId,
+        periodStart: input.from,
+        periodEnd: input.to,
+        periodType: "daily" as const,
+        triggeredBy: "manual" as const,
+      };
+      const jobId = buildGithubDeliveryJobId({
+        orgId: input.orgId,
+        userId: input.userId,
+        periodStart: input.from,
+      });
+      // Regenerate semantics: remove the stale completed/failed job hash
+      // before adding, so a re-run for the same (org, user, window) isn't
+      // silently deduped against a prior run. `remove` no-ops on an
+      // active/locked job, so an in-flight generation still dedups the add
+      // that follows it. Best-effort: a remove failure must never block the
+      // add. (Keep in lockstep with apps/gateway's enqueueGithubDelivery.)
+      try {
+        await queue.remove?.(jobId);
+      } catch {
+        // swallow — see comment above.
+      }
+      await queue.add(GITHUB_DELIVERY_JOB_NAME, payload, { jobId });
+      return { enqueued: true as const, jobId };
+    }),
+
+  getReport: githubProcedure
+    .input(
+      orgIdInput.extend({
+        userId: z.string().uuid(),
+        from: dateInput,
+        to: dateInput,
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      if (
+        !can(ctx.perm, {
+          type: "delivery.read_user",
+          orgId: input.orgId,
+          targetUserId: input.userId,
+        })
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      const row = (
+        await ctx.db
+          .select({
+            id: githubDeliveryReports.id,
+            periodStart: githubDeliveryReports.periodStart,
+            periodEnd: githubDeliveryReports.periodEnd,
+            periodType: githubDeliveryReports.periodType,
+            totalScore: githubDeliveryReports.totalScore,
+            insufficientData: githubDeliveryReports.insufficientData,
+            sectionScores: githubDeliveryReports.sectionScores,
+            metrics: githubDeliveryReports.metrics,
+            llmStatus: githubDeliveryReports.llmStatus,
+            triggeredBy: githubDeliveryReports.triggeredBy,
+            updatedAt: githubDeliveryReports.updatedAt,
+          })
+          .from(githubDeliveryReports)
+          .where(
+            and(
+              eq(githubDeliveryReports.orgId, input.orgId),
+              eq(githubDeliveryReports.userId, input.userId),
+              lte(githubDeliveryReports.periodStart, new Date(input.to)),
+              gte(githubDeliveryReports.periodEnd, new Date(input.from)),
+            ),
+          )
+          .orderBy(desc(githubDeliveryReports.periodStart))
+          .limit(1)
+      )[0];
+      return row ?? null;
+    }),
+
+  listActivity: githubProcedure
+    .input(
+      orgIdInput.extend({
+        userId: z.string().uuid(),
+        from: dateInput,
+        to: dateInput,
+        limit: z.number().int().min(1).max(200).default(50),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      if (
+        !can(ctx.perm, {
+          type: "delivery.read_user",
+          orgId: input.orgId,
+          targetUserId: input.userId,
+        })
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      // Resolve the member's GitHub numeric id via the same accounts join as
+      // apps/gateway/src/workers/githubDelivery/fetchActivity.ts's
+      // resolveGithubUserId (duplicated inline — apps/api can't import the
+      // gateway module). Keep in lockstep with that function.
+      const account = (
+        await ctx.db
+          .select({ providerAccountId: accounts.providerAccountId })
+          .from(accounts)
+          .where(
+            and(eq(accounts.userId, input.userId), eq(accounts.provider, "github")),
+          )
+          .limit(1)
+      )[0];
+      const ghUserId = account ? Number(account.providerAccountId) : NaN;
+      if (!account || !Number.isFinite(ghUserId)) {
+        return { ghUserId: null, pulls: [], issues: [], reviews: [] };
+      }
+
+      const from = new Date(input.from);
+      const to = new Date(input.to);
+
+      const pulls = await ctx.db
+        .select({
+          repoFullName: githubPullRequests.repoFullName,
+          number: githubPullRequests.number,
+          title: githubPullRequests.title,
+          htmlUrl: githubPullRequests.htmlUrl,
+          state: githubPullRequests.state,
+          ghCreatedAt: githubPullRequests.ghCreatedAt,
+          mergedAt: githubPullRequests.mergedAt,
+          additions: githubPullRequests.additions,
+          deletions: githubPullRequests.deletions,
+          changedFiles: githubPullRequests.changedFiles,
+        })
+        .from(githubPullRequests)
+        .where(
+          and(
+            eq(githubPullRequests.orgId, input.orgId),
+            eq(githubPullRequests.authorGhId, ghUserId),
+            // nulls-last omitted deliberately: a merged-only filter already
+            // excludes NULL mergedAt rows, so ordering desc never surfaces one.
+            isNotNull(githubPullRequests.mergedAt),
+            gte(githubPullRequests.mergedAt, from),
+            lte(githubPullRequests.mergedAt, to),
+          ),
+        )
+        .orderBy(desc(githubPullRequests.mergedAt))
+        .limit(input.limit);
+
+      // Issues: fetch org+window rows (indexed on org_id, closed_at), then
+      // TS-filter for closer-or-assignee — assigneeGhIds jsonb membership
+      // isn't SQL-narrowable without an unnest, and this is the same
+      // pragmatism apps/gateway's worker uses (fetchActivity.ts).
+      const issueRows = await ctx.db
+        .select({
+          repoFullName: githubIssues.repoFullName,
+          number: githubIssues.number,
+          title: githubIssues.title,
+          htmlUrl: githubIssues.htmlUrl,
+          state: githubIssues.state,
+          ghCreatedAt: githubIssues.ghCreatedAt,
+          closedAt: githubIssues.closedAt,
+          assigneeGhIds: githubIssues.assigneeGhIds,
+          closedByGhId: githubIssues.closedByGhId,
+        })
+        .from(githubIssues)
+        .where(
+          and(
+            eq(githubIssues.orgId, input.orgId),
+            isNotNull(githubIssues.closedAt),
+            gte(githubIssues.closedAt, from),
+            lte(githubIssues.closedAt, to),
+          ),
+        )
+        .orderBy(desc(githubIssues.closedAt));
+
+      const issues = issueRows
+        .filter((r) => {
+          const assignees = Array.isArray(r.assigneeGhIds)
+            ? r.assigneeGhIds.filter(
+                (v): v is number => typeof v === "number" && Number.isFinite(v),
+              )
+            : [];
+          return r.closedByGhId === ghUserId || assignees.includes(ghUserId);
+        })
+        .slice(0, input.limit)
+        .map((r) => ({
+          repoFullName: r.repoFullName,
+          number: r.number,
+          title: r.title,
+          htmlUrl: r.htmlUrl,
+          state: r.state,
+          ghCreatedAt: r.ghCreatedAt,
+          closedAt: r.closedAt,
+        }));
+
+      const reviews = await ctx.db
+        .select({
+          repoFullName: githubReviews.repoFullName,
+          prGhNodeId: githubReviews.prGhNodeId,
+          state: githubReviews.state,
+          submittedAt: githubReviews.submittedAt,
+        })
+        .from(githubReviews)
+        .where(
+          and(
+            eq(githubReviews.orgId, input.orgId),
+            eq(githubReviews.reviewerGhId, ghUserId),
+            gte(githubReviews.submittedAt, from),
+            lte(githubReviews.submittedAt, to),
+          ),
+        )
+        .orderBy(desc(githubReviews.submittedAt))
+        .limit(input.limit);
+
+      return { ghUserId, pulls, issues, reviews };
+    }),
 });

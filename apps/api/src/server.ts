@@ -27,11 +27,13 @@ import {
   EVALUATOR_QUEUE_PREFIX,
 } from "./trpc/routers/reports.js";
 
-// ─── github-sync queue constants (duplicated from apps/gateway to avoid
-// cross-app import) ──────────────────────────────────────────────────────
+// ─── github-sync / github-delivery queue constants (duplicated from
+// apps/gateway to avoid cross-app import) ──────────────────────────────────
 // TODO: extract to a shared @caliber/queue package to eliminate this duplication.
 const GITHUB_SYNC_QUEUE_NAME = "github-sync";
 const GITHUB_SYNC_QUEUE_PREFIX = "caliber:gw";
+const GITHUB_DELIVERY_QUEUE_NAME = "github-delivery";
+const GITHUB_DELIVERY_QUEUE_PREFIX = "caliber:gw";
 
 // When the gateway is disabled, no router actually reaches Redis (every
 // gateway-aware router short-circuits to NOT_FOUND via ensureGatewayEnabled).
@@ -203,7 +205,35 @@ export async function buildServer() {
     });
   }
 
-  // Consolidated teardown for both BullMQ queues plus the shared connection
+  // Instantiate the github-delivery BullMQ queue when the feature flag is
+  // on. Shares the same `bullmqRedis` connection as the blocks above when
+  // any of them are enabled; otherwise creates an identical connection
+  // here. Skipped entirely when ENABLE_GITHUB_DELIVERY=false or REDIS_URL is
+  // absent — githubDelivery.generate will gracefully return testMode:true.
+  let githubDeliveryQueue: Queue | undefined;
+  if (env.ENABLE_GITHUB_DELIVERY && env.REDIS_URL) {
+    if (!bullmqRedis) {
+      bullmqRedis = new Redis(env.REDIS_URL, {
+        enableAutoPipelining: true,
+        maxRetriesPerRequest: 3,
+      });
+      bullmqRedis.on("error", (err: Error) => {
+        app.log.warn({ err: err.message }, "github-delivery redis error");
+      });
+    }
+    githubDeliveryQueue = new Queue(GITHUB_DELIVERY_QUEUE_NAME, {
+      prefix: GITHUB_DELIVERY_QUEUE_PREFIX,
+      connection: bullmqRedis,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 1000 },
+        removeOnComplete: { age: 86400, count: 500 },
+        removeOnFail: { age: 7 * 86400 },
+      },
+    });
+  }
+
+  // Consolidated teardown for all BullMQ queues plus the shared connection
   // they may run on — registered as ONE hook (not one per queue) so the
   // close order is explicit in source rather than relying on Fastify's
   // "onClose hooks run LIFO" behavior across separately-registered hooks.
@@ -212,7 +242,7 @@ export async function buildServer() {
   // "owned" it (`ownsConnection = !bullmqRedis`); that was always false for
   // whichever block ran second, so with both ENABLE_EVALUATOR and
   // ENABLE_GITHUB_DELIVERY on, NEITHER block quit the shared connection and
-  // it leaked past shutdown. Both queue.close() calls must resolve before
+  // it leaked past shutdown. All queue.close() calls must resolve before
   // bullmqRedis.quit() — otherwise BullMQ's own in-flight close commands
   // would race a connection that's already quitting.
   if (bullmqRedis) {
@@ -222,6 +252,9 @@ export async function buildServer() {
       });
       await githubSyncQueue?.close().catch((err: Error) => {
         app.log.warn({ err: err.message }, "github-sync queue close failed");
+      });
+      await githubDeliveryQueue?.close().catch((err: Error) => {
+        app.log.warn({ err: err.message }, "github-delivery queue close failed");
       });
       await bullmqRedis?.quit().catch((err: Error) => {
         app.log.warn({ err: err.message }, "bullmq redis quit failed");
@@ -253,6 +286,7 @@ export async function buildServer() {
             redis,
             evaluatorQueue,
             githubSyncQueue,
+            githubDeliveryQueue,
           }),
           // errorFormatter is set on initTRPC.create() in trpc/procedures.ts —
           // setting it here on the adapter is silently ignored by tRPC v11.
