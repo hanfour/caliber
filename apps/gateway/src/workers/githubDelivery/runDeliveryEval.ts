@@ -8,11 +8,21 @@ import { eq } from "drizzle-orm";
 import { githubConnections, githubDeliveryReports } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import { computeDeliveryMetrics, scoreDelivery } from "@caliber/evaluator";
+import { safeErrorMessage } from "@caliber/gateway-core";
 import { syncOrg } from "../githubSync/syncOrg.js";
 import { fetchDeliveryActivity, resolveGithubUserId } from "./fetchActivity.js";
 import type { GithubDeliveryJobPayload } from "./queue.js";
 
 export const SYNC_STALE_AFTER_MS = 60 * 60 * 1000;
+
+/** Mirrors weeklyCron.ts's LoggerLike — kept as a separate declaration since
+ * apps/gateway has no shared logger-types module (same precedent as the
+ * queue-constant duplication in apps/api's githubDelivery.ts). */
+export interface LoggerLike {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
 
 export interface RunDeliveryEvalResult {
   reportId: string | null;
@@ -26,6 +36,7 @@ export async function runDeliveryEval(input: {
   payload: GithubDeliveryJobPayload;
   fetchImpl?: typeof fetch;
   now?: Date;
+  logger?: LoggerLike;
 }): Promise<RunDeliveryEvalResult> {
   const { db, payload } = input;
   const now = input.now ?? new Date();
@@ -59,8 +70,15 @@ export async function runDeliveryEval(input: {
         orgId: payload.orgId,
         fetchImpl: input.fetchImpl,
       });
-    } catch {
-      // Sync is best-effort here; score whatever data exists.
+    } catch (err) {
+      // Sync is best-effort here; score whatever data exists. Still worth a
+      // trace — a throw before syncOrg's own try/catch takes over (e.g. a
+      // decrypt failure on the sealed PAT) would otherwise leave zero
+      // record that the inline sync never ran.
+      input.logger?.warn(
+        { err: safeErrorMessage(err), orgId: payload.orgId },
+        "github-delivery inline sync failed; scoring existing data",
+      );
     }
   }
 

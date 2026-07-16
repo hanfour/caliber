@@ -21,6 +21,7 @@ import {
   githubIssues,
   githubPullRequests,
   githubReviews,
+  organizationMembers,
 } from "@caliber/db";
 import { encryptCredential } from "@caliber/gateway-core";
 import { router } from "../procedures.js";
@@ -59,6 +60,9 @@ export interface GithubSyncQueue {
 const GITHUB_DELIVERY_JOB_NAME = "github-delivery";
 const MAX_GENERATE_WINDOW_DAYS = 92;
 /** Keep in lockstep with apps/gateway/src/workers/githubDelivery/queue.ts. */
+// jobId deliberately omits periodType: the payload pins it to the literal
+// "daily", so it can't vary. If the enum ever widens, periodType MUST be
+// added to the jobId in the same commit — the DB unique key includes it.
 function buildGithubDeliveryJobId(input: {
   orgId: string;
   userId: string;
@@ -315,6 +319,26 @@ export const githubDeliveryRouter = router({
           .limit(1)
       )[0];
       if (!exists) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // Anti-enumeration: an org_admin could otherwise enqueue for any
+      // user UUID — a nonexistent one burns 3 worker retries on the
+      // report-upsert FK failure (+7-day failed hash), and an existing
+      // non-member gets a delivery-report row minted in an org they don't
+      // belong to. Same NOT_FOUND code as the missing-connection path
+      // above, deliberately, so the two cases are indistinguishable.
+      const membership = (
+        await ctx.db
+          .select({ userId: organizationMembers.userId })
+          .from(organizationMembers)
+          .where(
+            and(
+              eq(organizationMembers.orgId, input.orgId),
+              eq(organizationMembers.userId, input.userId),
+            ),
+          )
+          .limit(1)
+      )[0];
+      if (!membership) throw new TRPCError({ code: "NOT_FOUND" });
 
       const queue = ctx.githubDeliveryQueue;
       if (!queue) return { enqueued: false, testMode: true as const };

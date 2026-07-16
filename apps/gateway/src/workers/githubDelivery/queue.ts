@@ -34,6 +34,9 @@ export const GithubDeliveryJobPayload = z.object({
 export type GithubDeliveryJobPayload = z.infer<typeof GithubDeliveryJobPayload>;
 
 /** Colon-free (BullMQ rejects ':') and time-bucketed (PR1 C1 lesson). */
+// jobId deliberately omits periodType: the payload pins it to the literal
+// "daily", so it can't vary. If the enum ever widens, periodType MUST be
+// added to the jobId in the same commit — the DB unique key includes it.
 export function buildGithubDeliveryJobId(input: {
   orgId: string;
   userId: string;

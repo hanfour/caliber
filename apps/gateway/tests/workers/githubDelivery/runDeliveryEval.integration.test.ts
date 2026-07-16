@@ -327,6 +327,62 @@ describe("runDeliveryEval", () => {
     expect(report.totalScore).toBeNull();
   });
 
+  it("inline sync failure (decrypt throws) is logged and never blocks the report", async () => {
+    const org = await insertOrg(db);
+    // Sealed with a DIFFERENT master key than the one runDeliveryEval is
+    // given below, so decryptCredential throws (AES-GCM auth-tag mismatch)
+    // before syncOrg's own try/catch has a chance to persist anything — the
+    // path this test targets is the throw ahead of that try/catch, not a
+    // per-repo sync_error that syncOrg already catches internally (a
+    // full-500 routeFetch would just make syncOrg return normally).
+    const WRONG_KEY = "cd".repeat(32);
+    const id = crypto.randomUUID();
+    const sealed = encryptCredential({
+      masterKeyHex: WRONG_KEY,
+      accountId: id,
+      plaintext: TOKEN,
+    });
+    await db.insert(githubConnections).values({
+      id,
+      orgId: org.id,
+      ownerLogin: "acme",
+      nonce: sealed.nonce,
+      ciphertext: sealed.ciphertext,
+      authTag: sealed.authTag,
+      tokenLast4: TOKEN.slice(-4),
+      lastSyncAt: new Date(NOW.getTime() - SYNC_STALE_AFTER_MS - 1000), // stale → sync attempted
+    });
+    // Distinct gh-id from the other tests — see note above insertMember.
+    const member = await insertMember(db, 780);
+
+    const warnCalls: Array<{ obj: unknown; msg?: string }> = [];
+    const fakeLogger = {
+      info: () => {},
+      warn: (obj: unknown, msg?: string) => void warnCalls.push({ obj, msg }),
+      error: () => {},
+    };
+
+    const res = await runDeliveryEval({
+      db,
+      masterKeyHex: MASTER_KEY, // correct key — decrypting the wrong-key ciphertext throws
+      payload: payload(org.id, member.id),
+      now: NOW,
+      logger: fakeLogger,
+    });
+
+    expect(res.skippedSync).toBe(false); // sync was attempted (stale), just failed
+    expect(warnCalls).toHaveLength(1);
+    expect(warnCalls[0]!.msg).toContain("inline sync failed");
+    expect(warnCalls[0]!.obj).toMatchObject({ orgId: org.id });
+    expect(String((warnCalls[0]!.obj as { err: unknown }).err)).not.toContain(TOKEN);
+
+    // Existing degrade-gracefully semantics: the report still lands.
+    const report = (await db.select().from(githubDeliveryReports)).find(
+      (r) => r.userId === member.id,
+    )!;
+    expect(report.insufficientData).toBe(true); // no activity synced
+  });
+
   it("member without a github account → noIdentity report, never an error", async () => {
     const org = await insertOrg(db);
     const [plain] = await db

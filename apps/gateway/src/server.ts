@@ -754,6 +754,7 @@ async function wireGithubSyncPipeline(
     connection: githubRedis,
     db: app.db,
     masterKeyHex,
+    logger: app.log,
   });
   const deliveryCronHandle = startGithubDeliveryCron({
     db: app.db,

@@ -7,7 +7,7 @@ import {
   GITHUB_DELIVERY_QUEUE_PREFIX,
   GithubDeliveryJobPayload,
 } from "./queue.js";
-import { runDeliveryEval } from "./runDeliveryEval.js";
+import { runDeliveryEval, type LoggerLike } from "./runDeliveryEval.js";
 
 export interface CreateGithubDeliveryWorkerOptions {
   connection: Redis;
@@ -16,6 +16,8 @@ export interface CreateGithubDeliveryWorkerOptions {
   concurrency?: number;
   /** Test seam; threaded to the staleness-gated inline sync. */
   fetchImpl?: typeof fetch;
+  /** Threaded to runDeliveryEval so an inline-sync failure surfaces. */
+  logger?: LoggerLike;
 }
 
 export function createGithubDeliveryWorker(
@@ -30,6 +32,7 @@ export function createGithubDeliveryWorker(
         masterKeyHex: opts.masterKeyHex,
         payload,
         fetchImpl: opts.fetchImpl,
+        logger: opts.logger,
       });
     },
     {

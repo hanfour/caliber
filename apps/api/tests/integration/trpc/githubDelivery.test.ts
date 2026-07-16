@@ -209,6 +209,24 @@ describe("githubDelivery router", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("generate: rejects a user who is not an org member with NOT_FOUND (anti-enumeration)", async () => {
+    stubProbeFetch(true);
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, { role: "org_admin", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    // No orgId passed — this user has no organizationMembers row for `org`.
+    const outsider = await makeUser(t.db);
+
+    const queue = {
+      add: async () => {},
+      remove: async () => {},
+    };
+    const caller = await callerFor({ db: t.db, userId: admin.id, env: envWithFlag, githubDeliveryQueue: queue });
+    await caller.githubDelivery.setConnection({ orgId: org.id, ownerLogin: "acme", token: TOKEN });
+
+    await expect(caller.githubDelivery.generate({ orgId: org.id, userId: outsider.id, from: FROM, to: TO }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("getReport: self OR org_admin; returns latest overlapping row or null", async () => {
     const org = await makeOrg(t.db);
     const admin = await makeUser(t.db, { role: "org_admin", scopeType: "organization", scopeId: org.id, orgId: org.id });
