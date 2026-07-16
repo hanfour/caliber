@@ -109,6 +109,7 @@ export type Action =
   | { type: "evaluator.read_status"; orgId: string }
   | { type: "evaluator.view_cost"; orgId: string }
   | { type: "github.manage"; orgId: string }
+  | { type: "delivery.read_user"; orgId: string; targetUserId: string }
   | { type: "device.list_own" }
   | { type: "device.list_all"; orgId: string }
   | {
