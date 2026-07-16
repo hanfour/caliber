@@ -234,11 +234,17 @@ describe("githubDelivery router", () => {
     const member = await makeUser(t.db, { orgId: org.id });
     const stranger = await makeUser(t.db, { orgId: org.id });
 
+    const llmCalledAt = new Date("2026-07-14T12:34:56.000Z");
     await t.db.insert(githubDeliveryReports).values({
       orgId: org.id, userId: member.id,
       periodStart: new Date(FROM), periodEnd: new Date(TO), periodType: "daily",
       totalScore: "88.5", insufficientData: false,
-      sectionScores: [], metrics: { windowDays: 30 }, llmStatus: "skipped", triggeredBy: "manual",
+      sectionScores: [], metrics: { windowDays: 30 }, llmStatus: "ok", triggeredBy: "manual",
+      llmQualityAdjustment: "8.00",
+      llmNarrative: "測試敘事",
+      llmEvidence: [{ repo: "acme/web", prNumber: 1, quote: "q", reason: "r" }],
+      llmModel: "claude-haiku-4-5-20251001",
+      llmCalledAt,
     });
 
     const self = await callerFor({ db: t.db, userId: member.id, env: envWithFlag });
@@ -246,7 +252,17 @@ describe("githubDelivery router", () => {
     // total_score is numeric(10,4) — Postgres zero-pads on read regardless of
     // the inserted literal's precision (same behavior asserted for
     // evaluation_reports.total_score in reports.read.test.ts etc.).
-    expect(got).toMatchObject({ totalScore: "88.5000", llmStatus: "skipped" });
+    expect(got).toMatchObject({
+      totalScore: "88.5000",
+      llmStatus: "ok",
+      llmQualityAdjustment: "8.00",
+      llmNarrative: "測試敘事",
+      llmEvidence: [{ repo: "acme/web", prNumber: 1, quote: "q", reason: "r" }],
+      llmModel: "claude-haiku-4-5-20251001",
+      llmCalledAt,
+    });
+    // llmCostUsd must not be exposed
+    expect(got).not.toHaveProperty("llmCostUsd");
 
     const adminCaller = await callerFor({ db: t.db, userId: admin.id, env: envWithFlag });
     expect(await adminCaller.githubDelivery.getReport({ orgId: org.id, userId: member.id, from: FROM, to: TO })).not.toBeNull();

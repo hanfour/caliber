@@ -364,6 +364,12 @@ export const githubDeliveryRouter = router({
             sectionScores: githubDeliveryReports.sectionScores,
             metrics: githubDeliveryReports.metrics,
             llmStatus: githubDeliveryReports.llmStatus,
+            llmQualityAdjustment: githubDeliveryReports.llmQualityAdjustment,
+            llmNarrative: githubDeliveryReports.llmNarrative,
+            llmEvidence: githubDeliveryReports.llmEvidence,
+            llmModel: githubDeliveryReports.llmModel,
+            llmCalledAt: githubDeliveryReports.llmCalledAt,
+            // llmCostUsd deliberately not selected — cost is admin-internal
             triggeredBy: githubDeliveryReports.triggeredBy,
             updatedAt: githubDeliveryReports.updatedAt,
           })
