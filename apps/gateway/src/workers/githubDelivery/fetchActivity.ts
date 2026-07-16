@@ -4,6 +4,11 @@
  * membership and closedBy-OR-assignee logic stay in the pure metric
  * layer (already unit-tested there). assigneeGhIds jsonb is sanitized —
  * never trusted as number[].
+ *
+ * Deliberately org-wide (not per-member) — scoring needs the full window's
+ * totalEvents/medians. This is asymmetric with apps/api's listActivity
+ * (SQL-bounded via jsonb containment + limit for its display-only query) —
+ * that asymmetry is intentional; do NOT bound this fetch to "match" it.
  */
 import { and, eq, gte, lte, isNotNull } from "drizzle-orm";
 import {

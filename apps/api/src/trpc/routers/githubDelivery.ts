@@ -12,7 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, isNotNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lte, or, sql } from "drizzle-orm";
 import { can, type UserPermissions } from "@caliber/auth";
 import {
   accounts,
@@ -489,11 +489,12 @@ export const githubDeliveryRouter = router({
         .orderBy(desc(githubPullRequests.mergedAt))
         .limit(input.limit);
 
-      // Issues: fetch org+window rows (indexed on org_id, closed_at), then
-      // TS-filter for closer-or-assignee — assigneeGhIds jsonb membership
-      // isn't SQL-narrowable without an unnest, and this is the same
-      // pragmatism apps/gateway's worker uses (fetchActivity.ts).
-      const issueRows = await ctx.db
+      // Issues: closer-or-assignee membership is pushed into SQL (jsonb
+      // containment on assignee_gh_ids OR'd with closed_by_gh_id) so
+      // orderBy+limit is effective here — unlike apps/gateway's worker
+      // (fetchActivity.ts), which deliberately fetches org-wide for scoring
+      // correctness. This display path only needs the member's own rows.
+      const issues = await ctx.db
         .select({
           repoFullName: githubIssues.repoFullName,
           number: githubIssues.number,
@@ -502,8 +503,6 @@ export const githubDeliveryRouter = router({
           state: githubIssues.state,
           ghCreatedAt: githubIssues.ghCreatedAt,
           closedAt: githubIssues.closedAt,
-          assigneeGhIds: githubIssues.assigneeGhIds,
-          closedByGhId: githubIssues.closedByGhId,
         })
         .from(githubIssues)
         .where(
@@ -512,29 +511,14 @@ export const githubDeliveryRouter = router({
             isNotNull(githubIssues.closedAt),
             gte(githubIssues.closedAt, from),
             lte(githubIssues.closedAt, to),
+            or(
+              eq(githubIssues.closedByGhId, ghUserId),
+              sql`${githubIssues.assigneeGhIds} @> ${JSON.stringify([ghUserId])}::jsonb`,
+            ),
           ),
         )
-        .orderBy(desc(githubIssues.closedAt));
-
-      const issues = issueRows
-        .filter((r) => {
-          const assignees = Array.isArray(r.assigneeGhIds)
-            ? r.assigneeGhIds.filter(
-                (v): v is number => typeof v === "number" && Number.isFinite(v),
-              )
-            : [];
-          return r.closedByGhId === ghUserId || assignees.includes(ghUserId);
-        })
-        .slice(0, input.limit)
-        .map((r) => ({
-          repoFullName: r.repoFullName,
-          number: r.number,
-          title: r.title,
-          htmlUrl: r.htmlUrl,
-          state: r.state,
-          ghCreatedAt: r.ghCreatedAt,
-          closedAt: r.closedAt,
-        }));
+        .orderBy(desc(githubIssues.closedAt))
+        .limit(input.limit);
 
       const reviews = await ctx.db
         .select({

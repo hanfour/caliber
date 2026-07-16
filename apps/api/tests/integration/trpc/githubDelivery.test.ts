@@ -3,6 +3,7 @@ import type { Database } from "@caliber/db";
 import {
   githubConnections,
   githubDeliveryReports,
+  githubIssues,
   githubPullRequests,
   accounts,
 } from "@caliber/db";
@@ -268,12 +269,46 @@ describe("githubDelivery router", () => {
       authorGhId: 777, authorLogin: "me", state: "closed", title: "t", htmlUrl: "u", baseRef: "main",
       ghCreatedAt: new Date("2026-07-01T00:00:00Z"), mergedAt: new Date("2026-07-02T00:00:00Z"),
     });
+    // Issues: one where the member is in assigneeGhIds (jsonb array), one
+    // where the member is closedByGhId (assignees empty), and one belonging
+    // to another gh user (neither closer nor assignee) — proves the jsonb
+    // containment + OR run in SQL, not a TS filter.
+    await t.db.insert(githubIssues).values([
+      {
+        orgId: org.id, repoFullName: "acme/web", number: 10, ghNodeId: "I_10",
+        assigneeGhIds: [777], state: "closed", title: "assigned to me", htmlUrl: "u10",
+        ghCreatedAt: new Date("2026-07-01T00:00:00Z"), closedAt: new Date("2026-07-03T00:00:00Z"),
+      },
+      {
+        orgId: org.id, repoFullName: "acme/web", number: 11, ghNodeId: "I_11",
+        assigneeGhIds: [], closedByGhId: 777, state: "closed", title: "closed by me", htmlUrl: "u11",
+        ghCreatedAt: new Date("2026-07-01T00:00:00Z"), closedAt: new Date("2026-07-04T00:00:00Z"),
+      },
+      {
+        orgId: org.id, repoFullName: "acme/web", number: 12, ghNodeId: "I_12",
+        assigneeGhIds: [999], closedByGhId: 999, state: "closed", title: "not mine", htmlUrl: "u12",
+        ghCreatedAt: new Date("2026-07-01T00:00:00Z"), closedAt: new Date("2026-07-05T00:00:00Z"),
+      },
+    ]);
 
     const self = await callerFor({ db: t.db, userId: member.id, env: envWithFlag });
     const a = await self.githubDelivery.listActivity({ orgId: org.id, userId: member.id, from: FROM, to: TO });
     expect(a.ghUserId).toBe(777);
     expect(a.pulls).toHaveLength(1);
     expect(a.pulls[0]).toMatchObject({ repoFullName: "acme/web", number: 1, htmlUrl: "u" });
+
+    // Exactly the member's two issues (assignee + closer), never the other user's.
+    expect(a.issues).toHaveLength(2);
+    expect(a.issues.map((i) => i.number).sort()).toEqual([10, 11]);
+    expect(a.issues.some((i) => i.number === 12)).toBe(false);
+
+    // Limit effectiveness: SQL orderBy+limit (not a TS slice) — the single
+    // row returned must be the latest by closedAt among the member's issues.
+    const limited = await self.githubDelivery.listActivity({
+      orgId: org.id, userId: member.id, from: FROM, to: TO, limit: 1,
+    });
+    expect(limited.issues).toHaveLength(1);
+    expect(limited.issues[0]).toMatchObject({ number: 11 });
 
     const unlinked = await makeUser(t.db, { orgId: org.id });
     const u = await callerFor({ db: t.db, userId: unlinked.id, env: envWithFlag });
