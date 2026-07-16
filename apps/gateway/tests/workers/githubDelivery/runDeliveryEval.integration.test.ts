@@ -748,6 +748,173 @@ describe("runDeliveryEval", () => {
     expect(Number(report.llmCostUsd)).toBeCloseTo(0.05, 6);
   });
 
+  it("LLM quality ok path with a lone surrogate in narrative/evidence: report upsert succeeds and stored text is sanitized", async () => {
+    // Deterministic-crash regression test (Item 1, final-review fix wave):
+    // before deepStripInvalidJsonbChars guarded this write boundary, a lone
+    // UTF-16 surrogate in the LLM's narrative/evidence made the WHOLE
+    // report upsert fail with Postgres's "invalid input syntax for type
+    // json" — silently dropping the report for that period.
+    const evalAccountId = crypto.randomUUID();
+    const org = await insertOrg(db, {
+      llmEvalEnabled: true,
+      llmEvalModel: STUB_MODEL,
+      llmEvalAccountId: evalAccountId,
+    });
+    await insertConnection(db, org.id, {
+      lastSyncAt: new Date(NOW.getTime() - 10 * 60 * 1000), // fresh → no inline sync
+    });
+    const ghUserId = 9201;
+    const otherGhUserId = 9202;
+    const member = await insertMember(db, ghUserId);
+
+    // Same activity shape/dates as the ok-path test above (same 29.6 quant
+    // literal — not asserted precisely here since the point of this test is
+    // the write surviving, not the score arithmetic).
+    await db.insert(githubPullRequests).values([
+      {
+        orgId: org.id,
+        repoFullName: "acme/web",
+        number: 1,
+        ghNodeId: "PR_SURR_1",
+        authorGhId: ghUserId,
+        authorLogin: "me",
+        state: "closed",
+        draft: false,
+        title: "t",
+        htmlUrl: "u",
+        baseRef: "main",
+        ghCreatedAt: new Date("2026-07-01T00:00:00Z"),
+        mergedAt: new Date("2026-07-05T00:00:00Z"),
+      },
+      {
+        orgId: org.id,
+        repoFullName: "acme/web",
+        number: 2,
+        ghNodeId: "PR_SURR_2",
+        authorGhId: otherGhUserId,
+        authorLogin: "other",
+        state: "closed",
+        draft: false,
+        title: "t",
+        htmlUrl: "u",
+        baseRef: "main",
+        ghCreatedAt: new Date("2026-07-01T00:00:00Z"),
+        mergedAt: new Date("2026-07-02T00:00:00Z"),
+      },
+      {
+        orgId: org.id,
+        repoFullName: "acme/web",
+        number: 3,
+        ghNodeId: "PR_SURR_3",
+        authorGhId: otherGhUserId,
+        authorLogin: "other",
+        state: "closed",
+        draft: false,
+        title: "t",
+        htmlUrl: "u",
+        baseRef: "main",
+        ghCreatedAt: new Date("2026-07-01T00:00:00Z"),
+        mergedAt: new Date("2026-07-02T00:00:00Z"),
+      },
+    ]);
+    await db.insert(githubReviews).values([
+      {
+        orgId: org.id,
+        repoFullName: "acme/web",
+        ghNodeId: "R_SURR_1",
+        prGhNodeId: "PR_SURR_2",
+        reviewerGhId: ghUserId,
+        reviewerLogin: "me",
+        state: "APPROVED",
+        submittedAt: new Date("2026-07-06T00:00:00Z"),
+      },
+      {
+        orgId: org.id,
+        repoFullName: "acme/web",
+        ghNodeId: "R_SURR_2",
+        prGhNodeId: "PR_SURR_3",
+        reviewerGhId: ghUserId,
+        reviewerLogin: "me",
+        state: "APPROVED",
+        submittedAt: new Date("2026-07-06T00:00:00Z"),
+      },
+    ]);
+
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${org.id}`, "caliber-eval-testkey");
+
+    const reqId = `req-eval-surrogate-${org.id}`;
+    await seedUsageLog(db, org.id, reqId, { totalCost: "0.0500000000" });
+
+    // The parser itself now sanitizes narrative/evidence (Item 1's other
+    // half), so a raw lone surrogate can only reach this write boundary via
+    // a field the parser doesn't touch as a string primitive at parse time
+    // — model this directly by round-tripping through the same JSON path
+    // the real LLM response takes, embedding a lone high surrogate. Because
+    // parseDeliveryQualityResponse ALSO strips (belt-and-suspenders), this
+    // test's real job is to prove the upsert survives the write boundary
+    // regardless of which layer catches it — i.e. it stays green whichever
+    // of the two fixes is in place, and is the one that would have failed
+    // outright (whole-report upsert throwing) before either fix existed.
+    const surrogateBody = {
+      qualityAdjustment: 8,
+      narrative: "帶有代理對半字元 bad\uD800 text 的敘述。",
+      evidence: [
+        {
+          repo: "acme/web",
+          prNumber: 1,
+          quote: "x".repeat(199) + "😀" + "tail",
+          reason: "clear diff",
+        },
+      ],
+    };
+
+    const fetchImpl = routeFetch({
+      "/repos/acme/web/pulls/1/comments": () => json([]),
+      "/repos/acme/web/pulls/1": (_url, init) => pullDetailOrDiff(init, ghUserId),
+      "/v1/messages": () => llmOk(reqId, surrogateBody),
+    });
+
+    // Before the fix, this call rejects with Postgres's jsonb error and the
+    // whole report upsert is lost. After the fix, it resolves normally.
+    const res = await runDeliveryEval({
+      db,
+      masterKeyHex: MASTER_KEY,
+      payload: payload(org.id, member.id),
+      redis,
+      gatewayBaseUrl: GATEWAY_BASE_URL,
+      fetchImpl,
+      now: NOW,
+    });
+
+    expect(res.reportId).not.toBeNull();
+    const report = (await db.select().from(githubDeliveryReports)).find(
+      (r) => r.userId === member.id,
+    )!;
+    expect(report.llmStatus).toBe("ok");
+
+    /** True when `s` contains a UTF-16 surrogate that is not part of a
+     * valid pair (copied from packages/evaluator/tests — no shared
+     * cross-package test-util module exists yet). */
+    function hasLoneSurrogate(s: string): boolean {
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c >= 0xd800 && c <= 0xdbff) {
+          const next = s.charCodeAt(i + 1);
+          if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+          i++;
+        } else if (c >= 0xdc00 && c <= 0xdfff) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    expect(report.llmNarrative).not.toBeNull();
+    expect(hasLoneSurrogate(report.llmNarrative!)).toBe(false);
+    expect(report.llmEvidence).not.toBeNull();
+    expect(hasLoneSurrogate(JSON.stringify(report.llmEvidence))).toBe(false);
+  });
+
   it("LLM quality parse_error path: totalScore stays the quant value, llm_status parse_error", async () => {
     const org = await insertOrg(db, { llmEvalEnabled: true, llmEvalModel: STUB_MODEL });
     await insertConnection(db, org.id, {

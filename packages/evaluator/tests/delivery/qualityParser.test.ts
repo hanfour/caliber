@@ -4,6 +4,21 @@ import {
   QUALITY_ADJUSTMENT_LIMIT,
 } from "../../src/delivery/qualityParser";
 
+/** True when `s` contains a UTF-16 surrogate that is not part of a valid pair. */
+function hasLoneSurrogate(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const next = s.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+      i++;
+    } else if (c >= 0xdc00 && c <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const validPayload = {
   qualityAdjustment: 5,
   narrative: "這是一段繁體中文的敘述，說明交付品質的評估結果。",
@@ -147,6 +162,35 @@ describe("parseDeliveryQualityResponse", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.evidence).toEqual([]);
+    }
+  });
+
+  it("never emits a lone surrogate when the 200-char quote slice bisects an emoji", () => {
+    // The 200th char boundary lands inside "😀"'s surrogate pair — the exact
+    // shape that made keyword.ts's evidence quotes crash the jsonb write
+    // (see packages/evaluator/src/signals/keyword.ts).
+    const quote = "x".repeat(199) + "😀" + "tail";
+    const result = parseDeliveryQualityResponse(
+      JSON.stringify({
+        ...validPayload,
+        evidence: [{ repo: "org/repo", prNumber: 1, quote, reason: "r" }],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(hasLoneSurrogate(result.evidence[0]!.quote)).toBe(false);
+      expect(() => JSON.stringify(result)).not.toThrow();
+    }
+  });
+
+  it("sanitizes a raw lone surrogate in narrative", () => {
+    const result = parseDeliveryQualityResponse(
+      JSON.stringify({ ...validPayload, narrative: "bad\uD800text" }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(hasLoneSurrogate(result.narrative)).toBe(false);
+      expect(result.narrative).toBe("badtext");
     }
   });
 });

@@ -5,8 +5,10 @@
  * github.manage (org_admin only). `getReport`/`listActivity` are gated via
  * delivery.read_user (self or org_admin). The PAT is write-only: sealed with
  * encryptCredential (salt = row id) and never returned or logged. Report
- * reads use explicit safe-field selects — llm columns beyond llmStatus are
- * never selected. Queue constants come from @caliber/queue (formerly
+ * reads use explicit safe-field selects — getReport exposes llmStatus plus
+ * narrative/adjustment/evidence/model/calledAt; llmCostUsd stays
+ * admin-internal (deliberately not selected there); PAT/sealed columns are
+ * never selected anywhere. Queue constants come from @caliber/queue (formerly
  * duplicated from the gateway module — see packages/queue/src/githubSync.ts
  * / githubDelivery.ts).
  */

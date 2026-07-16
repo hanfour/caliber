@@ -25,7 +25,11 @@ import { eq } from "drizzle-orm";
 import { githubConnections, githubDeliveryReports } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
-import { computeDeliveryMetrics, scoreDelivery } from "@caliber/evaluator";
+import {
+  computeDeliveryMetrics,
+  deepStripInvalidJsonbChars,
+  scoreDelivery,
+} from "@caliber/evaluator";
 import { safeErrorMessage } from "@caliber/gateway-core";
 import { syncOrg } from "../githubSync/syncOrg.js";
 import { fetchDeliveryActivity, resolveGithubUserId } from "./fetchActivity.js";
@@ -268,8 +272,12 @@ export async function runDeliveryEval(
       totalScore: clampTotalScore(quantTotal + quality.qualityAdjustment),
       llmStatus: "ok",
       llmQualityAdjustment: quality.qualityAdjustment.toString(),
-      llmNarrative: quality.narrative,
-      llmEvidence: quality.evidence,
+      // deepStrip guards the jsonb write boundary: a lone UTF-16 surrogate /
+      // NUL in LLM-generated free text would otherwise fail the whole report
+      // upsert with "invalid input syntax for type json" — same fix as
+      // runRuleBased.ts / upsertEvaluationReportByKey.ts (v0.27.1 crash class).
+      llmNarrative: deepStripInvalidJsonbChars(quality.narrative),
+      llmEvidence: deepStripInvalidJsonbChars(quality.evidence) as unknown,
       llmModel: quality.model,
       llmCalledAt: quality.calledAt,
       llmCostUsd: quality.costUsd === null ? null : quality.costUsd.toString(),

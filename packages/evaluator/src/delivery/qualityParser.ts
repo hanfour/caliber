@@ -12,6 +12,7 @@
  * dropped, since evidence only supports the narrative/adjustment.
  */
 import { z } from "zod";
+import { stripInvalidJsonbChars } from "../util/jsonbText.js";
 
 export const QUALITY_ADJUSTMENT_LIMIT = 15;
 
@@ -71,7 +72,12 @@ export function parseDeliveryQualityResponse(raw: string): QualityParseResult {
   return {
     ok: true,
     qualityAdjustment,
-    narrative: result.data.narrative,
+    // This is the pure parsing layer, not the jsonb write boundary — the
+    // load-bearing fix lives at the DB write (runDeliveryEval.ts, via
+    // deepStripInvalidJsonbChars). Stripping here too is cheap and keeps
+    // this layer honest about never handing back a string Postgres jsonb
+    // would reject.
+    narrative: stripInvalidJsonbChars(result.data.narrative),
     evidence: coerceEvidence(result.data.evidence),
   };
 }
@@ -89,10 +95,13 @@ function coerceEvidence(raw: unknown): QualityEvidenceItem[] {
     const parsed = evidenceItemSchema.safeParse(entry);
     if (!parsed.success) continue;
     items.push({
-      repo: parsed.data.repo,
+      repo: stripInvalidJsonbChars(parsed.data.repo),
       prNumber: parsed.data.prNumber,
-      quote: parsed.data.quote.slice(0, MAX_QUOTE_CHARS),
-      reason: parsed.data.reason,
+      // Slicing by code-unit offset can cut an emoji's surrogate pair in
+      // half (same vector as keyword.ts's evidence window) — strip AFTER
+      // slicing, same idiom.
+      quote: stripInvalidJsonbChars(parsed.data.quote.slice(0, MAX_QUOTE_CHARS)),
+      reason: stripInvalidJsonbChars(parsed.data.reason),
     });
   }
   return items;
