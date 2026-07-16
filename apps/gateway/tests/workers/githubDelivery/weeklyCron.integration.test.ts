@@ -153,6 +153,11 @@ describe("startGithubDeliveryCron", () => {
     const dm = await insertMember(db, 888);
     await db.insert(organizationMembers).values({ orgId: disabledOrg.id, userId: dm.id });
 
+    const authErrorOrg = await insertOrg(db);
+    await insertConnection(db, authErrorOrg.id, { status: "auth_error" });
+    const authErrorMember = await insertMember(db, 999);
+    await db.insert(organizationMembers).values({ orgId: authErrorOrg.id, userId: authErrorMember.id });
+
     const added: Array<{ data: Record<string, unknown>; opts?: { jobId?: string } }> = [];
     const queue = {
       add: async (_n: string, data: unknown, opts?: { jobId?: string }) =>

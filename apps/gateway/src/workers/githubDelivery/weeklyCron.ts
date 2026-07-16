@@ -5,12 +5,15 @@
  * repeat ticks, which dedup against completed hashes (plain add — the
  * regenerate path is manual-only).
  *
+ * Excludes connections with status="auth_error" (revoked PAT orgs; parity
+ * with githubSync/interval.ts:51).
+ *
  * Interval skeleton (coalescing `scheduleTick` / epoch-guard / stopped-flag
  * / unref) copied verbatim from `../githubSync/interval.ts` (PR1, post-C1
  * fix) — only the tick body, interval constant, and the `clock` test seam
  * differ.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import {
   accounts,
   githubConnections,
@@ -84,6 +87,7 @@ export function startGithubDeliveryCron(
         and(
           eq(githubConnections.deliveryEnabled, true),
           isNull(organizations.deletedAt),
+          ne(githubConnections.status, "auth_error"),
         ),
       );
 
