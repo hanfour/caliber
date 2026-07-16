@@ -29,6 +29,14 @@
  * `refType=evaluation_report`). The writer takes `refType` as a parameter so
  * PR3 can pass the per-key variant (`evaluation_report_by_key`) without
  * touching this code. See spec §6.
+ *
+ * Widened (PR3 Task 5, `runDeliveryQuality`): `DeepAnalysisRefType` gains
+ * `"github_delivery_report"` and `WriteDeepAnalysisLedgerInput` gains an
+ * optional `eventType` (defaulting to `DEEP_ANALYSIS_EVENT_TYPE`, unchanged
+ * for every existing caller) so the delivery-quality LLM judgment can ledger
+ * under its own `event_type` (`DELIVERY_ANALYSIS_EVENT_TYPE = "delivery_analysis"`)
+ * while reusing this exact recover-from-usage_logs + dedup-insert machinery
+ * instead of forking it.
  */
 
 import { eq } from "drizzle-orm";
@@ -49,15 +57,29 @@ import { wrapEnforceBudget } from "./enforceBudgetWithMetrics.js";
 /** `llm_usage_events.event_type` value for the deep-analysis LLM step. */
 export const DEEP_ANALYSIS_EVENT_TYPE = "deep_analysis" as const;
 
+/**
+ * `llm_usage_events.event_type` value for the github-delivery quality LLM
+ * step (PR3 Task 5, `runDeliveryQuality`).
+ */
+export const DELIVERY_ANALYSIS_EVENT_TYPE = "delivery_analysis" as const;
+
 /** `ref_type` for the per-person grain (this PR). */
 export const REF_TYPE_PERSON = "evaluation_report" as const;
 
 /** `ref_type` for the per-key grain (wired in PR3; declared now for reuse). */
 export const REF_TYPE_KEY = "evaluation_report_by_key" as const;
 
+/**
+ * `ref_type` for a github-delivery quality report (PR3 Task 5). The ref_id
+ * is the `github_delivery_reports.id` row the LLM judgment belongs to.
+ */
+export const REF_TYPE_GITHUB_DELIVERY_REPORT =
+  "github_delivery_report" as const;
+
 export type DeepAnalysisRefType =
   | typeof REF_TYPE_PERSON
-  | typeof REF_TYPE_KEY;
+  | typeof REF_TYPE_KEY
+  | typeof REF_TYPE_GITHUB_DELIVERY_REPORT;
 
 /**
  * Resolve the deep-analysis enforcement kill-switch from the environment.
@@ -138,10 +160,19 @@ export interface WriteDeepAnalysisLedgerInput {
   orgId: string;
   /** The just-upserted report id — used as `ref_id` (must already exist). */
   reportId: string;
-  /** Grain selector: per-person (this PR) or per-key (PR3). */
+  /** Grain selector: per-person, per-key, or github-delivery-report (PR3). */
   refType: DeepAnalysisRefType;
   /** X-Request-Id of the loopback deep-analysis call (the usage_logs key). */
   usageLogRequestId: string;
+  /**
+   * `llm_usage_events.event_type` for this ledger row. Defaults to
+   * `DEEP_ANALYSIS_EVENT_TYPE` (unchanged behavior for every pre-existing
+   * caller). `runDeliveryQuality` (PR3 Task 5) passes
+   * `DELIVERY_ANALYSIS_EVENT_TYPE` so delivery-quality spend is
+   * distinguishable from per-person/per-key deep analysis in `getMonthSpend`
+   * breakdowns and dashboards.
+   */
+  eventType?: string;
   /** Optional — increments gwLlmCostUsdTotal on a successful insert. */
   metrics?: Pick<GatewayMetrics, "gwLlmCostUsdTotal">;
   /** Test injection — overrides the materialization-wait sleep. */
@@ -219,12 +250,13 @@ export async function writeDeepAnalysisLedger(
   }
 
   const costUsd = Number(recovered.totalCost);
+  const eventType = input.eventType ?? DEEP_ANALYSIS_EVENT_TYPE;
 
   const inserted = await input.db
     .insert(llmUsageEvents)
     .values({
       orgId: input.orgId,
-      eventType: DEEP_ANALYSIS_EVENT_TYPE,
+      eventType,
       model: recovered.model,
       tokensInput: recovered.tokensInput,
       tokensOutput: recovered.tokensOutput,
@@ -250,7 +282,7 @@ export async function writeDeepAnalysisLedger(
     input.metrics?.gwLlmCostUsdTotal.inc(
       {
         org_id: input.orgId,
-        event_type: DEEP_ANALYSIS_EVENT_TYPE,
+        event_type: eventType,
         model: recovered.model,
       },
       costUsd,

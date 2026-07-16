@@ -16,6 +16,14 @@
  *     and other statuses as deterministic (writes an error row to avoid
  *     retrying the same prompt_version).
  *   - Fetch failure / missing API key throw plain Errors (deterministic).
+ *
+ * Return shape (PR3 delivery-quality follow-up): also surfaces the
+ * loopback response's `x-request-id` as `requestId` on the resolved
+ * `LlmResponse` (a widened, optional field — see callWithCostTracking.ts).
+ * Facet extraction (which computes cost client-side from `usage` via
+ * `calculateCost`) ignores it; `runDeliveryQuality` (which instead polls
+ * `usage_logs` for the REAL post-markup cost, mirroring `runLlmDeepAnalysis`)
+ * is the reason this was added — reusing this client rather than forking it.
  */
 
 import type { Redis } from "ioredis";
@@ -109,10 +117,15 @@ export function createFacetLlmClient(deps: FacetLlmClientDeps): LlmClient {
 
       const inputTokens = json.usage?.input_tokens ?? 0;
       const outputTokens = json.usage?.output_tokens ?? 0;
+      const requestId =
+        res.headers.get("x-request-id") ??
+        res.headers.get("X-Request-Id") ??
+        undefined;
 
       return {
         text,
         usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+        requestId,
       };
     },
   };

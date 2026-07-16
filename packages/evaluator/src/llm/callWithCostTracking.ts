@@ -18,6 +18,15 @@ export interface LlmUsage {
 export interface LlmResponse {
   text: string;
   usage: LlmUsage;
+  /**
+   * Optional `x-request-id` of the underlying loopback call, when the
+   * concrete `LlmClient` implementation surfaces one (e.g. gateway's
+   * `createFacetLlmClient` — PR3 delivery-quality follow-up). Consumers
+   * that need to poll `usage_logs` for the REAL (post-markup) cost, rather
+   * than compute it client-side via `calculateCost`, read this field.
+   * `callWithCostTracking` itself ignores it — untouched, additive only.
+   */
+  requestId?: string;
 }
 
 export interface LlmClient {
