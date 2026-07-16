@@ -136,17 +136,25 @@ export function createGithubClient(opts: GithubClientOptions): GithubClient {
     if (res.status === 403 || res.status === 429) {
       const remaining = res.headers.get("x-ratelimit-remaining");
       const retryAfter = res.headers.get("retry-after");
-      if (remaining === "0" || retryAfter !== null) {
+      const hasRateLimitMarkers = remaining === "0" || retryAfter !== null;
+      // A bare 429 (no markers) is still a rate limit — GitHub's secondary
+      // rate limits don't always carry x-ratelimit-* headers. A bare 403
+      // means the PAT lacks permission for the resource, not a rate limit.
+      if (res.status === 429 || hasRateLimitMarkers) {
         const reset = res.headers.get("x-ratelimit-reset");
-        const resetAtMs = reset
-          ? Number(reset) * 1000
-          : retryAfter
-            ? Date.now() + Number(retryAfter) * 1000
+        // Guard against malformed headers producing NaN: Number.isFinite
+        // gates every arm so resetAtMs is always a finite number or null.
+        const resetSeconds = reset === null ? NaN : Number(reset);
+        const retryAfterSeconds = retryAfter === null ? NaN : Number(retryAfter);
+        const resetAtMs = Number.isFinite(resetSeconds)
+          ? resetSeconds * 1000
+          : Number.isFinite(retryAfterSeconds)
+            ? Date.now() + retryAfterSeconds * 1000
             : null;
         throw new GithubRateLimitError(resetAtMs);
       }
       // 403 without rate-limit markers = PAT lacks permission for the resource.
-      throw new GithubAuthError(`github access denied (403) for ${path}`);
+      throw new GithubAuthError(`github access denied (${res.status}) for ${path}`);
     }
     if (!res.ok) {
       throw new GithubHttpError(res.status, `github api ${res.status} for ${path}`);

@@ -101,6 +101,44 @@ describe("createGithubClient", () => {
     expect((err as GithubRateLimitError).resetAtMs).toBe(1783700000 * 1000);
   });
 
+  // Guard A: malformed rate-limit headers must not produce NaN — resetAtMs
+  // should degrade to null rather than a nonsense finite number.
+  it("malformed x-ratelimit-reset → GithubRateLimitError with resetAtMs null (not NaN)", async () => {
+    const fetchImpl = fetchQueue(
+      jsonRes({ message: "rate limited" }, 403, {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": "not-a-number",
+      }),
+    );
+    const err = await client(fetchImpl)
+      .getPull("acme/web", 1)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GithubRateLimitError);
+    expect((err as GithubRateLimitError).resetAtMs).toBeNull();
+  });
+
+  // Guard B: a bare 429 (no x-ratelimit-remaining/-reset or retry-after)
+  // must still classify as rate-limited, not auth_error — an auth_error
+  // permanently pauses the org's sync schedule (see interval.ts), which
+  // would be wrong for a transient rate limit. A bare 403 (no markers)
+  // still means "PAT lacks permission" → GithubAuthError.
+  it("bare 429 (no markers) → GithubRateLimitError with resetAtMs null", async () => {
+    const fetchImpl = fetchQueue(jsonRes({ message: "too many requests" }, 429));
+    const err = await client(fetchImpl)
+      .getPull("acme/web", 1)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GithubRateLimitError);
+    expect((err as GithubRateLimitError).resetAtMs).toBeNull();
+  });
+
+  it("bare 403 (no markers) → GithubAuthError", async () => {
+    const fetchImpl = fetchQueue(jsonRes({ message: "Forbidden" }, 403));
+    const err = await client(fetchImpl)
+      .getPull("acme/web", 1)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GithubAuthError);
+  });
+
   // owner_login is documented as "GitHub org (or user)". A fine-grained PAT
   // scoped to a USER resource owner 404s on /orgs/{owner}/repos; when that
   // happens and /user's login matches `owner` (case-insensitively), fall

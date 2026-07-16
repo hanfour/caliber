@@ -30,6 +30,14 @@ export interface SyncOrgResult {
   projectItems: number;
   status: "ok" | "auth_error" | "rate_limited" | "sync_error";
   errors: string[];
+  /**
+   * GitHub's rate-limit reset time (epoch ms), captured when `status` is
+   * "rate_limited" so the worker can delay the retry until the window
+   * actually clears instead of burning fixed exponential backoff. `null`
+   * when GitHub didn't send a parseable reset header; `undefined` when the
+   * sync wasn't rate-limited at all.
+   */
+  rateLimitResetAtMs?: number | null;
 }
 
 const emptyResult = (skippedReason?: SyncOrgResult["skippedReason"]): SyncOrgResult => ({
@@ -77,6 +85,7 @@ export async function syncOrg(input: SyncOrgInput): Promise<SyncOrgResult> {
   // closure's reassignments across the labeled loop below, and would
   // otherwise over-narrow `status` back to "ok" after the loop.
   let aborted = false;
+  let rateLimitResetAtMs: number | null | undefined;
   const errors: string[] = [];
   const totals = { repos: 0, pulls: 0, reviews: 0, issues: 0, projectItems: 0 };
 
@@ -90,6 +99,7 @@ export async function syncOrg(input: SyncOrgInput): Promise<SyncOrgResult> {
     if (err instanceof GithubRateLimitError) {
       status = "rate_limited";
       aborted = true;
+      rateLimitResetAtMs = err.resetAtMs;
       return true;
     }
     if (status === "ok") status = "sync_error";
@@ -156,5 +166,5 @@ export async function syncOrg(input: SyncOrgInput): Promise<SyncOrgResult> {
     })
     .where(eq(githubConnections.id, conn.id));
 
-  return { ...totals, status, errors };
+  return { ...totals, status, errors, rateLimitResetAtMs };
 }

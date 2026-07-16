@@ -218,6 +218,30 @@ describe("syncOrg", () => {
     expect(conn.status).toBe("auth_error");
   });
 
+  it("rate-limited repo listing → status rate_limited, captures rateLimitResetAtMs", async () => {
+    const org = await insertOrg(db);
+    await insertConnection(db, org.id);
+    const resetAtSeconds = Math.floor(Date.now() / 1000) + 120;
+    const fetchImpl = routeFetch({
+      "/orgs/acme/repos": () =>
+        json(
+          { message: "rate limited" },
+          403,
+          {
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": String(resetAtSeconds),
+          },
+        ),
+    });
+    const res = await syncOrg({ db, masterKeyHex: MASTER_KEY, orgId: org.id, fetchImpl });
+    expect(res.status).toBe("rate_limited");
+    expect(res.rateLimitResetAtMs).toBe(resetAtSeconds * 1000);
+    const conn = (
+      await db.select().from(githubConnections).where(eq(githubConnections.orgId, org.id))
+    )[0]!;
+    expect(conn.status).toBe("rate_limited");
+  });
+
   it("skips when no connection or disabled", async () => {
     const org = await insertOrg(db);
     expect(

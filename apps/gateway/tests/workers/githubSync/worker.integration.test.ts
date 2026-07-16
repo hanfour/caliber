@@ -233,4 +233,81 @@ describe("createGithubSyncWorker", () => {
       await queue.close();
     }
   }, 45_000);
+
+  // Proves the P2 fix end-to-end: a rate-limited sync must delay THIS SAME
+  // job until (roughly) GitHub's reset time and retry it, rather than
+  // failing the attempt out to BullMQ's fixed exponential backoff (which
+  // would exhaust all 3 attempts long before a real GitHub rate-limit
+  // window clears). `rateLimitMinDelayMs` is the test seam documented on
+  // `CreateGithubSyncWorkerOptions` — it lowers computeRateLimitDelayMs's
+  // 30s production floor so this test observes the retry inside its
+  // timeout budget instead of waiting out the real floor.
+  it("rate-limited first attempt delays the job until reset, then retries and succeeds", async () => {
+    const org = await insertOrg(db);
+    await insertConnection(db, org.id);
+
+    let repoListCalls = 0;
+    const resetAtSeconds = Math.floor((Date.now() + 2000) / 1000);
+    const fetchImpl = routeFetch({
+      "/orgs/acme/repos": () => {
+        repoListCalls += 1;
+        if (repoListCalls === 1) {
+          return json({ message: "rate limited" }, 403, {
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": String(resetAtSeconds),
+          });
+        }
+        return json([{ full_name: "acme/web" }]);
+      },
+      "/repos/acme/web/pulls/1/reviews": () => json([]),
+      "/repos/acme/web/pulls/1": () => json(PULL_DETAIL),
+      "/repos/acme/web/pulls": () =>
+        json([{ number: 1, node_id: "PR_1", updated_at: "2026-07-02T00:00:00Z" }]),
+      "/repos/acme/web/issues": () => json([]),
+      "/graphql": () =>
+        json({
+          data: {
+            organization: {
+              projectsV2: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            },
+          },
+        }),
+    });
+
+    const queue = createGithubSyncQueue({ connection: redisConnection });
+    const worker = createGithubSyncWorker({
+      connection: redisConnection,
+      db,
+      masterKeyHex: MASTER_KEY,
+      fetchImpl,
+      rateLimitMinDelayMs: 500,
+    });
+    try {
+      await enqueueGithubSync(queue, { orgId: org.id, triggeredBy: "manual" });
+      // 30s budget: covers the ~2s rate-limit delay plus BullMQ's delayed-job
+      // pickup latency and the second full sync pass.
+      const deadline = Date.now() + 30_000;
+      let rows: Array<{ orgId: string }> = [];
+      while (Date.now() < deadline) {
+        rows = (await db.select().from(githubPullRequests)).filter(
+          (r) => r.orgId === org.id,
+        );
+        if (rows.length > 0) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(rows).toHaveLength(1);
+      expect(repoListCalls).toBeGreaterThanOrEqual(2);
+
+      const conn = (
+        await db
+          .select()
+          .from(githubConnections)
+          .where(eq(githubConnections.orgId, org.id))
+      )[0]!;
+      expect(conn.status).toBe("ok");
+    } finally {
+      await worker.close();
+      await queue.close();
+    }
+  }, 45_000);
 });
