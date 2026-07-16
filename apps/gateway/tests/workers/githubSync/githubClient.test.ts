@@ -173,6 +173,22 @@ describe("createGithubClient", () => {
     expect((err as GithubHttpError).status).toBe(404);
   });
 
+  // Guard: a malformed /user body (no `login`, e.g. an empty object) must
+  // not throw a raw TypeError out of `.toLowerCase()` — it should rethrow
+  // the original org-404 GithubHttpError, same mismatch behavior as when
+  // /user's login simply doesn't match.
+  it("listRepoFullNames: org 404 + /user body missing login → rethrows the original 404 GithubHttpError", async () => {
+    const fetchImpl = fetchQueue(
+      jsonRes({ message: "Not Found" }, 404),
+      jsonRes({}),
+    );
+    const err = await client(fetchImpl)
+      .listRepoFullNames("acme")
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GithubHttpError);
+    expect((err as GithubHttpError).status).toBe(404);
+  });
+
   it("graphql surfaces GraphQL errors and returns data otherwise", async () => {
     const fetchImpl = fetchQueue(
       jsonRes({ data: { organization: { projectsV2: { nodes: [] } } } }),

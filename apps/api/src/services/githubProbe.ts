@@ -71,14 +71,18 @@ export async function probeGithubToken(
   const repoRes = isSelfOwner
     ? await get("/user/repos?per_page=1&affiliation=owner")
     : await get(`/orgs/${input.ownerLogin}/repos?per_page=1`);
+  const ownerKind = isSelfOwner ? "owner" : "org";
   if (repoRes.status === 404) {
     throw new GithubProbeError(
       "owner_not_found",
-      `github org '${input.ownerLogin}' not visible to this token`,
+      `github ${ownerKind} '${input.ownerLogin}' not visible to this token`,
     );
   }
   if (repoRes.status === 401 || repoRes.status === 403) {
-    throw new GithubProbeError("bad_token", "token lacks repo read on the org");
+    throw new GithubProbeError(
+      "bad_token",
+      `token lacks repo read on the ${ownerKind}`,
+    );
   }
   if (!repoRes.ok) {
     throw new GithubProbeError("network", `github repos returned ${repoRes.status}`);

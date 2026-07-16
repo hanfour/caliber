@@ -283,7 +283,64 @@ describe("createGithubSyncWorker", () => {
       rateLimitMinDelayMs: 500,
     });
     try {
-      await enqueueGithubSync(queue, { orgId: org.id, triggeredBy: "manual" });
+      const { jobId } = await enqueueGithubSync(queue, {
+        orgId: org.id,
+        triggeredBy: "manual",
+      });
+
+      // Wait for the worker to make its first (rate-limited) repo-listing
+      // call before checking for the delayed state below.
+      const firstCallDeadline = Date.now() + 15_000;
+      while (Date.now() < firstCallDeadline && repoListCalls < 1) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(repoListCalls).toBeGreaterThanOrEqual(1);
+
+      // Poll for the job to be observed in BullMQ's `delayed` state. NOTE:
+      // `delayed` alone does NOT discriminate the fix — BullMQ's own
+      // default exponential backoff (attempts: 3, queue.ts default job
+      // options) ALSO retries a plain-thrown error by moving the job to
+      // `delayed` (see node_modules/bullmq dist/esm/classes/job.js
+      // `moveToFailed` → `shouldRetry` branch calls
+      // `this.scripts.moveToDelayed(...)`), so a reverted plain throw would
+      // pass a bare `isDelayed()` check identically. The real discriminator
+      // is `attemptsMade`: `job.js#moveToFailed` unconditionally does
+      // `this.attemptsMade += 1` even on a retry-with-delay, whereas
+      // `job.js#moveToDelayed` (what worker.ts calls explicitly, followed
+      // by `throw new DelayedError()`) never touches `attemptsMade` —
+      // and `worker.js#handleFailed` special-cases `DelayedError` to skip
+      // `moveToFailed` entirely (see comment on the `moveToDelayed` call in
+      // worker.ts). So: `delayed` + `attemptsMade === 0` only holds under
+      // the real moveToDelayed+DelayedError wiring; a plain-throw revert
+      // shows `delayed` + `attemptsMade === 1`. Verified empirically against
+      // installed bullmq@5.75.2 by instrumenting this exact poll: real fix
+      // logged `attemptsMade: 0`, a plain-throw revert logged
+      // `attemptsMade: 1`. Poll fast (50ms) since the delay window here is
+      // only ~2s (resetAtSeconds - now, clamped by this worker's
+      // `rateLimitMinDelayMs: 500` test seam); "observed delayed at least
+      // once" is the pass condition so this doesn't race the job's own
+      // completion.
+      let observedDelayed = false;
+      let attemptsMadeWhileDelayed: number | null = null;
+      const delayedPollDeadline = Date.now() + 5_000;
+      while (Date.now() < delayedPollDeadline && !observedDelayed) {
+        const job = await queue.getJob(jobId);
+        if (job !== undefined && (await job.isDelayed())) {
+          observedDelayed = true;
+          attemptsMadeWhileDelayed = job.attemptsMade;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(
+        observedDelayed,
+        "never observed the job in BullMQ's 'delayed' state after the rate-limited attempt — worker.ts's moveToDelayed+DelayedError wiring may have regressed to a plain throw",
+      ).toBe(true);
+      expect(
+        attemptsMadeWhileDelayed,
+        `job.attemptsMade was ${attemptsMadeWhileDelayed} (expected 0) while delayed — this means the job reached 'delayed' via BullMQ's default moveToFailed-with-retry-delay path (a plain throw), not worker.ts's explicit job.moveToDelayed(...) + throw DelayedError() escape hatch, which never increments attemptsMade`,
+      ).toBe(0);
+
       // 30s budget: covers the ~2s rate-limit delay plus BullMQ's delayed-job
       // pickup latency and the second full sync pass.
       const deadline = Date.now() + 30_000;

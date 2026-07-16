@@ -197,7 +197,12 @@ export function createGithubClient(opts: GithubClientOptions): GithubClient {
         // /users/{owner}/repos which is public-only and would silently
         // undercount. Any other 404 (or non-404 error) is rethrown as-is.
         if (!(err instanceof GithubHttpError) || err.status !== 404) throw err;
-        const me = (await request("/user")) as GithubApiUser;
+        const me = (await request("/user")) as Partial<GithubApiUser>;
+        // Defend against a malformed /user body (missing/non-string
+        // `login`) the same way githubProbe.ts does: fall back to the
+        // original org-404 error rather than throwing a raw TypeError out
+        // of `.toLowerCase()` on undefined.
+        if (typeof me.login !== "string") throw err;
         if (me.login.toLowerCase() !== owner.toLowerCase()) throw err;
         const selfOut: string[] = [];
         for await (const chunk of pages("/user/repos", {
