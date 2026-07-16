@@ -13,8 +13,16 @@ export interface CreateGithubDeliveryWorkerOptions {
   connection: Redis;
   db: Database;
   masterKeyHex: string;
+  /** Required — threaded to runDeliveryEval's LLM quality layer (loopback
+   * eval-key lookup). Same instance the worker uses for its BullMQ
+   * connection is fine — it's an un-prefixed client either way. */
+  redis: Redis;
+  /** Required — base URL runDeliveryEval's quality layer targets for the
+   * loopback /v1/messages call. */
+  gatewayBaseUrl: string;
   concurrency?: number;
-  /** Test seam; threaded to the staleness-gated inline sync. */
+  /** Test seam; threaded to the staleness-gated inline sync AND the
+   * quality layer's GitHub/LLM-loopback fetches. */
   fetchImpl?: typeof fetch;
   /** Threaded to runDeliveryEval so an inline-sync failure surfaces. */
   logger?: LoggerLike;
@@ -31,6 +39,8 @@ export function createGithubDeliveryWorker(
         db: opts.db,
         masterKeyHex: opts.masterKeyHex,
         payload,
+        redis: opts.redis,
+        gatewayBaseUrl: opts.gatewayBaseUrl,
         fetchImpl: opts.fetchImpl,
         logger: opts.logger,
       });
