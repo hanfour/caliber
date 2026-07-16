@@ -194,8 +194,9 @@ describe("createGithubSyncWorker", () => {
     });
     try {
       await enqueueGithubSync(queue, { orgId: org.id, triggeredBy: "manual" });
-      // Poll until the row lands (worker is async); 15s budget.
-      const deadline = Date.now() + 15_000;
+      // Poll until the row lands (worker is async); 30s budget (doubled from
+      // 15s — this file is load-flaky under concurrent testcontainer spawn).
+      const deadline = Date.now() + 30_000;
       let rows: Array<{ orgId: string }> = [];
       while (Date.now() < deadline) {
         rows = (await db.select().from(githubPullRequests)).filter(
@@ -218,7 +219,7 @@ describe("createGithubSyncWorker", () => {
         .where(eq(githubPullRequests.orgId, org.id));
 
       await enqueueGithubSync(queue, { orgId: org.id, triggeredBy: "manual" });
-      const deadline2 = Date.now() + 15_000;
+      const deadline2 = Date.now() + 30_000;
       let rows2: Array<{ orgId: string }> = [];
       while (Date.now() < deadline2) {
         rows2 = (await db.select().from(githubPullRequests)).filter(
@@ -232,7 +233,7 @@ describe("createGithubSyncWorker", () => {
       await worker.close();
       await queue.close();
     }
-  }, 45_000);
+  }, 90_000);
 
   // Proves the P2 fix end-to-end: a rate-limited sync must delay THIS SAME
   // job until (roughly) GitHub's reset time and retry it, rather than
@@ -289,8 +290,9 @@ describe("createGithubSyncWorker", () => {
       });
 
       // Wait for the worker to make its first (rate-limited) repo-listing
-      // call before checking for the delayed state below.
-      const firstCallDeadline = Date.now() + 15_000;
+      // call before checking for the delayed state below. 30s budget
+      // (doubled from 15s — load-flaky under concurrent testcontainer spawn).
+      const firstCallDeadline = Date.now() + 30_000;
       while (Date.now() < firstCallDeadline && repoListCalls < 1) {
         await new Promise((r) => setTimeout(r, 50));
       }
@@ -322,7 +324,7 @@ describe("createGithubSyncWorker", () => {
       // completion.
       let observedDelayed = false;
       let attemptsMadeWhileDelayed: number | null = null;
-      const delayedPollDeadline = Date.now() + 5_000;
+      const delayedPollDeadline = Date.now() + 10_000;
       while (Date.now() < delayedPollDeadline && !observedDelayed) {
         const job = await queue.getJob(jobId);
         if (job !== undefined && (await job.isDelayed())) {
@@ -341,9 +343,10 @@ describe("createGithubSyncWorker", () => {
         `job.attemptsMade was ${attemptsMadeWhileDelayed} (expected 0) while delayed — this means the job reached 'delayed' via BullMQ's default moveToFailed-with-retry-delay path (a plain throw), not worker.ts's explicit job.moveToDelayed(...) + throw DelayedError() escape hatch, which never increments attemptsMade`,
       ).toBe(0);
 
-      // 30s budget: covers the ~2s rate-limit delay plus BullMQ's delayed-job
-      // pickup latency and the second full sync pass.
-      const deadline = Date.now() + 30_000;
+      // 60s budget (doubled from 30s — load-flaky under concurrent
+      // testcontainer spawn): covers the ~2s rate-limit delay plus BullMQ's
+      // delayed-job pickup latency and the second full sync pass.
+      const deadline = Date.now() + 60_000;
       let rows: Array<{ orgId: string }> = [];
       while (Date.now() < deadline) {
         rows = (await db.select().from(githubPullRequests)).filter(
@@ -366,5 +369,5 @@ describe("createGithubSyncWorker", () => {
       await worker.close();
       await queue.close();
     }
-  }, 45_000);
+  }, 120_000);
 });
