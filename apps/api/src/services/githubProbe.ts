@@ -1,7 +1,13 @@
 /**
  * Live PAT validation before persisting a GitHub connection (PR1).
- * Two GETs: /user (token valid?) and /orgs/{owner}/repos?per_page=1
- * (owner visible + repo read?). Error messages NEVER include the token.
+ * Two GETs: /user (token valid?) and either /orgs/{owner}/repos?per_page=1
+ * or, when `ownerLogin` is the token's own (case-insensitive) user login,
+ * /user/repos?per_page=1&affiliation=owner (owner visible + repo read?).
+ * `owner_login` is documented as "GitHub org (or user)" — a fine-grained
+ * PAT scoped to a USER resource owner 404s on /orgs/{owner}/repos, and
+ * /users/{owner}/repos would only list PUBLIC repos (a silent private-repo
+ * undercount), so the self-owner case must use /user/repos instead.
+ * Error messages NEVER include the token.
  */
 export type GithubProbeFailure = "bad_token" | "owner_not_found" | "network";
 
@@ -49,7 +55,22 @@ export async function probeGithubToken(
     throw new GithubProbeError("network", `github /user returned ${userRes.status}`);
   }
 
-  const repoRes = await get(`/orgs/${input.ownerLogin}/repos?per_page=1`);
+  let selfLogin: string | null = null;
+  try {
+    const userBody = (await userRes.json()) as { login?: unknown };
+    selfLogin = typeof userBody.login === "string" ? userBody.login : null;
+  } catch {
+    // Malformed /user body — fall through to the org endpoint below, same
+    // as any other owner whose login doesn't match the token's own.
+    selfLogin = null;
+  }
+  const isSelfOwner =
+    selfLogin !== null &&
+    selfLogin.toLowerCase() === input.ownerLogin.toLowerCase();
+
+  const repoRes = isSelfOwner
+    ? await get("/user/repos?per_page=1&affiliation=owner")
+    : await get(`/orgs/${input.ownerLogin}/repos?per_page=1`);
   if (repoRes.status === 404) {
     throw new GithubProbeError(
       "owner_not_found",

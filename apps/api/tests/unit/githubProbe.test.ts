@@ -50,4 +50,56 @@ describe("probeGithubToken", () => {
     const err = await probeGithubToken({ ...INPUT, fetchImpl }).catch((e) => e);
     expect((err as GithubProbeError).reason).toBe("network");
   });
+
+  // owner_login is documented as "GitHub org (or user)" — a fine-grained PAT
+  // scoped to a USER resource owner 404s on /orgs/{owner}/repos, and
+  // /users/{owner}/repos only lists PUBLIC repos (silent private-repo
+  // undercount), so when ownerLogin matches the token's own /user login we
+  // must probe GET /user/repos?affiliation=owner instead.
+  it("user-owner PAT: ownerLogin matches /user login → probes /user/repos, not /orgs/...", async () => {
+    const fetchImpl = fetchQueue(
+      json({ login: "hanfour" }),
+      json([{ full_name: "hanfour/dotfiles" }]),
+    );
+    const res = await probeGithubToken({
+      ...INPUT,
+      ownerLogin: "hanfour",
+      fetchImpl,
+    });
+    expect(res).toEqual({ sampleRepo: "hanfour/dotfiles" });
+    const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    const secondUrl = String(calls[1]![0]);
+    expect(secondUrl).toContain("/user/repos");
+    expect(secondUrl).toContain("affiliation=owner");
+    expect(secondUrl).not.toContain("/orgs/");
+  });
+
+  it("user-owner PAT: match is case-insensitive", async () => {
+    const fetchImpl = fetchQueue(
+      json({ login: "hanfour" }),
+      json([{ full_name: "hanfour/dotfiles" }]),
+    );
+    const res = await probeGithubToken({
+      ...INPUT,
+      ownerLogin: "HanFour",
+      fetchImpl,
+    });
+    expect(res).toEqual({ sampleRepo: "hanfour/dotfiles" });
+    const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const secondUrl = String(calls[1]![0]);
+    expect(secondUrl).toContain("/user/repos");
+  });
+
+  it("org owner (login differs from /user login) still uses the org endpoint", async () => {
+    const fetchImpl = fetchQueue(
+      json({ login: "bot" }),
+      json([{ full_name: "acme/web" }]),
+    );
+    const res = await probeGithubToken({ ...INPUT, ownerLogin: "acme", fetchImpl });
+    expect(res).toEqual({ sampleRepo: "acme/web" });
+    const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const secondUrl = String(calls[1]![0]);
+    expect(secondUrl).toContain("/orgs/acme/repos");
+  });
 });

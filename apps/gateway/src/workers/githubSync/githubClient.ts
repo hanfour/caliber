@@ -173,12 +173,34 @@ export function createGithubClient(opts: GithubClientOptions): GithubClient {
   return {
     async listRepoFullNames(owner) {
       const out: string[] = [];
-      for await (const chunk of pages(`/orgs/${owner}/repos`, {})) {
-        for (const repo of chunk as Array<{ full_name: string }>) {
-          out.push(repo.full_name);
+      try {
+        for await (const chunk of pages(`/orgs/${owner}/repos`, {})) {
+          for (const repo of chunk as Array<{ full_name: string }>) {
+            out.push(repo.full_name);
+          }
         }
+        return out;
+      } catch (err) {
+        // owner_login is documented as "GitHub org (or user)". A
+        // fine-grained PAT scoped to a USER resource owner 404s on
+        // /orgs/{owner}/repos. When that happens and the token's own
+        // /user login matches `owner` (case-insensitively), fall back to
+        // /user/repos?affiliation=owner — includes private repos, unlike
+        // /users/{owner}/repos which is public-only and would silently
+        // undercount. Any other 404 (or non-404 error) is rethrown as-is.
+        if (!(err instanceof GithubHttpError) || err.status !== 404) throw err;
+        const me = (await request("/user")) as GithubApiUser;
+        if (me.login.toLowerCase() !== owner.toLowerCase()) throw err;
+        const selfOut: string[] = [];
+        for await (const chunk of pages("/user/repos", {
+          affiliation: "owner",
+        })) {
+          for (const repo of chunk as Array<{ full_name: string }>) {
+            selfOut.push(repo.full_name);
+          }
+        }
+        return selfOut;
       }
-      return out;
     },
 
     async listPullsSince(repoFullName, sinceIso) {
