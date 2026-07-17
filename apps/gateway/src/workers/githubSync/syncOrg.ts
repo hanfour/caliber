@@ -169,6 +169,7 @@ export async function syncOrg(input: SyncOrgInput): Promise<SyncOrgResult> {
           client,
           orgId,
           ownerLogin: conn.ownerLogin,
+          logger: input.logger,
         });
         totals.projectItems = r.projectItems;
       } catch (err) {

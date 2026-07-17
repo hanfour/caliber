@@ -165,4 +165,38 @@ describe("syncOrgProjects", () => {
     await syncOrgProjects({ db, client, orgId: org.id, ownerLogin: "acme" });
     expect((await db.select().from(githubProjectItems)).filter((r) => r.orgId === org.id)).toHaveLength(2);
   });
+
+  it(
+    "caps runaway project pagination and logs it",
+    async () => {
+      const org = await insertOrg(db);
+      const warns: string[] = [];
+      const logger = { info: () => {}, warn: (_o: unknown, m?: string) => void warns.push(m ?? ""), error: () => {} };
+      // A server that always claims another page with the SAME cursor.
+      const client = {
+        ...throwingClientStub(),
+        graphql: async <T,>(query: string): Promise<T> =>
+          (query.includes("projectsV2(")
+            ? { organization: { projectsV2: { pageInfo: { hasNextPage: true, endCursor: "stuck" }, nodes: [] } } }
+            : { node: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } }) as T,
+      };
+      const res = await syncOrgProjects({ db, client, orgId: org.id, ownerLogin: "acme", logger });
+      expect(res.projectItems).toBe(0);
+      expect(warns.some((m) => m.includes("page cap"))).toBe(true);
+    },
+    15_000,
+  );
+
+  it("logs when the org node comes back null (PAT likely lacks Projects: read)", async () => {
+    const org = await insertOrg(db);
+    const warns: string[] = [];
+    const logger = { info: () => {}, warn: (_o: unknown, m?: string) => void warns.push(m ?? ""), error: () => {} };
+    const client = {
+      ...throwingClientStub(),
+      graphql: async <T,>(): Promise<T> => ({ organization: null }) as T,
+    };
+    const res = await syncOrgProjects({ db, client, orgId: org.id, ownerLogin: "acme", logger });
+    expect(res.projectItems).toBe(0);
+    expect(warns.some((m) => m.includes("no projects connection"))).toBe(true);
+  });
 });
