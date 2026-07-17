@@ -2,8 +2,10 @@
  * Integration tests for the deep-analysis budget gate + ledger writer
  * (Per-project scoring PR2 — closes the spend-blind gap).
  *
- * Real Postgres testcontainer (so migration 0022's `llm_usage_dedup_idx`
- * partial unique index exists — the writer's `onConflictDoNothing` targets it).
+ * Real Postgres testcontainer (so the partial unique indexes exist): the
+ * deep-analysis writer dedups on 0033's `llm_usage_request_dedup_idx`, while
+ * 0022's `llm_usage_dedup_idx` — narrowed by 0033 to request-id-less rows —
+ * still guards the facet writer and legacy rows.
  *
  * Cases (per Task 2 brief, step 3):
  *   (a) org over budget → deepAnalysisBudgetGate({enforce:true}) → { skip: true }

@@ -311,8 +311,10 @@ export async function runEvaluation(
   // Phase 3.5 (PR2): ledger the deep-analysis spend — AFTER the upsert so
   // `reportId` exists as the `ref_id`. Written UNCONDITIONALLY on LLM success
   // (honest accounting, independent of the budget kill-switch). Idempotent via
-  // `onConflictDoNothing` on `llm_usage_dedup_idx` so a BullMQ retry that
-  // re-runs the job cannot double-count this report's deep-analysis cost.
+  // `onConflictDoNothing` on `llm_usage_request_dedup_idx` (0033): a BullMQ
+  // retry reuses the same upstream request id and so cannot double-count, while
+  // a genuine re-generate — a new upstream call, a new request id — correctly
+  // lands its own row instead of being dedup-swallowed by the report id.
   // Not wrapped in try/catch: a transient DB error must surface (so spend is
   // never silently lost) — the dedup index keeps the retry single-counted.
   // PR3: per-key grain uses REF_TYPE_KEY; per-person uses REF_TYPE_PERSON.
