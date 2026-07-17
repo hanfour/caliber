@@ -14,17 +14,28 @@ interface DeliveryEvidenceItem {
   reason: string;
 }
 
+// Mirrors the owner/repo shape enforced by OWNER_LOGIN_REGEX in
+// apps/api/src/trpc/routers/githubDelivery.ts:54 (owner segment), extended
+// with a `/repo` segment — GitHub repo names allow letters, digits, `.`,
+// `_`, `-`. This is stricter than "non-empty string" so `repo` is safe to
+// interpolate into the `github.com/<repo>/pull/<prNumber>` href below.
+const EVIDENCE_REPO_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
+
 /**
  * Defensive parse: the LLM's raw JSON output is untrusted at this boundary
- * (same discipline as ReportDetail's evidence rendering) — a non-object item
- * (e.g. a stray string) or one missing `repo`/`prNumber` is dropped rather
- * than crashing the render.
+ * (same discipline as ReportDetail's evidence rendering) — a non-object item,
+ * one missing `repo`/`prNumber`, or one whose `repo`/`prNumber` don't match
+ * a real GitHub owner/repo + PR number shape is dropped rather than risking
+ * a mis-attributed or unsafe link (the quote/reason of a mis-attributed item
+ * is worthless without a verifiable link anyway).
  */
 function toEvidenceItem(item: unknown): DeliveryEvidenceItem | null {
   if (!item || typeof item !== "object") return null;
   const candidate = item as Record<string, unknown>;
-  if (typeof candidate.repo !== "string" || candidate.repo.length === 0) return null;
-  if (typeof candidate.prNumber !== "number" || !Number.isFinite(candidate.prNumber)) {
+  if (typeof candidate.repo !== "string" || !EVIDENCE_REPO_REGEX.test(candidate.repo)) {
+    return null;
+  }
+  if (typeof candidate.prNumber !== "number" || !Number.isInteger(candidate.prNumber) || candidate.prNumber <= 0) {
     return null;
   }
   return {

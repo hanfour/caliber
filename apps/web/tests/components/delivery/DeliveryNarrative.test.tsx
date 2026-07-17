@@ -72,6 +72,43 @@ describe("DeliveryNarrative", () => {
     expect(screen.getAllByRole("link")).toHaveLength(1);
   });
 
+  it("filters each malformed evidence item independently while a valid sibling still renders", () => {
+    render(
+      <DeliveryNarrative
+        report={{
+          llmStatus: "ok",
+          llmNarrative: "Narrative text.",
+          llmEvidence: [
+            // (a) a stray string, not an object at all.
+            "this is not an evidence object",
+            // (b) has prNumber but is missing repo.
+            { prNumber: 9, quote: "no repo", reason: "dropped" },
+            // (c) has repo but is missing prNumber.
+            { repo: "caliber/web", quote: "no prNumber", reason: "dropped" },
+            // (d) repo is shape-invalid (fails the owner/repo regex, and is
+            // the kind of value that would be unsafe to interpolate raw).
+            { repo: "javascript:alert(1)//x", prNumber: 1, quote: "unsafe repo", reason: "dropped" },
+            // (e) repo has a trailing fragment that isn't a valid repo segment.
+            { repo: "acme/web#frag", prNumber: 2, quote: "fragment repo", reason: "dropped" },
+            // (f) prNumber is not a positive integer.
+            { repo: "caliber/web", prNumber: 1.5, quote: "fractional pr", reason: "dropped" },
+            // Valid sibling in the same array — must still render, proving
+            // the filter is per-item and not all-or-nothing.
+            { repo: "caliber/web", prNumber: 7, quote: "valid quote", reason: "valid reason" },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("valid quote")).toBeInTheDocument();
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.queryByText("no repo")).not.toBeInTheDocument();
+    expect(screen.queryByText("no prNumber")).not.toBeInTheDocument();
+    expect(screen.queryByText("unsafe repo")).not.toBeInTheDocument();
+    expect(screen.queryByText("fragment repo")).not.toBeInTheDocument();
+    expect(screen.queryByText("fractional pr")).not.toBeInTheDocument();
+  });
+
   it("omits the evidence block entirely when evidence is absent or empty", () => {
     render(
       <DeliveryNarrative
