@@ -90,7 +90,8 @@
       "githubConnection": {
         "ownerInvalid": "有効な GitHub の組織またはユーザーのログイン名を入力してください",
         "tokenTooShort": "トークンが短すぎるようです",
-        "tokenTooLong": "トークンが長すぎるようです"
+        "tokenTooLong": "トークンが長すぎるようです",
+        "probeFailed": "接続の確認に失敗しました: {reason}"
       }
     }
   }

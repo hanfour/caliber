@@ -90,7 +90,8 @@
       "githubConnection": {
         "ownerInvalid": "Enter a valid GitHub org or user login",
         "tokenTooShort": "Token looks too short",
-        "tokenTooLong": "Token looks too long"
+        "tokenTooLong": "Token looks too long",
+        "probeFailed": "Connection probe failed: {reason}"
       }
     }
   }

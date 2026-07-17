@@ -90,7 +90,8 @@
       "githubConnection": {
         "ownerInvalid": "请输入有效的 GitHub 组织或用户账号",
         "tokenTooShort": "Token 长度过短",
-        "tokenTooLong": "Token 长度过长"
+        "tokenTooLong": "Token 长度过长",
+        "probeFailed": "连接探测失败：{reason}"
       }
     }
   }

@@ -90,7 +90,8 @@
       "githubConnection": {
         "ownerInvalid": "유효한 GitHub 조직 또는 사용자 로그인을 입력하세요",
         "tokenTooShort": "토큰이 너무 짧은 것 같습니다",
-        "tokenTooLong": "토큰이 너무 긴 것 같습니다"
+        "tokenTooLong": "토큰이 너무 긴 것 같습니다",
+        "probeFailed": "연결 확인에 실패했습니다: {reason}"
       }
     }
   }
