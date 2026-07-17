@@ -85,6 +85,11 @@ const DELIVERY_ACTIVITY_NARRATIVE_KEYS = [
   "evaluator.delivery.noLinkedAccount",
 ];
 
+// All new keys required by the member-detail tab strip (PR4 Task 3).
+// `evaluator.delivery.title` is reused as the delivery tab label — only the
+// new evaluation-tab label needs a key.
+const DELIVERY_TAB_KEYS = ["evaluator.delivery.tabEvaluation"];
+
 function getByPath(obj: Record<string, unknown>, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc != null && typeof acc === "object" && key in acc) {
@@ -241,6 +246,26 @@ describe("i18n catalog parity — DeliveryActivityList + DeliveryNarrative keys 
   };
 
   for (const key of DELIVERY_ACTIVITY_NARRATIVE_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — member detail tab strip keys (PR4 Task 3)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of DELIVERY_TAB_KEYS) {
     it(`"${key}" exists in all 5 catalogs`, () => {
       for (const [locale, catalog] of Object.entries(catalogs)) {
         const value = getByPath(catalog, key);

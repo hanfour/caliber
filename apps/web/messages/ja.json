@@ -1095,6 +1095,7 @@
     },
     "delivery": {
       "title": "デリバリー",
+      "tabEvaluation": "評価",
       "loading": "デリバリーレポートを読み込み中…",
       "notEnabled": "このワークスペースでは GitHub デリバリー評価が有効になっていません。",
       "noReport": "この期間のデリバリーレポートはまだありません。",

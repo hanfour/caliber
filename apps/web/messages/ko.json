@@ -1135,6 +1135,7 @@
     },
     "delivery": {
       "title": "딜리버리",
+      "tabEvaluation": "평가",
       "loading": "딜리버리 리포트를 불러오는 중…",
       "notEnabled": "이 워크스페이스에서는 GitHub 딜리버리 평가가 활성화되어 있지 않습니다.",
       "noReport": "이 기간에 대한 딜리버리 리포트가 아직 없습니다.",

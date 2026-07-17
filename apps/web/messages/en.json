@@ -1135,6 +1135,7 @@
     },
     "delivery": {
       "title": "Delivery",
+      "tabEvaluation": "Evaluation",
       "loading": "Loading delivery report…",
       "notEnabled": "GitHub delivery scoring is not enabled for this workspace.",
       "noReport": "No delivery report for this window yet.",

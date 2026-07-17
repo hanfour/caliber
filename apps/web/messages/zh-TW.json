@@ -1135,6 +1135,7 @@
     },
     "delivery": {
       "title": "交付產出",
+      "tabEvaluation": "評估",
       "loading": "載入交付報告中…",
       "notEnabled": "此工作區尚未啟用 GitHub 交付評分功能。",
       "noReport": "此區間尚無交付報告。",
