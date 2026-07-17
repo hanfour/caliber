@@ -100,4 +100,25 @@ describe("truncateDiff", () => {
     expect(out).toContain("…[truncated]");
     expect(out.length).toBeLessThan(diff.length);
   });
+
+  it("never emits a lone surrogate when the per-file cap bisects an emoji", () => {
+    // "😀" is a surrogate pair (2 code units). Placing it so maxFileChars
+    // lands between its halves is the emoji-at-the-boundary case: a naive
+    // slice would leave a trailing lone high surrogate in the prompt,
+    // risking an upstream 400 that burns all three BullMQ retries on an
+    // identical payload — the diff is the biggest text in the prompt (30k
+    // chars vs. the 4k/1k/300 caps qualityPrompt.ts's capText guards), so
+    // this is the highest-yield place for that boundary to be hit for real.
+    const maxFileChars = 40;
+    const prefix = "diff --git a/x b/x\n";
+    const body = "+".repeat(maxFileChars - prefix.length - 1) + "😀" + "tail";
+    const diff = prefix + body;
+
+    const out = truncateDiff(diff, { maxFileChars, maxTotalChars: 10_000 });
+
+    // Every surrogate code unit left in the output must be part of a valid pair.
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    expect(lone.test(out)).toBe(false);
+    expect(out).toContain("…[truncated]");
+  });
 });

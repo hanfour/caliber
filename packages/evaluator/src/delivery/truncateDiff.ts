@@ -5,6 +5,7 @@
  * (even non-diff) text is treated as a single section and passed through
  * unless it exceeds the caps.
  */
+import { stripInvalidJsonbChars } from "../util/jsonbText.js";
 
 export const DIFF_MAX_TOTAL_CHARS = 30_000;
 export const DIFF_MAX_FILE_CHARS = 4_000;
@@ -22,9 +23,17 @@ const FILE_TRUNCATED_MARKER = "\n…[truncated]\n";
 // leading section.
 const FILE_BOUNDARY = /(?=^diff --git )/m;
 
+/**
+ * The slice is stripped because cutting at a code-unit offset can bisect an
+ * emoji's surrogate pair, and a lone surrogate in the prompt risks an upstream
+ * 400 — which rethrows as a transport error and burns all three BullMQ retries
+ * on a deterministically-identical payload. That is the same retry-burn this
+ * cap exists to prevent, just triggered by an emoji instead of raw length.
+ * Same strip-after-slice idiom as qualityPrompt.ts's capText.
+ */
 function capFileSection(section: string, maxFileChars: number): string {
   if (section.length <= maxFileChars) return section;
-  return section.slice(0, maxFileChars) + FILE_TRUNCATED_MARKER;
+  return stripInvalidJsonbChars(section.slice(0, maxFileChars)) + FILE_TRUNCATED_MARKER;
 }
 
 export function truncateDiff(diff: string, opts: TruncateDiffOptions = {}): string {
