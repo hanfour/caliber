@@ -309,7 +309,9 @@ describe("startEvaluatorCron", () => {
     // pass's worth (2 members), not double (4).
     await handle.tick();
     // NOTE: stop() only after tick() — stop() sets the stopped flag, which
-    // aborts the enqueue loop mid-flight (graceful-shutdown behavior).
+    // makes runTick bail before starting a pass. Unlike githubSync/interval.ts,
+    // enqueueDailyEvaluatorJobs never re-checks it, so an in-flight pass runs
+    // to completion; stopping first would just enqueue nothing.
     handle.stop();
 
     expect(added).toHaveLength(2);
