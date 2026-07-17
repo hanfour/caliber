@@ -1169,6 +1169,36 @@
         "pr_lead_time_hours_median": "PR 前置時間中位數（小時）",
         "issue_resolution_days_median": "議題解決天數中位數"
       }
+    },
+    "githubConnection": {
+      "title": "GitHub 連線",
+      "tabLabel": "GitHub",
+      "loading": "正在載入 GitHub 連線…",
+      "notEnabled": "此工作區尚未啟用 GitHub 交付整合。",
+      "noConnection": "尚未設定 GitHub 連線 — 新增細粒度 PAT 以開始同步交付活動。",
+      "owner": "擁有者",
+      "tokenLabel": "細粒度 PAT",
+      "tokenHint": "需要 Issues、Pull requests、Projects 與 metadata 的唯讀權限。將以加密方式儲存，且不會再次顯示。",
+      "allowlistLabel": "Repo 允許清單（選填，每行一個 owner/repo）",
+      "allRepos": "此權杖可見的所有 repo",
+      "statusLabel": "狀態",
+      "status": {
+        "ok": "正常",
+        "auth_error": "驗證錯誤 — 權杖已撤銷或權限不足",
+        "rate_limited": "已達速率限制",
+        "sync_error": "同步發生錯誤"
+      },
+      "lastSync": "上次同步",
+      "neverSynced": "從未同步",
+      "lastError": "上次錯誤",
+      "connectBtn": "儲存連線",
+      "connectedToast": "已連線 — 探測到 {repo}。",
+      "probeFailed": "GitHub 拒絕了此連線",
+      "syncNowBtn": "立即同步",
+      "syncQueued": "已加入同步佇列。",
+      "deleteBtn": "移除連線",
+      "deleteConfirm": "要移除 GitHub 連線嗎？已同步的活動資料仍會保留。",
+      "deletedToast": "已移除 GitHub 連線。"
     }
   },
   "audit": {

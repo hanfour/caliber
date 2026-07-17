@@ -40,6 +40,15 @@ const TABS: Tab[] = [
     label: "Costs",
     action: (orgId) => ({ type: "evaluator.view_cost", orgId }),
   },
+  // Label kept as a literal here to match the other entries above, which are
+  // literals too even though `evaluator.tabs.*` i18n keys exist for them —
+  // this array is built outside the component (no `useTranslations` access).
+  // The locked i18n value is `evaluator.githubConnection.tabLabel` = "GitHub".
+  {
+    href: "/github",
+    label: "GitHub",
+    action: (orgId) => ({ type: "github.manage", orgId }),
+  },
 ];
 
 export default function EvaluatorLayout({

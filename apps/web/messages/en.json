@@ -1169,6 +1169,36 @@
         "pr_lead_time_hours_median": "Median PR lead time (h)",
         "issue_resolution_days_median": "Median issue resolution (d)"
       }
+    },
+    "githubConnection": {
+      "title": "GitHub connection",
+      "tabLabel": "GitHub",
+      "loading": "Loading GitHub connection…",
+      "notEnabled": "GitHub delivery integration is not enabled for this workspace.",
+      "noConnection": "No GitHub connection yet — add a fine-grained PAT to start syncing delivery activity.",
+      "owner": "Owner",
+      "tokenLabel": "Fine-grained PAT",
+      "tokenHint": "Needs read-only Issues, Pull requests, Projects and metadata permissions. Stored encrypted; never shown again.",
+      "allowlistLabel": "Repo allowlist (optional, one owner/repo per line)",
+      "allRepos": "All repos visible to the token",
+      "statusLabel": "Status",
+      "status": {
+        "ok": "OK",
+        "auth_error": "Auth error — token revoked or missing permissions",
+        "rate_limited": "Rate limited",
+        "sync_error": "Sync errors"
+      },
+      "lastSync": "Last sync",
+      "neverSynced": "Never",
+      "lastError": "Last error",
+      "connectBtn": "Save connection",
+      "connectedToast": "Connected — probe saw {repo}.",
+      "probeFailed": "GitHub rejected the connection",
+      "syncNowBtn": "Sync now",
+      "syncQueued": "Sync queued.",
+      "deleteBtn": "Remove connection",
+      "deleteConfirm": "Remove the GitHub connection? Synced activity data stays.",
+      "deletedToast": "GitHub connection removed."
     }
   },
   "audit": {

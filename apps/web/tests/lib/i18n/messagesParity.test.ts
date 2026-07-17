@@ -93,6 +93,36 @@ const DELIVERY_TAB_KEYS = ["evaluator.delivery.tabEvaluation"];
 // All new keys required by the leaderboard delivery-score column (PR4 Task 4)
 const DELIVERY_LEADERBOARD_KEYS = ["evaluator.leaderboard.deliveryScore"];
 
+// All new keys required by the GitHub connection settings page (PR4 Task 5)
+const GITHUB_CONNECTION_KEYS = [
+  "evaluator.githubConnection.title",
+  "evaluator.githubConnection.tabLabel",
+  "evaluator.githubConnection.loading",
+  "evaluator.githubConnection.notEnabled",
+  "evaluator.githubConnection.noConnection",
+  "evaluator.githubConnection.owner",
+  "evaluator.githubConnection.tokenLabel",
+  "evaluator.githubConnection.tokenHint",
+  "evaluator.githubConnection.allowlistLabel",
+  "evaluator.githubConnection.allRepos",
+  "evaluator.githubConnection.statusLabel",
+  "evaluator.githubConnection.status.ok",
+  "evaluator.githubConnection.status.auth_error",
+  "evaluator.githubConnection.status.rate_limited",
+  "evaluator.githubConnection.status.sync_error",
+  "evaluator.githubConnection.lastSync",
+  "evaluator.githubConnection.neverSynced",
+  "evaluator.githubConnection.lastError",
+  "evaluator.githubConnection.connectBtn",
+  "evaluator.githubConnection.connectedToast",
+  "evaluator.githubConnection.probeFailed",
+  "evaluator.githubConnection.syncNowBtn",
+  "evaluator.githubConnection.syncQueued",
+  "evaluator.githubConnection.deleteBtn",
+  "evaluator.githubConnection.deleteConfirm",
+  "evaluator.githubConnection.deletedToast",
+];
+
 function getByPath(obj: Record<string, unknown>, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc != null && typeof acc === "object" && key in acc) {
@@ -289,6 +319,26 @@ describe("i18n catalog parity — leaderboard delivery-score column keys (PR4 Ta
   };
 
   for (const key of DELIVERY_LEADERBOARD_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — GitHub connection settings keys (PR4 Task 5)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of GITHUB_CONNECTION_KEYS) {
     it(`"${key}" exists in all 5 catalogs`, () => {
       for (const [locale, catalog] of Object.entries(catalogs)) {
         const value = getByPath(catalog, key);
