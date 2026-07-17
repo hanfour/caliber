@@ -370,6 +370,41 @@ describe("writeDeepAnalysisLedger", () => {
     expect(await countLedger(reportId)).toBe(0);
   });
 
+  it("(0033) a manual regenerate — same reportId, NEW request id — ledgers as its OWN row (does not dedup)", async () => {
+    // The money bug: the OLD dedup target was (ref_type, ref_id, event_type)
+    // keyed on the STABLE reportId, so a manual regenerate that re-spent real
+    // LLM money against the same report was silently swallowed as a dedup
+    // no-op — getMonthSpend under-counted and the budget gate went blind.
+    // Dedup now targets usage_log_request_id, so two DIFFERENT real upstream
+    // calls against the same reportId must both land.
+    const reportId = randomUuid();
+    const reqId1 = "req-deep-regen-001";
+    const reqId2 = "req-deep-regen-002";
+    await seedUsageLog(reqId1, { totalCost: "0.1000000000" });
+    await seedUsageLog(reqId2, { totalCost: "0.2000000000" });
+
+    const first = await writeDeepAnalysisLedger({
+      db,
+      orgId,
+      reportId,
+      refType: REF_TYPE_PERSON,
+      usageLogRequestId: reqId1,
+      sleepMs: noopSleep,
+    });
+    const second = await writeDeepAnalysisLedger({
+      db,
+      orgId,
+      reportId,
+      refType: REF_TYPE_PERSON,
+      usageLogRequestId: reqId2,
+      sleepMs: noopSleep,
+    });
+
+    expect(first.written).toBe(true);
+    expect(second.written).toBe(true); // NOT deduped — a real second spend
+    expect(await countLedger(reportId)).toBe(2);
+  });
+
   it("refType is parameterised so PR3 can pass the per-key variant", async () => {
     const reqId = "req-deep-bykey-001";
     const reportId = randomUuid();
