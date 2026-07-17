@@ -261,7 +261,7 @@ export function TeamLeaderboard({ orgId, teamId, members }: Props) {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-4 py-2.5 text-center">
                     <DeliveryScoreCell orgId={orgId} userId={row.userId} />
                   </td>
                   <td className="px-4 py-2.5 text-center">
