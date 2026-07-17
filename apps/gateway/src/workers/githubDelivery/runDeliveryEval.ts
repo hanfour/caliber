@@ -115,6 +115,7 @@ export async function runDeliveryEval(
         masterKeyHex: input.masterKeyHex,
         orgId: payload.orgId,
         fetchImpl: input.fetchImpl,
+        logger: input.logger,
       });
     } catch (err) {
       // Sync is best-effort here; score whatever data exists. Still worth a

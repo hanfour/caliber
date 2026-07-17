@@ -25,6 +25,7 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
@@ -509,14 +510,14 @@ describe("runDeliveryEval", () => {
     expect(messagesCalls).toHaveLength(0);
   });
 
-  it("inline sync failure (decrypt throws) is logged and never blocks the report", async () => {
+  it("inline sync failure (decrypt throws) is logged and persisted on the connection row", async () => {
     const org = await insertOrg(db);
     // Sealed with a DIFFERENT master key than the one runDeliveryEval is
-    // given below, so decryptCredential throws (AES-GCM auth-tag mismatch)
-    // before syncOrg's own try/catch has a chance to persist anything — the
-    // path this test targets is the throw ahead of that try/catch, not a
-    // per-repo sync_error that syncOrg already catches internally (a
-    // full-500 routeFetch would just make syncOrg return normally).
+    // given below, so decryptCredential throws (AES-GCM auth-tag mismatch).
+    // As of #270②, syncOrg catches this internally and persists
+    // status="sync_error" directly on the connection row + logs via the
+    // threaded logger, instead of letting the throw escape past its own
+    // status-update for runDeliveryEval's outer catch to merely log.
     const WRONG_KEY = "cd".repeat(32);
     const id = crypto.randomUUID();
     const sealed = encryptCredential({
@@ -556,9 +557,18 @@ describe("runDeliveryEval", () => {
 
     expect(res.skippedSync).toBe(false); // sync was attempted (stale), just failed
     expect(warnCalls).toHaveLength(1);
-    expect(warnCalls[0]!.msg).toContain("inline sync failed");
+    expect(warnCalls[0]!.msg).toContain("credential decrypt failed");
     expect(warnCalls[0]!.obj).toMatchObject({ orgId: org.id });
     expect(String((warnCalls[0]!.obj as { err: unknown }).err)).not.toContain(TOKEN);
+
+    // The fix's core assertion (#270②): the connection row itself now
+    // reflects the failure instead of keeping a stale status="ok".
+    const conn = (
+      await db.select().from(githubConnections).where(eq(githubConnections.id, id))
+    )[0]!;
+    expect(conn.status).toBe("sync_error");
+    expect(conn.lastSyncError).toContain("credential");
+    expect(conn.lastSyncError).not.toContain(TOKEN);
 
     // Existing degrade-gracefully semantics: the report still lands.
     const report = (await db.select().from(githubDeliveryReports)).find(
