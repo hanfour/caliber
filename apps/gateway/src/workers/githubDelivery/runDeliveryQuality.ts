@@ -336,9 +336,12 @@ export async function runDeliveryQuality(
 /**
  * Best-effort ledger write for ONE loopback call (I4). Polls usage_logs for
  * the call's real cost (own poll, independent of the ledger's internal
- * poll), then writes the ledger row; a write failure logs and is swallowed
- * — never throws, so it can be called for every call that happened
- * (including on the terminal parse_error path) without risking the job.
+ * poll), then writes the ledger row; a *write* failure logs and is
+ * swallowed, so it can be called for every call that happened — including
+ * on the terminal parse_error path — without the ledger risking the job.
+ * The cost poll itself is NOT swallowed: a DB error there propagates and
+ * the job retries, same as every other infra hiccup on this path (see the
+ * file header). Don't call this where a throw is unacceptable.
  * `requestId` may be absent (defensive — the loopback client's shape
  * guarantees one today) or shared between two calls' rows courtesy of
  * `writeDeepAnalysisLedger`'s dedup-on-`usage_log_request_id` (migration
