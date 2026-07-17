@@ -1158,7 +1158,9 @@
       "syncQueued": "同期をキューに登録しました。",
       "deleteBtn": "接続を削除",
       "deleteConfirm": "GitHub 連携を削除しますか? 同期済みのアクティビティデータは保持されます。",
-      "deletedToast": "GitHub 連携を削除しました。"
+      "deletedToast": "GitHub 連携を削除しました。",
+      "accessTitle": "アクセス権がありません",
+      "accessHint": "ワークスペース管理者に <code>github.manage</code> 権限を依頼してください。"
     }
   },
   "audit": {

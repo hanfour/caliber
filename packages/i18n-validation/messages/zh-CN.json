@@ -86,6 +86,11 @@
       "apiKeys": {
         "perUserProjectEvalLimitReached": "已达每人项目评分上限（{max}），请先关闭其他密钥。",
         "perOrgProjectEvalLimitReached": "已达组织项目评分上限（{max}），请先关闭其他密钥。"
+      },
+      "githubConnection": {
+        "ownerInvalid": "请输入有效的 GitHub 组织或用户账号",
+        "tokenTooShort": "Token 长度过短",
+        "tokenTooLong": "Token 长度过长"
       }
     }
   }

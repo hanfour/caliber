@@ -67,11 +67,11 @@ const OWNER_LOGIN_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const schema = z.object({
   ownerLogin: z
     .string()
-    .regex(OWNER_LOGIN_REGEX, "Enter a valid GitHub org or user login"),
+    .regex(OWNER_LOGIN_REGEX, "validation.custom.githubConnection.ownerInvalid"),
   token: z
     .string()
-    .min(20, "Token looks too short")
-    .max(255, "Token looks too long"),
+    .min(20, "validation.custom.githubConnection.tokenTooShort")
+    .max(255, "validation.custom.githubConnection.tokenTooLong"),
   repoAllowlist: z.string().optional(),
 });
 type FormValues = z.infer<typeof schema>;
@@ -323,9 +323,6 @@ export function GithubConnectionSettings({ orgId }: Props) {
             placeholder={"acme/web\nacme/api"}
             {...register("repoAllowlist")}
           />
-          {errors.repoAllowlist && (
-            <p className="text-xs text-destructive">{errors.repoAllowlist.message}</p>
-          )}
         </div>
 
         <div className="flex justify-end">

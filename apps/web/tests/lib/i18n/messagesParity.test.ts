@@ -121,6 +121,8 @@ const GITHUB_CONNECTION_KEYS = [
   "evaluator.githubConnection.deleteBtn",
   "evaluator.githubConnection.deleteConfirm",
   "evaluator.githubConnection.deletedToast",
+  "evaluator.githubConnection.accessTitle",
+  "evaluator.githubConnection.accessHint",
 ];
 
 function getByPath(obj: Record<string, unknown>, path: string): unknown {

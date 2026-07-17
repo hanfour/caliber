@@ -14,7 +14,6 @@ export default function EvaluatorGithubPage({
 }) {
   const { id: orgId } = use(params);
   const t = useTranslations("evaluator.githubConnection");
-  const tCommon = useTranslations("common");
 
   return (
     <RequirePerm
@@ -23,8 +22,13 @@ export default function EvaluatorGithubPage({
         <div className="container max-w-3xl py-8">
           <Card className="shadow-card flex flex-col items-center p-10 text-center">
             <ShieldAlert className="h-6 w-6 text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              {tCommon("insufficientPermission")}
+            <h3 className="mt-3 text-sm font-semibold">
+              {t("accessTitle")}
+            </h3>
+            <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+              {t.rich("accessHint", {
+                code: (chunks) => <code className="font-mono">{chunks}</code>,
+              })}
             </p>
           </Card>
         </div>

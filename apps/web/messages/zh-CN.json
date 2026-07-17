@@ -1198,7 +1198,9 @@
       "syncQueued": "已加入同步队列。",
       "deleteBtn": "移除连接",
       "deleteConfirm": "要移除 GitHub 连接吗？已同步的活动数据仍会保留。",
-      "deletedToast": "已移除 GitHub 连接。"
+      "deletedToast": "已移除 GitHub 连接。",
+      "accessTitle": "没有访问权限",
+      "accessHint": "请向工作区管理员申请 <code>github.manage</code> 权限。"
     }
   },
   "audit": {

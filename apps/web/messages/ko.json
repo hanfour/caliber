@@ -1198,7 +1198,9 @@
       "syncQueued": "동기화가 대기열에 추가되었습니다.",
       "deleteBtn": "연결 제거",
       "deleteConfirm": "GitHub 연결을 제거하시겠습니까? 동기화된 활동 데이터는 유지됩니다.",
-      "deletedToast": "GitHub 연결이 제거되었습니다."
+      "deletedToast": "GitHub 연결이 제거되었습니다.",
+      "accessTitle": "접근 권한이 없습니다",
+      "accessHint": "워크스페이스 관리자에게 <code>github.manage</code> 권한을 요청하세요."
     }
   },
   "audit": {

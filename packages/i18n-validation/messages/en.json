@@ -86,6 +86,11 @@
       "apiKeys": {
         "perUserProjectEvalLimitReached": "Per-user project-scoring limit reached ({max}). Disable another key first.",
         "perOrgProjectEvalLimitReached": "Per-org project-scoring limit reached ({max}). Disable another key first."
+      },
+      "githubConnection": {
+        "ownerInvalid": "Enter a valid GitHub org or user login",
+        "tokenTooShort": "Token looks too short",
+        "tokenTooLong": "Token looks too long"
       }
     }
   }

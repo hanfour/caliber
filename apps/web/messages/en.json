@@ -1198,7 +1198,9 @@
       "syncQueued": "Sync queued.",
       "deleteBtn": "Remove connection",
       "deleteConfirm": "Remove the GitHub connection? Synced activity data stays.",
-      "deletedToast": "GitHub connection removed."
+      "deletedToast": "GitHub connection removed.",
+      "accessTitle": "No access",
+      "accessHint": "Ask a workspace admin for the <code>github.manage</code> permission."
     }
   },
   "audit": {
