@@ -154,11 +154,14 @@ export async function runFacetExtraction(
 
   // Build deps stack
   const budgetDeps = createBudgetDeps(input.db);
+  // Wrap when EITHER metrics or onBudgetEvent is present: gating on metrics
+  // alone silently drops the alert webhook when only onBudgetEvent is supplied
+  // (same defect fixed in deepAnalysisBudgetGate — #270).
   const enforceBudgetFn: (orgId: string, est: number) => Promise<void> =
-    input.metrics
+    input.metrics || input.onBudgetEvent
       ? wrapEnforceBudget(
           budgetDeps,
-          {
+          input.metrics && {
             gwLlmBudgetWarnTotal: input.metrics.gwLlmBudgetWarnTotal,
             gwLlmBudgetExceededTotal: input.metrics.gwLlmBudgetExceededTotal,
           },
