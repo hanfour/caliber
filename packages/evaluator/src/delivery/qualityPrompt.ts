@@ -31,7 +31,17 @@ export interface DeliveryQualityPrompt {
   user: string;
 }
 
-const MAX_REVIEW_COMMENTS = 20;
+export const MAX_REVIEW_COMMENTS = 20;
+export const PR_BODY_MAX_CHARS = 4_000;
+export const REVIEW_COMMENT_MAX_CHARS = 1_000;
+export const PR_TITLE_MAX_CHARS = 300;
+
+const TRUNCATED_MARKER = "\n…[truncated]\n";
+
+/** Cap free-form GitHub/LLM-adjacent text. Never throws; marker is visible to the model. */
+function capText(text: string, maxChars: number): string {
+  return text.length <= maxChars ? text : text.slice(0, maxChars) + TRUNCATED_MARKER;
+}
 
 const SYSTEM_PROMPT = [
   "You are a senior engineer assessing the delivery quality of a teammate's recent merged pull requests, based on the real PR titles, descriptions, review comments, and diffs provided in the user message.",
@@ -74,13 +84,15 @@ export function buildDeliveryQualityPrompt(
 function formatPr(pr: QualityPromptPr): string {
   const comments = pr.reviewComments.slice(0, MAX_REVIEW_COMMENTS);
   return [
-    `## ${pr.repoFullName}#${pr.number} — ${pr.title}`,
+    `## ${pr.repoFullName}#${pr.number} — ${capText(pr.title, PR_TITLE_MAX_CHARS)}`,
     "",
     "### Description",
-    pr.body ?? "(no description)",
+    capText(pr.body ?? "(no description)", PR_BODY_MAX_CHARS),
     "",
     `### Review comments (${comments.length})`,
-    ...(comments.length > 0 ? comments.map((c) => `- ${c}`) : ["(none)"]),
+    ...(comments.length > 0
+      ? comments.map((c) => `- ${capText(c, REVIEW_COMMENT_MAX_CHARS)}`)
+      : ["(none)"]),
     "",
     "### Diff",
     "```diff",

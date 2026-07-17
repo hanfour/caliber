@@ -38,6 +38,7 @@ import {
   buildDeliveryQualityPrompt,
   enforceBudget,
   isBudgetError,
+  MAX_REVIEW_COMMENTS,
   parseDeliveryQualityResponse,
   QUALITY_RETRY_SUFFIX,
   samplePullsForQuality,
@@ -207,7 +208,7 @@ export async function runDeliveryQuality(
         title: pr.title,
         body: detail.body ?? null,
         diff: truncateDiff(diff),
-        reviewComments: reviewComments.slice(0, 20).map((c) => c.body),
+        reviewComments: reviewComments.slice(0, MAX_REVIEW_COMMENTS).map((c) => c.body),
       });
     } catch (err) {
       input.logger?.warn(
