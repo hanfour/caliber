@@ -1148,7 +1148,7 @@
       "section": {
         "throughput": "產出量",
         "collaboration": "協作",
-        "timeliness": "即時性"
+        "timeliness": "時效性"
       },
       "metric": {
         "merged_pr_count": "已合併 PR 數",

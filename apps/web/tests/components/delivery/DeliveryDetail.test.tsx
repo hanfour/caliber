@@ -232,6 +232,28 @@ describe("DeliveryDetail", () => {
     expect(screen.getByText("Timeliness")).toBeInTheDocument();
     expect(screen.getByText("Merged PRs")).toBeInTheDocument();
     expect(screen.queryByText(/NaN/)).toBeNull();
+
+    // PERCENT-LOCK: section scores render as Math.round(score * 100)%, never
+    // score*120 (the 0-120 total-score scale) or score*weight. Each section
+    // pill is its own text node, so an exact match pins it precisely.
+    expect(screen.getByText("75%")).toBeInTheDocument(); // throughput.score = 0.75
+    expect(screen.getByText("50%")).toBeInTheDocument(); // collaboration.score = 0.5
+    expect(screen.getByText("60%")).toBeInTheDocument(); // timeliness.score = 0.6
+
+    // PERCENT-LOCK: metric subscores render inline as "{value} · {pct}" —
+    // assert the full combined text so a regression to score*120/score*weight
+    // at the metric level fails loudly too. Some subscores collide in value
+    // with their section (e.g. collaboration's two subscores are both 0.5,
+    // same as the section score); getAllByText + a length check pins the
+    // count instead of assuming a single match.
+    expect(screen.getByText("6 · 75%")).toBeInTheDocument(); // merged_pr_count
+    expect(screen.getByText("4 · 40%")).toBeInTheDocument(); // issues_closed_count
+    expect(screen.getByText("5 · 50%")).toBeInTheDocument(); // reviews_submitted
+    expect(screen.getByText("3 · 50%")).toBeInTheDocument(); // distinct_prs_reviewed
+    expect(screen.getByText("36.2 · 60%")).toBeInTheDocument(); // pr_lead_time_hours_median
+    expect(screen.getByText("3.4 · 60%")).toBeInTheDocument(); // issue_resolution_days_median
+    expect(screen.getAllByText(/50%/)).toHaveLength(3); // collaboration section + its 2 subscores
+    expect(screen.getAllByText(/60%/)).toHaveLength(3); // timeliness section + its 2 subscores
   });
 
   it("shows the LLM-skipped note instead of the adjustment badge on parse_error", () => {
@@ -244,9 +266,26 @@ describe("DeliveryDetail", () => {
     expect(screen.getByText("Quality review unavailable (parse_error)")).toBeInTheDocument();
   });
 
+  it("shows the LLM-skipped note instead of the adjustment badge on budget_denied", () => {
+    getReportQuery.mockReturnValue({
+      data: { ...fullReport, llmStatus: "budget_denied", llmQualityAdjustment: null },
+      isLoading: false,
+      error: null,
+    });
+    render(<DeliveryDetail orgId="org-1" userId="u-1" />);
+    expect(screen.getByText("Quality review unavailable (budget_denied)")).toBeInTheDocument();
+    expect(screen.queryByText(/\+8\.0/)).toBeNull();
+  });
+
   it("calls generate.mutate with the memoized range and shows the queued toast on success", () => {
     getReportQuery.mockReturnValue({ data: fullReport, isLoading: false, error: null });
     render(<DeliveryDetail orgId="org-1" userId="u-1" />);
+
+    // Capture the exact from/to the shared memoized range produced for the
+    // query, so the mutation-payload assertion below proves real equality
+    // with it — not just "some string" (expect.any(String) would pass even
+    // if the mutate call used a differently-computed, un-memoized range).
+    const queryArgs = getReportQuery.mock.calls[0][0] as { from: string; to: string };
 
     fireEvent.click(screen.getByRole("button", { name: "Generate delivery report" }));
 
@@ -254,8 +293,8 @@ describe("DeliveryDetail", () => {
       expect.objectContaining({
         orgId: "org-1",
         userId: "u-1",
-        from: expect.any(String),
-        to: expect.any(String),
+        from: queryArgs.from,
+        to: queryArgs.to,
       }),
     );
 
