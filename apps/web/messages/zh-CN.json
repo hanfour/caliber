@@ -1110,6 +1110,7 @@
       "rank": "#",
       "member": "成员",
       "score": "分数",
+      "deliveryScore": "交付分",
       "trend": "趋势",
       "trendUp": "上升",
       "trendDown": "下降",

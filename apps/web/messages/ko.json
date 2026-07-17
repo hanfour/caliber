@@ -1110,6 +1110,7 @@
       "rank": "#",
       "member": "멤버",
       "score": "점수",
+      "deliveryScore": "딜리버리",
       "trend": "추세",
       "trendUp": "상승",
       "trendDown": "하락",

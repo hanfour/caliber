@@ -1070,6 +1070,7 @@
       "rank": "#",
       "member": "メンバー",
       "score": "スコア",
+      "deliveryScore": "デリバリー",
       "trend": "トレンド",
       "trendUp": "上昇",
       "trendDown": "下降",

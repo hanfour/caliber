@@ -1110,6 +1110,7 @@
       "rank": "#",
       "member": "Member",
       "score": "Score",
+      "deliveryScore": "Delivery",
       "trend": "Trend",
       "trendUp": "up",
       "trendDown": "down",
