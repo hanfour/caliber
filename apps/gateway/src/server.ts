@@ -764,6 +764,7 @@ async function wireGithubSyncPipeline(
     connection: githubRedis,
     db: app.db,
     masterKeyHex,
+    logger: app.log,
   });
   const cronHandle = startGithubSyncInterval({
     db: app.db,

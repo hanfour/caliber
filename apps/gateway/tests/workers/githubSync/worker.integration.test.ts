@@ -102,10 +102,11 @@ async function insertConnection(
   db: Database,
   orgId: string,
   overrides: Partial<typeof githubConnections.$inferInsert> = {},
+  sealKeyHex: string = MASTER_KEY,
 ) {
   const id = crypto.randomUUID();
   const sealed = encryptCredential({
-    masterKeyHex: MASTER_KEY,
+    masterKeyHex: sealKeyHex,
     accountId: id,
     plaintext: TOKEN,
   });
@@ -370,4 +371,56 @@ describe("createGithubSyncWorker", () => {
       await queue.close();
     }
   }, 120_000);
+
+  // Regression (I2, final whole-branch review): the periodic 6h interval
+  // worker is the path that matters post-flip, not just the inline
+  // staleness-gated sync — so syncOrg's warnings (task 1's decrypt-failure
+  // warn, task 2's Projects page-cap/scope warnings) must actually reach a
+  // real logger through THIS entry point. Asserting the wiring shape
+  // (`logger` accepted on `CreateGithubSyncWorkerOptions`) would pass even
+  // if the option were declared but never threaded to `syncOrg` — this
+  // proves forwarding at runtime by capturing syncOrg's actual `warn` call
+  // through the logger injected into the worker.
+  it("threads its logger into syncOrg so a decrypt failure is observable through the worker's own logger", async () => {
+    const org = await insertOrg(db);
+    // Seal with a DIFFERENT master key than the one the worker is given, so
+    // syncOrg's decrypt step fails and calls `logger.warn` internally.
+    await insertConnection(db, org.id, {}, "cd".repeat(32));
+
+    const warnCalls: Array<{ obj: Record<string, unknown>; msg?: string }> = [];
+    const logger = {
+      info: () => {},
+      warn: (obj: Record<string, unknown>, msg?: string) => void warnCalls.push({ obj, msg }),
+      error: () => {},
+    };
+
+    const queue = createGithubSyncQueue({ connection: redisConnection });
+    const worker = createGithubSyncWorker({
+      connection: redisConnection,
+      db,
+      masterKeyHex: MASTER_KEY,
+      logger,
+    });
+    try {
+      await enqueueGithubSync(queue, { orgId: org.id, triggeredBy: "manual" });
+
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline && warnCalls.length === 0) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(warnCalls).toHaveLength(1);
+      expect(warnCalls[0]!.msg).toContain("credential");
+
+      const conn = (
+        await db
+          .select()
+          .from(githubConnections)
+          .where(eq(githubConnections.orgId, org.id))
+      )[0]!;
+      expect(conn.status).toBe("sync_error");
+    } finally {
+      await worker.close();
+      await queue.close();
+    }
+  }, 60_000);
 });
