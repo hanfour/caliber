@@ -1,5 +1,5 @@
 /**
- * Integration tests for PR2 Task 8: `createGithubDeliveryWorker`.
+ * Integration tests for PR2 Task 8 / PR3 Task 6: `createGithubDeliveryWorker`.
  *
  * Real BullMQ round-trip over Postgres + Redis testcontainers (modeled on
  * apps/gateway/tests/workers/githubSync/worker.integration.test.ts — real
@@ -7,7 +7,11 @@
  *
  * enqueueGithubDelivery → createGithubDeliveryWorker processes it →
  * runDeliveryEval runs for real (fresh `lastSyncAt` → sync skipped, scores
- * existing activity rows) → a row lands in github_delivery_reports.
+ * existing activity rows) → a row lands in github_delivery_reports. The org
+ * seeded here is llm_eval_enabled=false (default), so PR3's quality layer
+ * fast-skips ("disabled") — this test proves dark-path parity: threading
+ * the new required `redis`/`gatewayBaseUrl` options through the worker
+ * doesn't change the e2e result for orgs that haven't opted into LLM eval.
  *
  * Container + `insertOrg`/`insertConnection` helpers copied from
  * apps/gateway/tests/workers/githubSync/syncOrg.integration.test.ts;
@@ -33,6 +37,7 @@ import pg from "pg";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { Redis } from "ioredis";
+import RedisMock from "ioredis-mock";
 import { encryptCredential } from "@caliber/gateway-core";
 import {
   organizations,
@@ -234,7 +239,17 @@ describe("createGithubDeliveryWorker", () => {
     ]);
 
     const queue = createGithubDeliveryQueue({ connection: redisConnection });
-    const worker = createGithubDeliveryWorker({ connection: redisConnection, db, masterKeyHex: MASTER_KEY });
+    // `redis`/`gatewayBaseUrl` are REQUIRED as of PR3 Task 6 (threaded to
+    // runDeliveryEval's LLM quality layer). ioredis-mock + a dummy base URL
+    // are enough here — the seeded org is llm_eval_enabled=false (default),
+    // so the quality layer never reaches redis/fetch (see file header).
+    const worker = createGithubDeliveryWorker({
+      connection: redisConnection,
+      db,
+      masterKeyHex: MASTER_KEY,
+      redis: new RedisMock() as unknown as Redis,
+      gatewayBaseUrl: "http://localhost:3002",
+    });
     try {
       await enqueueGithubDelivery(queue, {
         orgId: org.id,

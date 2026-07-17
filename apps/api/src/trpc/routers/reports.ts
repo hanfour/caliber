@@ -15,45 +15,20 @@ import {
 import type { Database } from "@caliber/db";
 import { can } from "@caliber/auth";
 import { buildEvaluatorJobId } from "@caliber/evaluator";
+import {
+  EVALUATOR_QUEUE_NAME,
+  EVALUATOR_QUEUE_PREFIX,
+  type EvaluatorJobPayload,
+  type QueueLike as EvaluatorQueue,
+} from "@caliber/queue";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 import { notifyGdprRequested } from "../../services/gdprNotifications.js";
 import { getFacetSummary } from "../../services/facetSummary.js";
 
-// ─── Evaluator queue constants (duplicated from apps/gateway to avoid cross-package import) ──
-// TODO: extract to a shared @caliber/queue package to eliminate this duplication.
-// jobId derivation uses `buildEvaluatorJobId` (from @caliber/evaluator) — shared with
-// apps/gateway enqueueEvaluator — so cron and admin-rerun always dedup correctly.
-const EVALUATOR_QUEUE_NAME = "evaluator";
-const EVALUATOR_QUEUE_PREFIX = "caliber:gw";
-
-// Minimal Queue interface — matches the BullMQ Queue surface we need.
-// When ctx.evaluatorQueue is undefined (test mode / queue not wired), rerun
-// returns { enqueued: 0, targets: N, testMode: true } instead of calling add().
-interface EvaluatorQueue {
-  add(
-    name: string,
-    data: EvaluatorJobPayload,
-    opts?: { jobId?: string },
-  ): Promise<unknown>;
-}
-
-interface EvaluatorJobPayload {
-  orgId: string;
-  userId: string;
-  periodStart: string;
-  periodEnd: string;
-  periodType: string;
-  triggeredBy: string;
-  triggeredByUser: string;
-  // Per-key grain (PR5). MUST stay in lockstep with apps/gateway's
-  // EvaluatorJobPayload (queue.ts): when `apiKeyId` is set the enqueue jobId
-  // becomes the 4-part `${userId}:${apiKeyId}:${periodStart}:${periodType}`
-  // and `keyNameSnapshot` is required/non-empty — see `rerun` below.
-  apiKeyId?: string;
-  keyNameSnapshot?: string;
-}
-
+// Re-exported for downstream importers (trpc/procedures.ts, trpc/context.ts,
+// apps/api/src/server.ts) — this router used to declare these itself;
+// now they live in @caliber/queue (see packages/queue/src/evaluator.ts).
 export { EVALUATOR_QUEUE_NAME, EVALUATOR_QUEUE_PREFIX };
 export type { EvaluatorQueue };
 

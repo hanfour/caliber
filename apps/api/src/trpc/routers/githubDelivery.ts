@@ -5,9 +5,12 @@
  * github.manage (org_admin only). `getReport`/`listActivity` are gated via
  * delivery.read_user (self or org_admin). The PAT is write-only: sealed with
  * encryptCredential (salt = row id) and never returned or logged. Report
- * reads use explicit safe-field selects — llm columns beyond llmStatus are
- * never selected. Queue constants are duplicated from the gateway module
- * (same precedent as reports.ts:27-28 — TODO @caliber/queue).
+ * reads use explicit safe-field selects — getReport exposes llmStatus plus
+ * narrative/adjustment/evidence/model/calledAt; llmCostUsd stays
+ * admin-internal (deliberately not selected there); PAT/sealed columns are
+ * never selected anywhere. Queue constants come from @caliber/queue (formerly
+ * duplicated from the gateway module — see packages/queue/src/githubSync.ts
+ * / githubDelivery.ts).
  */
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -24,6 +27,14 @@ import {
   organizationMembers,
 } from "@caliber/db";
 import { encryptCredential } from "@caliber/gateway-core";
+import {
+  GITHUB_SYNC_JOB_NAME,
+  buildGithubSyncJobId,
+  GITHUB_DELIVERY_JOB_NAME,
+  buildGithubDeliveryJobId,
+  type QueueLike as GithubSyncQueue,
+  type QueueLike as GithubDeliveryQueue,
+} from "@caliber/queue";
 import { router } from "../procedures.js";
 import { githubProcedure } from "./_githubGate.js";
 import { requireMasterKeyHex } from "./_credentials.js";
@@ -32,59 +43,12 @@ import {
   GithubProbeError,
 } from "../../services/githubProbe.js";
 
-// ─── GitHub sync queue constants (duplicated from apps/gateway's
-// workers/githubSync/queue.ts to avoid cross-app import) ──────────────────
-// TODO: extract to a shared @caliber/queue package to eliminate this duplication.
-const GITHUB_SYNC_JOB_NAME = "github-sync";
-/** Keep in lockstep with apps/gateway/src/workers/githubSync/queue.ts. */
-function buildGithubSyncJobId(input: { orgId: string }): string {
-  return ["ghsync", "v1", input.orgId].join("_").replaceAll(":", "-");
-}
+// Re-exported for downstream importers (trpc/procedures.ts, trpc/context.ts) —
+// this router used to declare these itself; now they live in @caliber/queue.
+export type { GithubSyncQueue, GithubDeliveryQueue };
 
-export interface GithubSyncQueue {
-  add(
-    name: string,
-    data: unknown,
-    opts?: { jobId?: string },
-  ): Promise<unknown>;
-  /**
-   * Optional: BullMQ's real `Queue#remove` (see syncNow below). Optional so
-   * fakes/test doubles that don't implement it still typecheck.
-   */
-  remove?(jobId: string): Promise<unknown>;
-}
-
-// ─── GitHub delivery queue constants (duplicated from apps/gateway's
-// workers/githubDelivery/queue.ts to avoid cross-app import) ──────────────
-// TODO: extract to a shared @caliber/queue package to eliminate this duplication.
-const GITHUB_DELIVERY_JOB_NAME = "github-delivery";
+// API-domain constant (not queue-domain) — stays here.
 const MAX_GENERATE_WINDOW_DAYS = 92;
-/** Keep in lockstep with apps/gateway/src/workers/githubDelivery/queue.ts. */
-// jobId deliberately omits periodType: the payload pins it to the literal
-// "daily", so it can't vary. If the enum ever widens, periodType MUST be
-// added to the jobId in the same commit — the DB unique key includes it.
-function buildGithubDeliveryJobId(input: {
-  orgId: string;
-  userId: string;
-  periodStart: string;
-}): string {
-  return ["ghdel", "v1", input.orgId, input.userId, input.periodStart]
-    .join("_")
-    .replaceAll(":", "-");
-}
-
-export interface GithubDeliveryQueue {
-  add(
-    name: string,
-    data: unknown,
-    opts?: { jobId?: string },
-  ): Promise<unknown>;
-  /**
-   * Optional: BullMQ's real `Queue#remove` (see generate below). Optional so
-   * fakes/test doubles that don't implement it still typecheck.
-   */
-  remove?(jobId: string): Promise<unknown>;
-}
 
 const orgIdInput = z.object({ orgId: z.string().uuid() });
 const OWNER_LOGIN_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -402,6 +366,12 @@ export const githubDeliveryRouter = router({
             sectionScores: githubDeliveryReports.sectionScores,
             metrics: githubDeliveryReports.metrics,
             llmStatus: githubDeliveryReports.llmStatus,
+            llmQualityAdjustment: githubDeliveryReports.llmQualityAdjustment,
+            llmNarrative: githubDeliveryReports.llmNarrative,
+            llmEvidence: githubDeliveryReports.llmEvidence,
+            llmModel: githubDeliveryReports.llmModel,
+            llmCalledAt: githubDeliveryReports.llmCalledAt,
+            // llmCostUsd deliberately not selected — cost is admin-internal
             triggeredBy: githubDeliveryReports.triggeredBy,
             updatedAt: githubDeliveryReports.updatedAt,
           })

@@ -5,7 +5,7 @@ import {
   buildGithubSyncJobId,
   enqueueGithubSync,
   type QueueLike,
-} from "../../src/workers/githubSync/queue.js";
+} from "../src/index.js";
 
 const ORG = "0b7e7d1e-0000-4000-8000-000000000001";
 

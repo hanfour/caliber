@@ -9,8 +9,9 @@
  * throws and returns a colon-free jobId for BOTH the per-person and per-key
  * payloads.
  *
- * The existing unit tests in evaluatorQueue.test.ts use a mock queue and
- * never exercise BullMQ's id validation — this integration test closes that gap.
+ * The existing unit tests in packages/queue/tests/evaluator.test.ts use a
+ * mock queue and never exercise BullMQ's id validation — this integration
+ * test closes that gap.
  *
  * Also verifies the lockstep property: the jobId returned by `enqueueEvaluator`
  * equals `buildEvaluatorJobId` called directly with the same inputs (ensuring

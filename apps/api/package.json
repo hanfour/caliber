@@ -31,6 +31,7 @@
     "@caliber/evaluator": "workspace:*",
     "@caliber/gateway-core": "workspace:*",
     "@caliber/i18n-validation": "workspace:*",
+    "@caliber/queue": "workspace:*",
     "@fastify/cookie": "^11.0.0",
     "@fastify/rate-limit": "^10.3.0",
     "@trpc/server": "^11.0.0",

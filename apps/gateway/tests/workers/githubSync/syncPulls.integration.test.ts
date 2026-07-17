@@ -127,6 +127,9 @@ function stubClient(
         }));
     },
     getPull: async (_repo, n) => details.find((d) => d.number === n)!,
+    getPullDiff: async () => {
+      throw new Error("unused");
+    },
     listReviews: async (_repo, n) =>
       n === 1
         ? [
@@ -138,6 +141,9 @@ function stubClient(
             },
           ]
         : [],
+    listReviewComments: async () => {
+      throw new Error("unused");
+    },
     listIssuesSince: async () => [],
     getIssue: async () => {
       throw new Error("unused");
