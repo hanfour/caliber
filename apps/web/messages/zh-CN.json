@@ -1132,6 +1132,33 @@
       "viewScore": "查看项目分数",
       "noReport": "尚无报告。分数由每晚计划任务生成。",
       "keyLabel": "项目：{name}"
+    },
+    "delivery": {
+      "title": "交付产出",
+      "loading": "正在加载交付报告…",
+      "notEnabled": "此工作区尚未启用 GitHub 交付评分功能。",
+      "noReport": "此区间尚无交付报告。",
+      "noIdentity": "此成员尚未关联 GitHub 账号，因此无法归属交付活动。",
+      "scoreLabel": "交付分数",
+      "adjustmentLabel": "LLM 质量调整",
+      "llmSkipped": "质量审查不可用（{reason}）",
+      "generateBtn": "生成交付报告",
+      "generateQueued": "交付报告已排队，请稍后刷新。",
+      "windowMeta": "{days} 天区间 · {events} 个交付事件",
+      "section": {
+        "throughput": "产出量",
+        "collaboration": "协作",
+        "timeliness": "及时性"
+      },
+      "metric": {
+        "merged_pr_count": "已合并 PR 数",
+        "issues_closed_count": "已关闭问题数",
+        "project_items_completed": "已完成项目条目数",
+        "reviews_submitted": "已提交审查数",
+        "distinct_prs_reviewed": "已审查的不同 PR 数",
+        "pr_lead_time_hours_median": "PR 前置时间中位数（小时）",
+        "issue_resolution_days_median": "问题解决天数中位数"
+      }
     }
   },
   "audit": {

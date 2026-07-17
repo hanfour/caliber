@@ -1092,6 +1092,33 @@
       "viewScore": "プロジェクトスコアを表示",
       "noReport": "まだレポートがありません。スコアは毎晩生成されます。",
       "keyLabel": "プロジェクト: {name}"
+    },
+    "delivery": {
+      "title": "デリバリー",
+      "loading": "デリバリーレポートを読み込み中…",
+      "notEnabled": "このワークスペースでは GitHub デリバリー評価が有効になっていません。",
+      "noReport": "この期間のデリバリーレポートはまだありません。",
+      "noIdentity": "このメンバーは GitHub アカウントが連携されていないため、デリバリー活動を紐付けできません。",
+      "scoreLabel": "デリバリースコア",
+      "adjustmentLabel": "LLM 品質調整",
+      "llmSkipped": "品質レビューを利用できません（{reason}）",
+      "generateBtn": "デリバリーレポートを生成",
+      "generateQueued": "デリバリーレポートをキューに追加しました。しばらくして更新してください。",
+      "windowMeta": "{days} 日間・{events} 件のデリバリーイベント",
+      "section": {
+        "throughput": "スループット",
+        "collaboration": "コラボレーション",
+        "timeliness": "タイムリネス"
+      },
+      "metric": {
+        "merged_pr_count": "マージ済み PR 数",
+        "issues_closed_count": "クローズ済みイシュー数",
+        "project_items_completed": "完了したプロジェクト項目数",
+        "reviews_submitted": "提出したレビュー数",
+        "distinct_prs_reviewed": "レビューした PR 数（重複なし）",
+        "pr_lead_time_hours_median": "PR リードタイム中央値（時間）",
+        "issue_resolution_days_median": "イシュー解決日数中央値"
+      }
     }
   },
   "audit": {

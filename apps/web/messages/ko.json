@@ -1132,6 +1132,33 @@
       "viewScore": "프로젝트 점수 보기",
       "noReport": "아직 보고서가 없습니다. 점수는 매일 밤 생성됩니다.",
       "keyLabel": "프로젝트: {name}"
+    },
+    "delivery": {
+      "title": "딜리버리",
+      "loading": "딜리버리 리포트를 불러오는 중…",
+      "notEnabled": "이 워크스페이스에서는 GitHub 딜리버리 평가가 활성화되어 있지 않습니다.",
+      "noReport": "이 기간에 대한 딜리버리 리포트가 아직 없습니다.",
+      "noIdentity": "이 멤버는 연결된 GitHub 계정이 없어 딜리버리 활동을 귀속시킬 수 없습니다.",
+      "scoreLabel": "딜리버리 점수",
+      "adjustmentLabel": "LLM 품질 조정",
+      "llmSkipped": "품질 검토를 사용할 수 없습니다 ({reason})",
+      "generateBtn": "딜리버리 리포트 생성",
+      "generateQueued": "딜리버리 리포트가 대기열에 추가되었습니다. 잠시 후 새로고침하세요.",
+      "windowMeta": "{days}일 기간 · {events}건의 딜리버리 이벤트",
+      "section": {
+        "throughput": "처리량",
+        "collaboration": "협업",
+        "timeliness": "적시성"
+      },
+      "metric": {
+        "merged_pr_count": "병합된 PR 수",
+        "issues_closed_count": "종료된 이슈 수",
+        "project_items_completed": "완료된 프로젝트 항목 수",
+        "reviews_submitted": "제출한 리뷰 수",
+        "distinct_prs_reviewed": "리뷰한 고유 PR 수",
+        "pr_lead_time_hours_median": "PR 리드타임 중앙값(시간)",
+        "issue_resolution_days_median": "이슈 해결 일수 중앙값"
+      }
     }
   },
   "audit": {
