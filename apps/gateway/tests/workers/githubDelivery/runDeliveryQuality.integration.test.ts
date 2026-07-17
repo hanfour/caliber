@@ -549,6 +549,106 @@ describe("runDeliveryQuality", () => {
     expect(result).toEqual({ status: "parse_error", model: STUB_MODEL });
   });
 
+  // Regression (I4, final whole-branch review): before this fix,
+  // `requestId = retry.requestId` overwrote the first call's requestId, so
+  // only ONE ledger write ever happened even when two real upstream calls
+  // were made. Two distinct requestIds (each with its own seeded
+  // usage_logs cost) prove BOTH calls ledger, and that the report's
+  // costUsd is their sum — the I4 design decision.
+  it("retry succeeds → ledgers BOTH calls' spend, report costUsd is their sum", async () => {
+    const org = await insertOrg(db);
+    await insertConnection(db, org.id);
+    await insertMergedPr(db, {
+      orgId: org.id,
+      ghUserId: GH_USER_ID,
+      repoFullName: "acme/web",
+      number: 1,
+      mergedAt: MERGED_AT,
+    });
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${org.id}`, STUB_RAW_KEY);
+
+    const firstReqId = `req-i4-first-${org.id}`;
+    const retryReqId = `req-i4-retry-${org.id}`;
+    await seedUsageLog(db, org.id, firstReqId, { totalCost: "0.0300000000" });
+    await seedUsageLog(db, org.id, retryReqId, { totalCost: "0.0700000000" });
+
+    let messageCalls = 0;
+    const fetchImpl = routeFetch({
+      "/repos/acme/web/pulls/1/comments": () => json([]),
+      "/repos/acme/web/pulls/1": (_url, init) => pullDetailOrDiff(init, "PR body"),
+      "/v1/messages": () => {
+        messageCalls++;
+        return messageCalls === 1 ? llmInvalid(firstReqId) : llmOk(retryReqId);
+      },
+    });
+
+    const reportId = crypto.randomUUID();
+    const result = await runDeliveryQuality(
+      baseInput({ orgId: org.id, reportId, fetchImpl }),
+    );
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.costUsd).toBeCloseTo(0.03 + 0.07, 6);
+
+    const ledgerRows = await db
+      .select()
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.refId, reportId));
+    expect(ledgerRows).toHaveLength(2);
+    expect(ledgerRows.map((r) => r.usageLogRequestId).sort()).toEqual(
+      [firstReqId, retryReqId].sort(),
+    );
+  });
+
+  // Regression (I4): before this fix, a terminal parse_error returned at
+  // the `!parsed.ok` check BEFORE any ledger write — zero calls ledgered
+  // even when one or two real upstream calls (with real spend) happened.
+  // Production facet data showed ~45% parse_error on haiku, so this was
+  // systematically invisible spend against budget enforcement.
+  it("both attempts invalid JSON → parse_error, but BOTH calls still ledger their real spend", async () => {
+    const org = await insertOrg(db);
+    await insertConnection(db, org.id);
+    await insertMergedPr(db, {
+      orgId: org.id,
+      ghUserId: GH_USER_ID,
+      repoFullName: "acme/web",
+      number: 1,
+      mergedAt: MERGED_AT,
+    });
+    await redis.set(`${LLM_KEY_REDIS_PREFIX}${org.id}`, STUB_RAW_KEY);
+
+    const firstReqId = `req-i4-pe-first-${org.id}`;
+    const retryReqId = `req-i4-pe-retry-${org.id}`;
+    await seedUsageLog(db, org.id, firstReqId, { totalCost: "0.0100000000" });
+    await seedUsageLog(db, org.id, retryReqId, { totalCost: "0.0200000000" });
+
+    let messageCalls = 0;
+    const fetchImpl = routeFetch({
+      "/repos/acme/web/pulls/1/comments": () => json([]),
+      "/repos/acme/web/pulls/1": (_url, init) => pullDetailOrDiff(init, "PR body"),
+      "/v1/messages": () => {
+        messageCalls++;
+        return llmInvalid(messageCalls === 1 ? firstReqId : retryReqId);
+      },
+    });
+
+    const reportId = crypto.randomUUID();
+    const result = await runDeliveryQuality(
+      baseInput({ orgId: org.id, reportId, fetchImpl }),
+    );
+    expect(result).toEqual({ status: "parse_error", model: STUB_MODEL });
+
+    const ledgerRows = await db
+      .select()
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.refId, reportId));
+    expect(ledgerRows).toHaveLength(2);
+    expect(ledgerRows.map((r) => r.usageLogRequestId).sort()).toEqual(
+      [firstReqId, retryReqId].sort(),
+    );
+  });
+
   it("a per-PR GitHub fetch failure drops that PR but the report still completes with the survivor", async () => {
     const org = await insertOrg(db);
     await insertConnection(db, org.id);
