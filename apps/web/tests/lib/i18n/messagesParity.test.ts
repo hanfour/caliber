@@ -47,6 +47,84 @@ const CONTINUOUS_SCORING_KEYS = [
   "evaluator.trendChart.passLine",
 ];
 
+// All new keys required by the DeliveryDetail core component (PR4 Task 1)
+const DELIVERY_KEYS = [
+  "evaluator.delivery.title",
+  "evaluator.delivery.loading",
+  "evaluator.delivery.notEnabled",
+  "evaluator.delivery.noReport",
+  "evaluator.delivery.noIdentity",
+  "evaluator.delivery.scoreLabel",
+  "evaluator.delivery.adjustmentLabel",
+  "evaluator.delivery.llmSkipped",
+  "evaluator.delivery.generateBtn",
+  "evaluator.delivery.generateQueued",
+  "evaluator.delivery.windowMeta",
+  "evaluator.delivery.section.throughput",
+  "evaluator.delivery.section.collaboration",
+  "evaluator.delivery.section.timeliness",
+  "evaluator.delivery.metric.merged_pr_count",
+  "evaluator.delivery.metric.issues_closed_count",
+  "evaluator.delivery.metric.project_items_completed",
+  "evaluator.delivery.metric.reviews_submitted",
+  "evaluator.delivery.metric.distinct_prs_reviewed",
+  "evaluator.delivery.metric.pr_lead_time_hours_median",
+  "evaluator.delivery.metric.issue_resolution_days_median",
+];
+
+// All new keys required by DeliveryActivityList + DeliveryNarrative
+// (PR4 Task 2)
+const DELIVERY_ACTIVITY_NARRATIVE_KEYS = [
+  "evaluator.delivery.narrativeTitle",
+  "evaluator.delivery.evidenceTitle",
+  "evaluator.delivery.activityTitle",
+  "evaluator.delivery.pulls",
+  "evaluator.delivery.issues",
+  "evaluator.delivery.reviews",
+  "evaluator.delivery.noActivity",
+  "evaluator.delivery.noLinkedAccount",
+];
+
+// All new keys required by the member-detail tab strip (PR4 Task 3).
+// `evaluator.delivery.title` is reused as the delivery tab label — only the
+// new evaluation-tab label needs a key.
+const DELIVERY_TAB_KEYS = ["evaluator.delivery.tabEvaluation"];
+
+// All new keys required by the leaderboard delivery-score column (PR4 Task 4)
+const DELIVERY_LEADERBOARD_KEYS = ["evaluator.leaderboard.deliveryScore"];
+
+// All new keys required by the GitHub connection settings page (PR4 Task 5)
+const GITHUB_CONNECTION_KEYS = [
+  "evaluator.githubConnection.title",
+  "evaluator.githubConnection.tabLabel",
+  "evaluator.githubConnection.loading",
+  "evaluator.githubConnection.notEnabled",
+  "evaluator.githubConnection.noConnection",
+  "evaluator.githubConnection.owner",
+  "evaluator.githubConnection.tokenLabel",
+  "evaluator.githubConnection.tokenHint",
+  "evaluator.githubConnection.allowlistLabel",
+  "evaluator.githubConnection.allRepos",
+  "evaluator.githubConnection.statusLabel",
+  "evaluator.githubConnection.status.ok",
+  "evaluator.githubConnection.status.auth_error",
+  "evaluator.githubConnection.status.rate_limited",
+  "evaluator.githubConnection.status.sync_error",
+  "evaluator.githubConnection.lastSync",
+  "evaluator.githubConnection.neverSynced",
+  "evaluator.githubConnection.lastError",
+  "evaluator.githubConnection.connectBtn",
+  "evaluator.githubConnection.connectedToast",
+  "evaluator.githubConnection.probeFailed",
+  "evaluator.githubConnection.syncNowBtn",
+  "evaluator.githubConnection.syncQueued",
+  "evaluator.githubConnection.deleteBtn",
+  "evaluator.githubConnection.deleteConfirm",
+  "evaluator.githubConnection.deletedToast",
+  "evaluator.githubConnection.accessTitle",
+  "evaluator.githubConnection.accessHint",
+];
+
 function getByPath(obj: Record<string, unknown>, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc != null && typeof acc === "object" && key in acc) {
@@ -163,6 +241,106 @@ describe("i18n catalog parity — continuous scoring keys (Task 12)", () => {
   };
 
   for (const key of CONTINUOUS_SCORING_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — DeliveryDetail keys (PR4 Task 1)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of DELIVERY_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — DeliveryActivityList + DeliveryNarrative keys (PR4 Task 2)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of DELIVERY_ACTIVITY_NARRATIVE_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — member detail tab strip keys (PR4 Task 3)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of DELIVERY_TAB_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — leaderboard delivery-score column keys (PR4 Task 4)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of DELIVERY_LEADERBOARD_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — GitHub connection settings keys (PR4 Task 5)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of GITHUB_CONNECTION_KEYS) {
     it(`"${key}" exists in all 5 catalogs`, () => {
       for (const [locale, catalog] of Object.entries(catalogs)) {
         const value = getByPath(catalog, key);

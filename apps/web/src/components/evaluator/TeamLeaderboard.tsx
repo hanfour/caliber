@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DeliveryScoreCell } from "@/components/delivery/DeliveryScoreCell";
 
 // ─── Score colour helpers ─────────────────────────────────────────────────────
 
@@ -213,6 +214,7 @@ export function TeamLeaderboard({ orgId, teamId, members }: Props) {
               )}
               <th className="px-4 py-2 text-left font-medium">{t("member")}</th>
               <th className="px-4 py-2 text-center font-medium">{t("score")}</th>
+              <th className="px-4 py-2 text-center font-medium">{t("deliveryScore")}</th>
               <th className="px-4 py-2 text-center font-medium">{t("trend")}</th>
             </tr>
           </thead>
@@ -258,6 +260,9 @@ export function TeamLeaderboard({ orgId, teamId, members }: Props) {
                         {row.latestScore.toFixed(1)}
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    <DeliveryScoreCell orgId={orgId} userId={row.userId} />
                   </td>
                   <td className="px-4 py-2.5 text-center">
                     <div className="flex items-center justify-center">

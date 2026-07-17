@@ -61,8 +61,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core, @caliber/i18n-validation/server)
-        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator --filter=@caliber/i18n-validation
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core, @caliber/queue, @caliber/i18n-validation/server)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator --filter=@caliber/queue --filter=@caliber/i18n-validation
       - name: Run API integration tests (testcontainers)
         run: pnpm --filter @caliber/api test:integration
 
@@ -82,8 +82,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core)
-        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core, @caliber/queue)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator --filter=@caliber/queue
       - name: Run Gateway integration tests (testcontainers postgres + redis)
         run: pnpm --filter @caliber/gateway test:integration
       # gateway-core unit tests also run in lint-type-test via `turbo run test`,
@@ -109,8 +109,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core)
-        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core, @caliber/queue)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator --filter=@caliber/queue
       - name: Gateway load correctness gate
         run: pnpm --filter @caliber/gateway test:load
 
@@ -129,8 +129,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/auth, @caliber/gateway-core, @caliber/evaluator, @caliber/i18n-validation/server)
-        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator --filter=@caliber/i18n-validation
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/auth, @caliber/gateway-core, @caliber/evaluator, @caliber/queue, @caliber/i18n-validation/server)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator --filter=@caliber/queue --filter=@caliber/i18n-validation
       - name: Run evaluator unit tests
         run: pnpm --filter @caliber/evaluator test
       - name: Run API integration tests (evaluator-related, testcontainers)
@@ -149,8 +149,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core)
-        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator
+      - name: Build workspace packages (needed by tests that import @caliber/db, @caliber/gateway-core, @caliber/queue)
+        run: pnpm turbo run build --filter=@caliber/db --filter=@caliber/auth --filter=@caliber/config --filter=@caliber/gateway-core --filter=@caliber/evaluator --filter=@caliber/queue
       - name: Coverage gate (packages/{auth,config} ≥ 80%)
         run: pnpm test:coverage
       - name: Upload coverage HTML report on failure

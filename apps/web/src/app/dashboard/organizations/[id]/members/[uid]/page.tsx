@@ -1,13 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ShieldAlert } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RequirePerm } from "@/components/RequirePerm";
 import { ReportDetail } from "@/components/evaluator/ReportDetail";
+import { DeliveryDetail } from "@/components/delivery/DeliveryDetail";
 
 export default function MemberDetailPage() {
   const params = useParams();
@@ -60,8 +64,12 @@ export default function MemberDetailPage() {
   );
 }
 
+type MemberTab = "evaluation" | "delivery";
+
 function MemberDetailBody({ orgId, uid }: { orgId: string; uid: string }) {
   const { data: user, isLoading } = trpc.users.get.useQuery({ id: uid });
+  const t = useTranslations("evaluator.delivery");
+  const [tab, setTab] = useState<MemberTab>("evaluation");
 
   const userName = isLoading
     ? "…"
@@ -70,6 +78,14 @@ function MemberDetailBody({ orgId, uid }: { orgId: string; uid: string }) {
   const initials = userName !== "…"
     ? userName.charAt(0).toUpperCase()
     : "?";
+
+  const tabButtonClass = (active: boolean) =>
+    cn(
+      "relative -mb-px border-b-2 px-3 py-2 text-sm transition-colors",
+      active
+        ? "border-primary text-foreground font-medium"
+        : "border-transparent text-muted-foreground hover:text-foreground",
+    );
 
   return (
     <div className="space-y-6">
@@ -88,8 +104,38 @@ function MemberDetailBody({ orgId, uid }: { orgId: string; uid: string }) {
         </div>
       </div>
 
-      {/* Evaluation section */}
-      <ReportDetail orgId={orgId} userId={uid} userName={userName} />
+      {/* Tab strip — state-only toggle (v1: no URL param), idiom mirrors the
+          org-level Link tab strip in organizations/[id]/layout.tsx but uses
+          buttons since there are no sub-routes here. */}
+      <div className="border-b border-border">
+        <nav className="flex gap-1 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setTab("evaluation")}
+            className={tabButtonClass(tab === "evaluation")}
+          >
+            {t("tabEvaluation")}
+          </button>
+          <RequirePerm
+            action={{ type: "delivery.read_user", orgId, targetUserId: uid }}
+          >
+            <button
+              type="button"
+              onClick={() => setTab("delivery")}
+              className={tabButtonClass(tab === "delivery")}
+            >
+              {t("title")}
+            </button>
+          </RequirePerm>
+        </nav>
+      </div>
+
+      {tab === "evaluation" && (
+        <ReportDetail orgId={orgId} userId={uid} userName={userName} />
+      )}
+      {tab === "delivery" && (
+        <DeliveryDetail orgId={orgId} userId={uid} userName={userName} />
+      )}
     </div>
   );
 }

@@ -27,6 +27,7 @@ import {
   organizationMembers,
 } from "@caliber/db";
 import { encryptCredential } from "@caliber/gateway-core";
+import { formatValidationKey } from "@caliber/i18n-validation";
 import {
   GITHUB_SYNC_JOB_NAME,
   buildGithubSyncJobId,
@@ -83,7 +84,10 @@ export const githubDeliveryRouter = router({
         if (err instanceof GithubProbeError) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `github connection probe failed: ${err.reason}`,
+            message: formatValidationKey(
+              "validation.custom.githubConnection.probeFailed",
+              { reason: err.reason },
+            ),
           });
         }
         throw err;
