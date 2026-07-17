@@ -22,6 +22,8 @@ import {
   DEFAULT_SELECTION,
   type WindowSelection,
 } from "../evaluator/EvaluationWindowSelect";
+import { DeliveryNarrative } from "./DeliveryNarrative";
+import { DeliveryActivityList } from "./DeliveryActivityList";
 
 // ─── Types (mirrors the jsonb shape persisted by
 // apps/gateway/src/workers/githubDelivery/runDeliveryEval.ts) ─────────────────
@@ -274,6 +276,21 @@ export function DeliveryDetail({ orgId, userId }: Props) {
           </CardContent>
         </Card>
       )}
+
+      <DeliveryNarrative
+        report={{
+          llmStatus: data.llmStatus,
+          llmNarrative: data.llmNarrative,
+          llmEvidence: data.llmEvidence,
+        }}
+      />
+
+      <DeliveryActivityList
+        orgId={orgId}
+        userId={userId}
+        from={rangeFrom}
+        to={rangeTo}
+      />
     </div>
   );
 }

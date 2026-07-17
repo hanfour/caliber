@@ -17,6 +17,7 @@ vi.mock("@/components/RequirePerm", () => ({
 }));
 
 const getReportQuery = vi.fn();
+const listActivityQuery = vi.fn();
 const generateMutate = vi.fn();
 const invalidateGetReport = vi.fn();
 let generateOptions: {
@@ -31,6 +32,7 @@ vi.mock("@/lib/trpc/client", () => ({
     }),
     githubDelivery: {
       getReport: { useQuery: (...a: unknown[]) => getReportQuery(...a) },
+      listActivity: { useQuery: (...a: unknown[]) => listActivityQuery(...a) },
       generate: {
         useMutation: (opts: typeof generateOptions) => {
           generateOptions = opts ?? {};
@@ -139,6 +141,16 @@ const fullReport = {
 describe("DeliveryDetail", () => {
   beforeEach(() => {
     getReportQuery.mockReset();
+    listActivityQuery.mockReset();
+    // DeliveryActivityList mounts (and calls this query) whenever
+    // DeliveryDetail reaches its full-report branch — give it a harmless
+    // default so tests that don't care about activity content don't crash
+    // on an undefined destructure.
+    listActivityQuery.mockReturnValue({
+      data: { ghUserId: 42, pulls: [], issues: [], reviews: [] },
+      isLoading: false,
+      error: null,
+    });
     generateMutate.mockReset();
     invalidateGetReport.mockReset();
     toastSuccess.mockReset();
@@ -254,6 +266,10 @@ describe("DeliveryDetail", () => {
     expect(screen.getByText("3.4 · 60%")).toBeInTheDocument(); // issue_resolution_days_median
     expect(screen.getAllByText(/50%/)).toHaveLength(3); // collaboration section + its 2 subscores
     expect(screen.getAllByText(/60%/)).toHaveLength(3); // timeliness section + its 2 subscores
+
+    // Composition (PR4 Task 2): DeliveryActivityList mounts below the
+    // sections table in the full-report branch.
+    expect(screen.getByText("Recent activity")).toBeInTheDocument();
   });
 
   it("shows the LLM-skipped note instead of the adjustment badge on parse_error", () => {

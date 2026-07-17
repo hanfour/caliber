@@ -72,6 +72,19 @@ const DELIVERY_KEYS = [
   "evaluator.delivery.metric.issue_resolution_days_median",
 ];
 
+// All new keys required by DeliveryActivityList + DeliveryNarrative
+// (PR4 Task 2)
+const DELIVERY_ACTIVITY_NARRATIVE_KEYS = [
+  "evaluator.delivery.narrativeTitle",
+  "evaluator.delivery.evidenceTitle",
+  "evaluator.delivery.activityTitle",
+  "evaluator.delivery.pulls",
+  "evaluator.delivery.issues",
+  "evaluator.delivery.reviews",
+  "evaluator.delivery.noActivity",
+  "evaluator.delivery.noLinkedAccount",
+];
+
 function getByPath(obj: Record<string, unknown>, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc != null && typeof acc === "object" && key in acc) {
@@ -208,6 +221,26 @@ describe("i18n catalog parity — DeliveryDetail keys (PR4 Task 1)", () => {
   };
 
   for (const key of DELIVERY_KEYS) {
+    it(`"${key}" exists in all 5 catalogs`, () => {
+      for (const [locale, catalog] of Object.entries(catalogs)) {
+        const value = getByPath(catalog, key);
+        expect(value, `Missing "${key}" in ${locale}`).toBeDefined();
+        expect(typeof value, `"${key}" in ${locale} must be a string`).toBe("string");
+      }
+    });
+  }
+});
+
+describe("i18n catalog parity — DeliveryActivityList + DeliveryNarrative keys (PR4 Task 2)", () => {
+  const catalogs: Record<string, Record<string, unknown>> = {
+    en: en as unknown as Record<string, unknown>,
+    "zh-TW": zhTW as unknown as Record<string, unknown>,
+    "zh-CN": zhCN as unknown as Record<string, unknown>,
+    ja: ja as unknown as Record<string, unknown>,
+    ko: ko as unknown as Record<string, unknown>,
+  };
+
+  for (const key of DELIVERY_ACTIVITY_NARRATIVE_KEYS) {
     it(`"${key}" exists in all 5 catalogs`, () => {
       for (const [locale, catalog] of Object.entries(catalogs)) {
         const value = getByPath(catalog, key);
