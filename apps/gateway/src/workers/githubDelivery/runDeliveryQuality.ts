@@ -36,8 +36,6 @@ import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
 import {
   buildDeliveryQualityPrompt,
-  enforceBudget,
-  isBudgetError,
   MAX_REVIEW_COMMENTS,
   parseDeliveryQualityResponse,
   QUALITY_RETRY_SUFFIX,
@@ -47,14 +45,17 @@ import {
   type QualityPromptPr,
 } from "@caliber/evaluator";
 import { decryptCredential, safeErrorMessage } from "@caliber/gateway-core";
+import type { GatewayMetrics } from "../../plugins/metrics.js";
 import { createGithubClient } from "../githubSync/githubClient.js";
 import { createFacetLlmClient } from "../evaluator/facetLlmClient.js";
-import { createBudgetDeps } from "../evaluator/budgetDeps.js";
+import type { BudgetAlertEvent } from "../evaluator/budgetAlertWebhook.js";
 import {
   DELIVERY_ANALYSIS_EVENT_TYPE,
   REF_TYPE_GITHUB_DELIVERY_REPORT,
+  deepAnalysisBudgetGate,
   isDeepAnalysisEnforceEnabled,
   writeDeepAnalysisLedger,
+  type BudgetGateMetrics,
 } from "../evaluator/ledgerDeepAnalysis.js";
 
 /** Mirrors runDeliveryEval.ts's LoggerLike (same no-shared-module precedent). */
@@ -87,6 +88,16 @@ export interface RunDeliveryQualityInput {
   fetchImpl?: typeof fetch;
   sleepMs?: (ms: number) => Promise<void>;
   logger?: LoggerLike;
+  /**
+   * Optional — surfaces budget warn/exceeded counters AND ledgers delivery
+   * spend against `gwLlmCostUsdTotal` (Task 5, budget metrics/webhook
+   * parity for the delivery path). Threaded to both `deepAnalysisBudgetGate`
+   * (the pre-call halt check) and `writeDeepAnalysisLedger` (the post-call
+   * cost ledger write).
+   */
+  metrics?: BudgetGateMetrics & Pick<GatewayMetrics, "gwLlmCostUsdTotal">;
+  /** Optional sink for budget warn/exceeded webhook alerts (Task 5). */
+  onBudgetEvent?: (e: BudgetAlertEvent) => void;
 }
 
 export type DeliveryQualityResult =
@@ -125,16 +136,20 @@ export async function runDeliveryQuality(
     return { status: "skipped", reason: "no_model" };
   }
 
-  const enforce = isDeepAnalysisEnforceEnabled();
-  if (enforce) {
-    try {
-      await enforceBudget(input.orgId, 0, createBudgetDeps(input.db));
-    } catch (err) {
-      if (isBudgetError(err)) {
-        return { status: "budget_denied" };
-      }
-      // Fail-open on non-budget infra errors (mirrors deepAnalysisBudgetGate).
-    }
+  // Shared gate (Task 5): previously a bare `enforceBudget` call here meant a
+  // delivery budget denial incremented no counter and fired no webhook — the
+  // operator was blind exactly when spend was being refused. Routing through
+  // `deepAnalysisBudgetGate` gives the delivery path the same
+  // metrics/webhook parity the evaluator's deep-analysis path already has.
+  const gate = await deepAnalysisBudgetGate({
+    db: input.db,
+    orgId: input.orgId,
+    enforce: isDeepAnalysisEnforceEnabled(),
+    metrics: input.metrics,
+    onBudgetEvent: input.onBudgetEvent,
+  });
+  if (gate.skip) {
+    return { status: "budget_denied" };
   }
 
   // 2. Connection + PAT decrypt.
@@ -289,6 +304,7 @@ export async function runDeliveryQuality(
         refType: REF_TYPE_GITHUB_DELIVERY_REPORT,
         eventType: DELIVERY_ANALYSIS_EVENT_TYPE,
         usageLogRequestId: requestId,
+        metrics: input.metrics,
         sleepMs: sleep,
       });
     } catch (err) {

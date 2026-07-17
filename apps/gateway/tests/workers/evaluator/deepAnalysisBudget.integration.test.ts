@@ -267,6 +267,22 @@ describe("deepAnalysisBudgetGate", () => {
 
     expect(result.skip).toBe(false);
   });
+
+  it("fires onBudgetEvent even when no metrics are supplied (Task 5: the conditional-metrics bug)", async () => {
+    await setBudget("0.50");
+    await seedSpend("0.75"); // month-to-date 0.75 > 0.50 budget → halted/exceeded
+
+    const events: unknown[] = [];
+    const gate = await deepAnalysisBudgetGate({
+      db,
+      orgId,
+      enforce: true,
+      onBudgetEvent: (e) => void events.push(e),
+    });
+
+    expect(gate.skip).toBe(true);
+    expect(events).toHaveLength(1);
+  });
 });
 
 describe("writeDeepAnalysisLedger", () => {

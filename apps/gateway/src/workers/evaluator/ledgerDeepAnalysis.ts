@@ -100,7 +100,7 @@ export function isDeepAnalysisEnforceEnabled(
 
 // ── Budget gate ──────────────────────────────────────────────────────────────
 
-type BudgetGateMetrics = Pick<
+export type BudgetGateMetrics = Pick<
   GatewayMetrics,
   "gwLlmBudgetWarnTotal" | "gwLlmBudgetExceededTotal"
 >;
@@ -135,7 +135,13 @@ export async function deepAnalysisBudgetGate(
   }
 
   const deps = createBudgetDeps(input.db);
-  const enforce = input.metrics
+  // Route through wrapEnforceBudget whenever EITHER metrics OR onBudgetEvent
+  // is present — the prior `input.metrics ? ... : ...` ternary silently
+  // dropped an onBudgetEvent passed without metrics (Task 5: the webhook
+  // alert never fired). wrapEnforceBudget's `metrics` param is optional and
+  // `?.`-guards its `.inc(...)` sites, so passing `undefined` metrics here is
+  // safe.
+  const enforce = input.metrics || input.onBudgetEvent
     ? wrapEnforceBudget(deps, input.metrics, input.onBudgetEvent)
     : (orgId: string, est: number) => enforceBudgetCore(orgId, est, deps);
 

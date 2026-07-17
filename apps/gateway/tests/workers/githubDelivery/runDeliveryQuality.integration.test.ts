@@ -370,6 +370,30 @@ describe("runDeliveryQuality", () => {
     expect(result).toEqual({ status: "budget_denied" });
   });
 
+  it("budget denial increments the counter and fires the alert event (Task 5: delivery budget parity)", async () => {
+    const org = await insertOrg(db, {
+      llmHaltedUntilMonthEnd: true,
+      llmHaltedAt: new Date(),
+    });
+    const events: Array<{ event: string }> = [];
+    const inc = vi.fn();
+    const result = await runDeliveryQuality(
+      baseInput({
+        orgId: org.id,
+        metrics: {
+          gwLlmBudgetWarnTotal: { inc },
+          gwLlmBudgetExceededTotal: { inc },
+          gwLlmCostUsdTotal: { inc },
+        } as never,
+        onBudgetEvent: (e) => void events.push(e),
+      }),
+    );
+
+    expect(result.status).toBe("budget_denied");
+    expect(inc).toHaveBeenCalled();
+    expect(events.some((e) => e.event === "exceeded")).toBe(true);
+  });
+
   it("no github connection → skipped no_connection", async () => {
     const org = await insertOrg(db);
     const result = await runDeliveryQuality(baseInput({ orgId: org.id }));

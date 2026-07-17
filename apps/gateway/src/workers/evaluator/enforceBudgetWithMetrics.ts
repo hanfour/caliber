@@ -22,6 +22,10 @@
  *     case (the threshold check requires a finite budget).
  *   - Errors that aren't budget breaches propagate untouched without any
  *     metric emission.
+ *   - `metrics` is optional (Task 5, delivery budget parity): a caller that
+ *     only wants the `onBudgetEvent` webhook alert (no Prometheus counters)
+ *     can omit it — the two `.inc(...)` call sites below are `?.`-guarded so
+ *     this wrapper still fires `onBudgetEvent` without a metrics object.
  */
 
 import {
@@ -46,7 +50,7 @@ function monthStartUtc(d: Date): Date {
  */
 export function wrapEnforceBudget(
   deps: EnforceBudgetDeps,
-  metrics: Pick<
+  metrics?: Pick<
     GatewayMetrics,
     "gwLlmBudgetWarnTotal" | "gwLlmBudgetExceededTotal"
   >,
@@ -67,7 +71,7 @@ export function wrapEnforceBudget(
           monthStartUtc(deps.now()),
         );
         if (monthSpend >= org.llm_monthly_budget_usd * WARNING_THRESHOLD) {
-          metrics.gwLlmBudgetWarnTotal.inc({ org_id: orgId });
+          metrics?.gwLlmBudgetWarnTotal.inc({ org_id: orgId });
           onBudgetEvent?.({
             orgId,
             event: "warn",
@@ -78,7 +82,7 @@ export function wrapEnforceBudget(
       }
     } catch (err) {
       if (err instanceof BudgetExceededDegrade) {
-        metrics.gwLlmBudgetExceededTotal.inc({
+        metrics?.gwLlmBudgetExceededTotal.inc({
           org_id: orgId,
           behavior: "degrade",
         });
@@ -92,7 +96,7 @@ export function wrapEnforceBudget(
           behavior: "degrade",
         });
       } else if (err instanceof BudgetExceededHalt) {
-        metrics.gwLlmBudgetExceededTotal.inc({
+        metrics?.gwLlmBudgetExceededTotal.inc({
           org_id: orgId,
           behavior: "halt",
         });
