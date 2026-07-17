@@ -19,7 +19,10 @@ interface DeliveryEvidenceItem {
 // with a `/repo` segment — GitHub repo names allow letters, digits, `.`,
 // `_`, `-`. This is stricter than "non-empty string" so `repo` is safe to
 // interpolate into the `github.com/<repo>/pull/<prNumber>` href below.
-const EVIDENCE_REPO_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
+// Repo segment must contain at least one alphanumeric — rejects "."/".." path
+// tricks (e.g. "acme/.." would browser-normalize to github.com/pull/N).
+const EVIDENCE_REPO_REGEX =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?=.*[A-Za-z0-9])[A-Za-z0-9._-]{1,100}$/;
 
 /**
  * Defensive parse: the LLM's raw JSON output is untrusted at this boundary

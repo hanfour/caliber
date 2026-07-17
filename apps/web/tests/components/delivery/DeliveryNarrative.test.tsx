@@ -92,6 +92,9 @@ describe("DeliveryNarrative", () => {
             { repo: "acme/web#frag", prNumber: 2, quote: "fragment repo", reason: "dropped" },
             // (f) prNumber is not a positive integer.
             { repo: "caliber/web", prNumber: 1.5, quote: "fractional pr", reason: "dropped" },
+            // (g) repo segment is a dot-path — "acme/.." would browser-normalize
+            // to github.com/pull/N (misdirected link); must be dropped.
+            { repo: "acme/..", prNumber: 3, quote: "dot path repo", reason: "dropped" },
             // Valid sibling in the same array — must still render, proving
             // the filter is per-item and not all-or-nothing.
             { repo: "caliber/web", prNumber: 7, quote: "valid quote", reason: "valid reason" },
@@ -107,6 +110,7 @@ describe("DeliveryNarrative", () => {
     expect(screen.queryByText("unsafe repo")).not.toBeInTheDocument();
     expect(screen.queryByText("fragment repo")).not.toBeInTheDocument();
     expect(screen.queryByText("fractional pr")).not.toBeInTheDocument();
+    expect(screen.queryByText("dot path repo")).not.toBeInTheDocument();
   });
 
   it("omits the evidence block entirely when evidence is absent or empty", () => {
