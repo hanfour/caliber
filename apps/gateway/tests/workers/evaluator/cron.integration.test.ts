@@ -29,6 +29,7 @@ import {
 } from "@caliber/db";
 import {
   enqueueDailyEvaluatorJobs,
+  startEvaluatorCron,
   type EnqueueDailyResult,
 } from "../../../src/workers/evaluator/cron.js";
 import type {
@@ -270,5 +271,47 @@ describe("enqueueDailyEvaluatorJobs", () => {
     expect(result2.jobsEnqueued).toBe(0);
     expect(result2.enqueueFailures).toBe(1);
     expect(queue.jobs).toHaveLength(1); // Still only 1 job
+  });
+});
+
+describe("startEvaluatorCron", () => {
+  it("tick joins the in-flight start-up pass instead of running a second one", async () => {
+    // Seed an org with capture enabled + 2 members — one pass of
+    // enqueueDailyEvaluatorJobs enqueues exactly 2 jobs.
+    const [org] = await db
+      .insert(organizations)
+      .values({
+        slug: "cron-test-tick-join",
+        name: "Cron Test Tick Join Org",
+        contentCaptureEnabled: true,
+      })
+      .returning();
+    const orgId = org!.id;
+    await db.insert(organizationMembers).values([
+      { orgId, userId: user1Id },
+      { orgId, userId: user2Id },
+    ]);
+
+    const added: unknown[] = [];
+    const queue = {
+      add: async (...a: unknown[]) => void added.push(a),
+    };
+    const noopLogger = { info: () => {}, error: () => {} };
+
+    const handle = startEvaluatorCron({
+      db,
+      queue,
+      logger: noopLogger,
+      intervalMs: 60 * 60 * 1000, // irrelevant; we call tick() directly
+    });
+    // Do NOT clear `added` — the point is that the start-up tick and this
+    // tick() call are ONE pass, so the enqueue count must equal a single
+    // pass's worth (2 members), not double (4).
+    await handle.tick();
+    // NOTE: stop() only after tick() — stop() sets the stopped flag, which
+    // aborts the enqueue loop mid-flight (graceful-shutdown behavior).
+    handle.stop();
+
+    expect(added).toHaveLength(2);
   });
 });

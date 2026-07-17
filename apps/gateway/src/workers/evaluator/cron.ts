@@ -258,7 +258,6 @@ export function startEvaluatorCron(
 ): EvaluatorCronHandle {
   const interval = opts.intervalMs ?? EVALUATOR_CRON_INTERVAL_MS;
   let stopped = false;
-  let currentTick: Promise<void> | null = null;
 
   async function runTick(): Promise<void> {
     if (stopped) return;
@@ -278,10 +277,27 @@ export function startEvaluatorCron(
     }
   }
 
+  let currentTick: Promise<void> | null = null;
+
+  // Tracks the in-flight tick so a manual `handle.tick()` joins an already-
+  // running pass (e.g. the run-at-start tick) instead of racing it with a
+  // second, independent DB enumeration + duplicate enqueues. Cleared back to
+  // null once the pass settles so the next call starts a fresh one. Ported
+  // from githubSync/interval.ts, which fixed this same bug (#270). Unlike
+  // interval.ts's scheduleTick, this doesn't add a `.catch` — runTick above
+  // already self-catches, so adding one here would double-catch.
+  function scheduleTick(): Promise<void> {
+    const settled = runTick().finally(() => {
+      if (currentTick === settled) currentTick = null;
+    });
+    currentTick = settled;
+    return settled;
+  }
+
   // Run immediately on start, then on interval
-  currentTick = runTick();
+  currentTick = scheduleTick();
   const timer = setInterval(() => {
-    currentTick = runTick();
+    scheduleTick();
   }, interval);
 
   // Don't keep process alive solely for this timer
@@ -292,9 +308,6 @@ export function startEvaluatorCron(
       stopped = true;
       clearInterval(timer);
     },
-    tick: async () => {
-      await currentTick;
-      await runTick();
-    },
+    tick: () => currentTick ?? scheduleTick(),
   };
 }
