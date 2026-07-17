@@ -4,6 +4,7 @@
  * The system message pins a strict JSON-only output contract so the
  * companion parser (qualityParser.ts) can coerce the reply reliably.
  */
+import { stripInvalidJsonbChars } from "../util/jsonbText.js";
 
 export interface QualityPromptPr {
   repoFullName: string;
@@ -38,9 +39,20 @@ export const PR_TITLE_MAX_CHARS = 300;
 
 const TRUNCATED_MARKER = "\n…[truncated]\n";
 
-/** Cap free-form GitHub/LLM-adjacent text. Never throws; marker is visible to the model. */
+/**
+ * Cap free-form GitHub text. Never throws; marker is visible to the model.
+ *
+ * The slice is stripped because cutting at a code-unit offset can bisect an
+ * emoji's surrogate pair, and a lone surrogate in the prompt risks an upstream
+ * 400 — which rethrows as a transport error and burns all three BullMQ retries
+ * on a deterministically-identical payload. That is the same retry-burn this
+ * cap exists to prevent, just triggered by an emoji instead of raw length.
+ * Same strip-after-slice idiom as qualityParser.ts's quote handling.
+ */
 function capText(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : text.slice(0, maxChars) + TRUNCATED_MARKER;
+  return text.length <= maxChars
+    ? text
+    : stripInvalidJsonbChars(text.slice(0, maxChars)) + TRUNCATED_MARKER;
 }
 
 const SYSTEM_PROMPT = [
