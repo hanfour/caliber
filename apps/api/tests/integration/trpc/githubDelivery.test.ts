@@ -10,6 +10,7 @@ import {
 import { eq } from "drizzle-orm";
 import { resolvePermissions } from "@caliber/auth";
 import type { ServerEnv } from "@caliber/config";
+import { decryptCredential } from "@caliber/gateway-core";
 import {
   setupTestDb,
   makeOrg,
@@ -135,6 +136,32 @@ describe("githubDelivery router", () => {
     const rows = await t.db.select().from(githubConnections).where(eq(githubConnections.orgId, org.id));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe(row.id);
+  });
+
+  it("concurrent first-writes leave a row whose ciphertext decrypts with its own id", async () => {
+    stubProbeFetch(true);
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, { role: "org_admin", scopeType: "organization", scopeId: org.id, orgId: org.id });
+    const caller = await callerFor({ db: t.db, userId: admin.id, env: envWithFlag });
+
+    // Two concurrent first-writes for the same org: each computes its own
+    // randomUUID() salt before either row exists.
+    await Promise.all([
+      caller.githubDelivery.setConnection({ orgId: org.id, ownerLogin: "acme", token: TOKEN }),
+      caller.githubDelivery.setConnection({ orgId: org.id, ownerLogin: "acme", token: `${TOKEN}B` }),
+    ]);
+
+    const rows = await t.db.select().from(githubConnections).where(eq(githubConnections.orgId, org.id));
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    // The invariant: whatever ciphertext survived must decrypt with the row's OWN id.
+    const plaintext = decryptCredential({
+      masterKeyHex: defaultTestEnv.CREDENTIAL_ENCRYPTION_KEY!,
+      accountId: row.id,
+      sealed: { nonce: row.nonce, ciphertext: row.ciphertext, authTag: row.authTag },
+    });
+    expect([TOKEN, `${TOKEN}B`]).toContain(plaintext);
+    expect(row.tokenLast4).toBe(plaintext.slice(-4));
   });
 
   it("rejects a bad token with BAD_REQUEST", async () => {

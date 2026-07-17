@@ -34,7 +34,10 @@ import {
   type EvaluatorJobPayload,
 } from "./workers/evaluator/queue.js";
 import { createEvaluatorWorker } from "./workers/evaluator/worker.js";
-import { maybeSendBudgetAlert } from "./workers/evaluator/budgetAlertWebhook.js";
+import {
+  maybeSendBudgetAlert,
+  type BudgetAlertEvent,
+} from "./workers/evaluator/budgetAlertWebhook.js";
 import { UsageLogWorker } from "./workers/usageLogWorker.js";
 import { BillingAudit } from "./workers/billingAudit.js";
 import {
@@ -585,6 +588,40 @@ async function wireBodyCapturePipeline(
 }
 
 /**
+ * Build the `onBudgetEvent` webhook-alert sink shared by the evaluator and
+ * github-delivery pipelines (Task 5, budget metrics/webhook parity).
+ *
+ * The two pipelines are gated independently (`ENABLE_EVALUATOR` vs.
+ * `ENABLE_GITHUB_DELIVERY`) and each owns its own dedicated Redis
+ * connection (BullMQ Lua scripts can't share the prefixed `fastify.redis`
+ * client — see the pipeline doc comments below), so a single closure
+ * *instance* can't be shared across both without coupling one pipeline's
+ * wiring to the other's gate. Instead this factory is called once per
+ * pipeline with that pipeline's own redis client; `maybeSendBudgetAlert`'s
+ * dedup keys live in Redis, so either connection produces identical dedup
+ * behavior — the two resulting closures are behaviorally interchangeable.
+ */
+function buildOnBudgetEventSink(
+  app: FastifyInstance,
+  redis: Redis,
+  alertWebhookUrl: string | undefined,
+): ((e: BudgetAlertEvent) => void) | undefined {
+  if (!alertWebhookUrl) return undefined;
+  return (e: BudgetAlertEvent) => {
+    void maybeSendBudgetAlert(
+      {
+        redis,
+        fetch: globalThis.fetch,
+        webhookUrl: alertWebhookUrl,
+        logger: app.log,
+        now: () => new Date(),
+      },
+      e,
+    );
+  };
+}
+
+/**
  * Build the dedicated BullMQ Redis connection + Queue for evaluator cron
  * and wire onClose teardown. The cron is started in buildServer and manages
  * itself via the EvaluatorCronHandle; only the queue is decorated here so the
@@ -635,23 +672,11 @@ async function wireEvaluatorPipeline(
 
   // Active webhook alerting for org budget warn/exceeded (Plan P4). Only wired
   // when GATEWAY_ALERT_WEBHOOK_URL is set; the sink is fire-and-forget (voided).
-  // Capture the narrowed string into a const — TS does not narrow an env
-  // property through closure capture.
-  const alertWebhookUrl = env.GATEWAY_ALERT_WEBHOOK_URL;
-  const onBudgetEvent = alertWebhookUrl
-    ? (e: Parameters<typeof maybeSendBudgetAlert>[1]) => {
-        void maybeSendBudgetAlert(
-          {
-            redis: workerRedis,
-            fetch: globalThis.fetch,
-            webhookUrl: alertWebhookUrl,
-            logger: app.log,
-            now: () => new Date(),
-          },
-          e,
-        );
-      }
-    : undefined;
+  const onBudgetEvent = buildOnBudgetEventSink(
+    app,
+    workerRedis,
+    env.GATEWAY_ALERT_WEBHOOK_URL,
+  );
 
   // PR7: wire app.gwMetrics so the evaluator worker emits Prometheus counters
   // (gwEvalLlmCalledTotal{grain,result}, gwEvalLlmCostUsd{grain}, etc.).
@@ -739,6 +764,7 @@ async function wireGithubSyncPipeline(
     connection: githubRedis,
     db: app.db,
     masterKeyHex,
+    logger: app.log,
   });
   const cronHandle = startGithubSyncInterval({
     db: app.db,
@@ -749,6 +775,19 @@ async function wireGithubSyncPipeline(
   // github-delivery (PR2): shares this pipeline's dedicated redis
   // connection + masterKeyHex; wired after the sync queue/worker/interval
   // so sync stays the primary subsystem this function documents.
+  //
+  // Task 5 (budget metrics/webhook parity): this pipeline is gated
+  // independently of wireEvaluatorPipeline (ENABLE_GITHUB_DELIVERY vs.
+  // ENABLE_EVALUATOR), so it can't reuse that pipeline's onBudgetEvent
+  // closure — it may run without the evaluator pipeline ever having wired
+  // one. Build an equivalent sink over this pipeline's own githubRedis
+  // connection instead (see buildOnBudgetEventSink's doc comment).
+  const onBudgetEvent = buildOnBudgetEventSink(
+    app,
+    githubRedis,
+    env.GATEWAY_ALERT_WEBHOOK_URL,
+  );
+
   const deliveryQueue = createGithubDeliveryQueue({ connection: githubRedis });
   const deliveryWorker = createGithubDeliveryWorker({
     connection: githubRedis,
@@ -757,6 +796,8 @@ async function wireGithubSyncPipeline(
     redis: githubRedis,
     gatewayBaseUrl: env.GATEWAY_LOCAL_BASE_URL,
     logger: app.log,
+    onBudgetEvent,
+    metrics: app.gwMetrics,
   });
   const deliveryCronHandle = startGithubDeliveryCron({
     db: app.db,

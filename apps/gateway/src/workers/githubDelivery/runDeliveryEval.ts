@@ -31,6 +31,9 @@ import {
   scoreDelivery,
 } from "@caliber/evaluator";
 import { safeErrorMessage } from "@caliber/gateway-core";
+import type { GatewayMetrics } from "../../plugins/metrics.js";
+import type { BudgetAlertEvent } from "../evaluator/budgetAlertWebhook.js";
+import type { BudgetGateMetrics } from "../evaluator/ledgerDeepAnalysis.js";
 import { syncOrg } from "../githubSync/syncOrg.js";
 import { fetchDeliveryActivity, resolveGithubUserId } from "./fetchActivity.js";
 import { runDeliveryQuality } from "./runDeliveryQuality.js";
@@ -73,6 +76,11 @@ export interface RunDeliveryEvalInput {
   fetchImpl?: typeof fetch;
   now?: Date;
   logger?: LoggerLike;
+  /** Threaded to runDeliveryQuality's budget gate + ledger write (Task 5,
+   * budget metrics/webhook parity for the delivery path). */
+  metrics?: BudgetGateMetrics & Pick<GatewayMetrics, "gwLlmCostUsdTotal">;
+  /** Threaded to runDeliveryQuality's budget gate (Task 5). */
+  onBudgetEvent?: (e: BudgetAlertEvent) => void;
 }
 
 /** Round to 1dp and clamp into [0, 120], stringified for the decimal column. */
@@ -115,6 +123,7 @@ export async function runDeliveryEval(
         masterKeyHex: input.masterKeyHex,
         orgId: payload.orgId,
         fetchImpl: input.fetchImpl,
+        logger: input.logger,
       });
     } catch (err) {
       // Sync is best-effort here; score whatever data exists. Still worth a
@@ -259,6 +268,8 @@ export async function runDeliveryEval(
     },
     fetchImpl: input.fetchImpl,
     logger: input.logger,
+    metrics: input.metrics,
+    onBudgetEvent: input.onBudgetEvent,
   });
 
   if (quality.status === "skipped") {

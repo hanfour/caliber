@@ -16,6 +16,13 @@ const RATE_LIMIT_MIN_DELAY_MS = 30_000; // 30s floor
 const RATE_LIMIT_MAX_DELAY_MS = 3_600_000; // 1h ceiling
 const RATE_LIMIT_DEFAULT_DELAY_MS = 300_000; // 5min, used when reset is unknown
 
+/** Mirrors syncOrg.ts's LoggerLike (same no-shared-module precedent). */
+interface LoggerLike {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
 /**
  * Pure helper: how long to delay a rate-limited sync job before retrying.
  * `resetAtMs` comes from `SyncOrgResult.rateLimitResetAtMs` (GitHub's
@@ -65,6 +72,14 @@ export interface CreateGithubSyncWorkerOptions {
    * the full 30s floor. Never set outside tests.
    */
   rateLimitMinDelayMs?: number;
+  /**
+   * Threaded to `syncOrg` so its decrypt-failure and Projects-cap/scope
+   * warnings (task 1/2) reach a real sink on the path that matters post-flip
+   * — the periodic 6h interval worker, not just the inline staleness-gated
+   * sync. Without this, those signals are logger-only on a logger nobody
+   * passed, i.e. dead (#270 finding I2).
+   */
+  logger?: LoggerLike;
 }
 
 export function createGithubSyncWorker(
@@ -79,6 +94,7 @@ export function createGithubSyncWorker(
         masterKeyHex: opts.masterKeyHex,
         orgId: payload.orgId,
         fetchImpl: opts.fetchImpl,
+        logger: opts.logger,
       });
       // Spec: rate-limited syncs must wait out GitHub's actual reset window
       // rather than burn BullMQ's fixed exponential backoff (1s/2s/4s,

@@ -2,6 +2,9 @@
 import { Worker, type WorkerOptions } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Database } from "@caliber/db";
+import type { GatewayMetrics } from "../../plugins/metrics.js";
+import type { BudgetAlertEvent } from "../evaluator/budgetAlertWebhook.js";
+import type { BudgetGateMetrics } from "../evaluator/ledgerDeepAnalysis.js";
 import {
   GITHUB_DELIVERY_QUEUE_NAME,
   GITHUB_DELIVERY_QUEUE_PREFIX,
@@ -26,6 +29,11 @@ export interface CreateGithubDeliveryWorkerOptions {
   fetchImpl?: typeof fetch;
   /** Threaded to runDeliveryEval so an inline-sync failure surfaces. */
   logger?: LoggerLike;
+  /** Threaded to runDeliveryEval's budget gate + ledger write (Task 5,
+   * budget metrics/webhook parity for the delivery path). */
+  metrics?: BudgetGateMetrics & Pick<GatewayMetrics, "gwLlmCostUsdTotal">;
+  /** Threaded to runDeliveryEval's budget gate (Task 5). */
+  onBudgetEvent?: (e: BudgetAlertEvent) => void;
 }
 
 export function createGithubDeliveryWorker(
@@ -43,6 +51,8 @@ export function createGithubDeliveryWorker(
         gatewayBaseUrl: opts.gatewayBaseUrl,
         fetchImpl: opts.fetchImpl,
         logger: opts.logger,
+        metrics: opts.metrics,
+        onBudgetEvent: opts.onBudgetEvent,
       });
     },
     {

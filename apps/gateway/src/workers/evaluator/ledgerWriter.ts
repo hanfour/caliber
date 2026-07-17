@@ -17,6 +17,15 @@
  *     the nullable column shape; Drizzle treats `undefined` as "unset"
  *     (which would silently fall back to the default), and the columns
  *     have no default — so we must be explicit here.
+ *   - `usage_log_request_id` is left `null` — `LedgerRow` (the facet path)
+ *     has no request id to persist (0033 note). NULL rows are exempt from
+ *     the new `llm_usage_request_dedup_idx` partial index, so this path
+ *     keeps deduping on the legacy `(ref_type, ref_id, event_type)` index.
+ *   - The metrics increment only fires on an ACTUAL insert (`.returning()`
+ *     non-empty). A deduped no-op previously still incremented
+ *     `gwLlmCostUsdTotal`, double-counting cost on every BullMQ retry that
+ *     hit the dedup conflict. Mirrors `writeDeepAnalysisLedger`'s `written`
+ *     gate.
  *
  * See spec §6 (Cost budget infrastructure).
  */
@@ -42,7 +51,7 @@ export function createLedgerWriter(
   metrics?: Pick<GatewayMetrics, "gwLlmCostUsdTotal">,
 ): (row: LedgerRow) => Promise<void> {
   return async (row) => {
-    await db
+    const inserted = await db
       .insert(llmUsageEvents)
       .values({
         orgId: row.orgId,
@@ -54,11 +63,20 @@ export function createLedgerWriter(
         costUsd: String(row.costUsd),
         refType: row.refType ?? null,
         refId: row.refId ?? null,
+        // LedgerRow (the facet path) carries no upstream request id — left
+        // null and thus exempt from llm_usage_request_dedup_idx (0033).
+        usageLogRequestId: null,
       })
       // Guard against BullMQ crash-window retries double-inserting the same
-      // facet-extraction row. Mirrors writeDeepAnalysisLedger's use of the
-      // same partial unique index (llm_usage_dedup_idx) on
-      // (ref_type, ref_id, event_type) WHERE ref_id IS NOT NULL.
+      // facet-extraction row. Targets `llm_usage_dedup_idx` on
+      // (ref_type, ref_id, event_type) WHERE ref_id IS NOT NULL AND
+      // usage_log_request_id IS NULL (narrowed by migration 0033 so this
+      // legacy index no longer collides with the deep-analysis path, which
+      // now always carries a request id and dedups on
+      // `llm_usage_request_dedup_idx` instead). The predicate here MUST
+      // match the index's WHERE clause verbatim or Postgres cannot infer an
+      // arbiter (42P10) — this writer always sets usageLogRequestId: null
+      // above, so the predicate always holds for its own rows.
       // Rows with a null ref_id are NOT covered by the partial index and are
       // allowed to insert freely (no dedup attempt).
       .onConflictDoNothing({
@@ -67,15 +85,21 @@ export function createLedgerWriter(
           llmUsageEvents.refId,
           llmUsageEvents.eventType,
         ],
-        where: sql`${llmUsageEvents.refId} IS NOT NULL`,
-      });
-    metrics?.gwLlmCostUsdTotal.inc(
-      {
-        org_id: row.orgId,
-        event_type: row.eventType,
-        model: row.model,
-      },
-      row.costUsd,
-    );
+        where: sql`${llmUsageEvents.refId} IS NOT NULL AND ${llmUsageEvents.usageLogRequestId} IS NULL`,
+      })
+      .returning({ id: llmUsageEvents.id });
+
+    // Only count cost when a NEW row actually landed — a deduped no-op
+    // (BullMQ retry hitting the conflict) must not double-increment.
+    if (inserted.length > 0) {
+      metrics?.gwLlmCostUsdTotal.inc(
+        {
+          org_id: row.orgId,
+          event_type: row.eventType,
+          model: row.model,
+        },
+        row.costUsd,
+      );
+    }
   };
 }

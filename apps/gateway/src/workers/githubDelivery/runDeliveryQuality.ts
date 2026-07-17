@@ -36,8 +36,7 @@ import type { Database } from "@caliber/db";
 import type { Redis } from "ioredis";
 import {
   buildDeliveryQualityPrompt,
-  enforceBudget,
-  isBudgetError,
+  MAX_REVIEW_COMMENTS,
   parseDeliveryQualityResponse,
   QUALITY_RETRY_SUFFIX,
   samplePullsForQuality,
@@ -46,14 +45,17 @@ import {
   type QualityPromptPr,
 } from "@caliber/evaluator";
 import { decryptCredential, safeErrorMessage } from "@caliber/gateway-core";
+import type { GatewayMetrics } from "../../plugins/metrics.js";
 import { createGithubClient } from "../githubSync/githubClient.js";
 import { createFacetLlmClient } from "../evaluator/facetLlmClient.js";
-import { createBudgetDeps } from "../evaluator/budgetDeps.js";
+import type { BudgetAlertEvent } from "../evaluator/budgetAlertWebhook.js";
 import {
   DELIVERY_ANALYSIS_EVENT_TYPE,
   REF_TYPE_GITHUB_DELIVERY_REPORT,
+  deepAnalysisBudgetGate,
   isDeepAnalysisEnforceEnabled,
   writeDeepAnalysisLedger,
+  type BudgetGateMetrics,
 } from "../evaluator/ledgerDeepAnalysis.js";
 
 /** Mirrors runDeliveryEval.ts's LoggerLike (same no-shared-module precedent). */
@@ -86,6 +88,16 @@ export interface RunDeliveryQualityInput {
   fetchImpl?: typeof fetch;
   sleepMs?: (ms: number) => Promise<void>;
   logger?: LoggerLike;
+  /**
+   * Optional — surfaces budget warn/exceeded counters AND ledgers delivery
+   * spend against `gwLlmCostUsdTotal` (Task 5, budget metrics/webhook
+   * parity for the delivery path). Threaded to both `deepAnalysisBudgetGate`
+   * (the pre-call halt check) and `writeDeepAnalysisLedger` (the post-call
+   * cost ledger write).
+   */
+  metrics?: BudgetGateMetrics & Pick<GatewayMetrics, "gwLlmCostUsdTotal">;
+  /** Optional sink for budget warn/exceeded webhook alerts (Task 5). */
+  onBudgetEvent?: (e: BudgetAlertEvent) => void;
 }
 
 export type DeliveryQualityResult =
@@ -124,16 +136,20 @@ export async function runDeliveryQuality(
     return { status: "skipped", reason: "no_model" };
   }
 
-  const enforce = isDeepAnalysisEnforceEnabled();
-  if (enforce) {
-    try {
-      await enforceBudget(input.orgId, 0, createBudgetDeps(input.db));
-    } catch (err) {
-      if (isBudgetError(err)) {
-        return { status: "budget_denied" };
-      }
-      // Fail-open on non-budget infra errors (mirrors deepAnalysisBudgetGate).
-    }
+  // Shared gate (Task 5): previously a bare `enforceBudget` call here meant a
+  // delivery budget denial incremented no counter and fired no webhook — the
+  // operator was blind exactly when spend was being refused. Routing through
+  // `deepAnalysisBudgetGate` gives the delivery path the same
+  // metrics/webhook parity the evaluator's deep-analysis path already has.
+  const gate = await deepAnalysisBudgetGate({
+    db: input.db,
+    orgId: input.orgId,
+    enforce: isDeepAnalysisEnforceEnabled(),
+    metrics: input.metrics,
+    onBudgetEvent: input.onBudgetEvent,
+  });
+  if (gate.skip) {
+    return { status: "budget_denied" };
   }
 
   // 2. Connection + PAT decrypt.
@@ -207,7 +223,7 @@ export async function runDeliveryQuality(
         title: pr.title,
         body: detail.body ?? null,
         diff: truncateDiff(diff),
-        reviewComments: reviewComments.slice(0, 20).map((c) => c.body),
+        reviewComments: reviewComments.slice(0, MAX_REVIEW_COMMENTS).map((c) => c.body),
       });
     } catch (err) {
       input.logger?.warn(
@@ -245,6 +261,8 @@ export async function runDeliveryQuality(
   // Transport errors (fetch failure / missing key / non-2xx) are NOT caught
   // here — they propagate up so the whole job retries via BullMQ (see file
   // header). Only parse failures are handled locally (terminal, with retry).
+  const sleep = input.sleepMs ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+
   const first = await llmClient.call({
     model: org.llmEvalModel,
     system: prompt.system,
@@ -253,7 +271,21 @@ export async function runDeliveryQuality(
   });
 
   let parsed = parseDeliveryQualityResponse(first.text);
-  let requestId = first.requestId;
+  // Ledger the first call's spend right away, before a retry's requestId
+  // can overwrite it. Every call that actually happened cost real money —
+  // ledgering only the LAST call (or, on terminal parse_error, ledgering
+  // nothing) is the "money spent, ledger blind" defect task 4 exists to
+  // close (I4). Best-effort per call, same as before: a ledger failure logs
+  // and is swallowed, it never fails the report.
+  let costUsd = await ledgerQualityCall({
+    db: input.db,
+    orgId: input.orgId,
+    reportId: input.reportId,
+    requestId: first.requestId,
+    metrics: input.metrics,
+    logger: input.logger,
+    sleep,
+  });
 
   if (!parsed.ok) {
     const retry = await llmClient.call({
@@ -263,39 +295,31 @@ export async function runDeliveryQuality(
       maxTokens: QUALITY_MAX_TOKENS,
     });
     parsed = parseDeliveryQualityResponse(retry.text);
-    requestId = retry.requestId;
+    const retryCostUsd = await ledgerQualityCall({
+      db: input.db,
+      orgId: input.orgId,
+      reportId: input.reportId,
+      requestId: retry.requestId,
+      metrics: input.metrics,
+      logger: input.logger,
+      sleep,
+    });
+    // Design decision (I4): the report's costUsd is the SUM of every call
+    // this run actually made, not just the last one. The ledger already
+    // sums correctly per-row (that's the budget-enforcement fix); the
+    // report-facing figure exists to answer "what did producing this
+    // report cost", and understating it to one call's cost when two were
+    // spent would reopen the same honesty gap for the displayed number
+    // that task 4 closed for the ledger. `null` only when NEITHER call's
+    // cost could be recovered (no request id, or usage_logs never
+    // materialized) — not when just one of the two comes up empty.
+    costUsd = costUsd === null && retryCostUsd === null
+      ? null
+      : (costUsd ?? 0) + (retryCostUsd ?? 0);
   }
 
   if (!parsed.ok) {
     return { status: "parse_error", model: org.llmEvalModel };
-  }
-
-  // 6. On ok: poll usage_logs for the real cost (own poll, independent of
-  // the ledger's internal poll below), then ledger (best-effort — a ledger
-  // failure logs and is swallowed; costUsd stays whatever this poll found).
-  const calledAt = new Date();
-  let costUsd: number | null = null;
-
-  if (requestId) {
-    const sleep = input.sleepMs ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    costUsd = await pollUsageLogCost(input.db, requestId, sleep);
-
-    try {
-      await writeDeepAnalysisLedger({
-        db: input.db,
-        orgId: input.orgId,
-        reportId: input.reportId,
-        refType: REF_TYPE_GITHUB_DELIVERY_REPORT,
-        eventType: DELIVERY_ANALYSIS_EVENT_TYPE,
-        usageLogRequestId: requestId,
-        sleepMs: sleep,
-      });
-    } catch (err) {
-      input.logger?.warn(
-        { err: safeErrorMessage(err), orgId: input.orgId, reportId: input.reportId },
-        "github-delivery quality: ledger write failed",
-      );
-    }
   }
 
   return {
@@ -304,9 +328,58 @@ export async function runDeliveryQuality(
     narrative: parsed.narrative,
     evidence: parsed.evidence,
     model: org.llmEvalModel,
-    calledAt,
+    calledAt: new Date(),
     costUsd,
   };
+}
+
+/**
+ * Best-effort ledger write for ONE loopback call (I4). Polls usage_logs for
+ * the call's real cost (own poll, independent of the ledger's internal
+ * poll), then writes the ledger row; a *write* failure logs and is
+ * swallowed, so it can be called for every call that happened — including
+ * on the terminal parse_error path — without the ledger risking the job.
+ * The cost poll itself is NOT swallowed: a DB error there propagates and
+ * the job retries, same as every other infra hiccup on this path (see the
+ * file header). Don't call this where a throw is unacceptable.
+ * `requestId` may be absent (defensive — the loopback client's shape
+ * guarantees one today) or shared between two calls' rows courtesy of
+ * `writeDeepAnalysisLedger`'s dedup-on-`usage_log_request_id` (migration
+ * 0033): a real first+retry pair always carries two distinct request ids,
+ * so both ledger.
+ */
+async function ledgerQualityCall(params: {
+  db: Database;
+  orgId: string;
+  reportId: string;
+  requestId: string | undefined;
+  metrics: RunDeliveryQualityInput["metrics"];
+  logger: LoggerLike | undefined;
+  sleep: (ms: number) => Promise<void>;
+}): Promise<number | null> {
+  if (!params.requestId) return null;
+
+  const costUsd = await pollUsageLogCost(params.db, params.requestId, params.sleep);
+
+  try {
+    await writeDeepAnalysisLedger({
+      db: params.db,
+      orgId: params.orgId,
+      reportId: params.reportId,
+      refType: REF_TYPE_GITHUB_DELIVERY_REPORT,
+      eventType: DELIVERY_ANALYSIS_EVENT_TYPE,
+      usageLogRequestId: params.requestId,
+      metrics: params.metrics,
+      sleepMs: params.sleep,
+    });
+  } catch (err) {
+    params.logger?.warn(
+      { err: safeErrorMessage(err), orgId: params.orgId, reportId: params.reportId },
+      "github-delivery quality: ledger write failed",
+    );
+  }
+
+  return costUsd;
 }
 
 async function pollUsageLogCost(

@@ -51,11 +51,18 @@ const emptyResult = (skippedReason?: SyncOrgResult["skippedReason"]): SyncOrgRes
   errors: [],
 });
 
+interface LoggerLike {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
 export interface SyncOrgInput {
   db: Database;
   masterKeyHex: string;
   orgId: string;
   fetchImpl?: typeof fetch;
+  logger?: LoggerLike;
 }
 
 export async function syncOrg(input: SyncOrgInput): Promise<SyncOrgResult> {
@@ -71,11 +78,31 @@ export async function syncOrg(input: SyncOrgInput): Promise<SyncOrgResult> {
   if (!conn) return emptyResult("no_connection");
   if (!conn.deliveryEnabled) return emptyResult("disabled");
 
-  const token = decryptCredential({
-    masterKeyHex,
-    accountId: conn.id,
-    sealed: { nonce: conn.nonce, ciphertext: conn.ciphertext, authTag: conn.authTag },
-  });
+  let token: string;
+  try {
+    token = decryptCredential({
+      masterKeyHex,
+      accountId: conn.id,
+      sealed: { nonce: conn.nonce, ciphertext: conn.ciphertext, authTag: conn.authTag },
+    });
+  } catch (err) {
+    // A wrong/rotated CREDENTIAL_ENCRYPTION_KEY throws here, before the sync's
+    // own try/catch. Without this branch the throw escapes past the status
+    // update below and the row keeps a stale status='ok' — the operator sees a
+    // healthy connection while nothing syncs (#270).
+    const message = `credential decrypt failed: ${safeErrorMessage(err)}`;
+    input.logger?.warn({ orgId, err: safeErrorMessage(err) }, "github sync: credential decrypt failed");
+    await db
+      .update(githubConnections)
+      .set({
+        status: "sync_error",
+        lastSyncAt: new Date(),
+        lastSyncError: message.slice(0, MAX_ERROR_CHARS),
+        updatedAt: new Date(),
+      })
+      .where(eq(githubConnections.id, conn.id));
+    return { ...emptyResult(), status: "sync_error", errors: [message] };
+  }
   const client = createGithubClient({ token, fetchImpl });
 
   let status: SyncOrgResult["status"] = "ok";
@@ -142,6 +169,7 @@ export async function syncOrg(input: SyncOrgInput): Promise<SyncOrgResult> {
           client,
           orgId,
           ownerLogin: conn.ownerLogin,
+          logger: input.logger,
         });
         totals.projectItems = r.projectItems;
       } catch (err) {

@@ -76,10 +76,11 @@ async function insertConnection(
   db: Database,
   orgId: string,
   overrides: Partial<typeof githubConnections.$inferInsert> = {},
+  sealKeyHex: string = MASTER_KEY,
 ) {
   const id = crypto.randomUUID();
   const sealed = encryptCredential({
-    masterKeyHex: MASTER_KEY,
+    masterKeyHex: sealKeyHex,
     accountId: id,
     plaintext: TOKEN,
   });
@@ -240,6 +241,28 @@ describe("syncOrg", () => {
       await db.select().from(githubConnections).where(eq(githubConnections.orgId, org.id))
     )[0]!;
     expect(conn.status).toBe("rate_limited");
+  });
+
+  it("persists sync_error when the sealed PAT cannot be decrypted", async () => {
+    const org = await insertOrg(db);
+    // Seal with a DIFFERENT master key than the one syncOrg is given.
+    await insertConnection(db, org.id, {}, "cd".repeat(32));
+    const warnCalls: Array<{ obj: Record<string, unknown>; msg?: string }> = [];
+    const logger = {
+      info: () => {},
+      warn: (obj: Record<string, unknown>, msg?: string) => void warnCalls.push({ obj, msg }),
+      error: () => {},
+    };
+    const res = await syncOrg({ db, masterKeyHex: MASTER_KEY, orgId: org.id, logger });
+    expect(res.status).toBe("sync_error");
+    expect(res.errors[0]).toContain("credential");
+    const conn = (await db.select().from(githubConnections).where(eq(githubConnections.orgId, org.id)))[0]!;
+    expect(conn.status).toBe("sync_error");
+    expect(conn.lastSyncError).not.toBeNull();
+    expect(conn.lastSyncError).not.toContain(TOKEN);
+    expect(conn.lastSyncAt).not.toBeNull();
+    expect(warnCalls).toHaveLength(1);
+    expect(warnCalls[0]!.msg).toContain("credential");
   });
 
   it("skips when no connection or disabled", async () => {

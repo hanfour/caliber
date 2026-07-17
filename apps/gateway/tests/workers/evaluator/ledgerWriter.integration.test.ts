@@ -213,4 +213,33 @@ describe("createLedgerWriter (integration)", () => {
     );
     expect(rows.rows[0]!.count).toBe("1");
   });
+
+  it("does NOT increment gwLlmCostUsdTotal on a deduped no-op insert (0033 bonus fix)", async () => {
+    // Regression guard: before 0033, `.inc` ran unconditionally, so a BullMQ
+    // retry that hit the dedup conflict still double-counted cost even
+    // though no second row landed. It must now only fire on an actual insert.
+    const inc = vi.fn();
+    const metricsStub = { gwLlmCostUsdTotal: { inc } } as never;
+    const write = createLedgerWriter(db, metricsStub);
+    const dupRow = {
+      orgId,
+      eventType: "facet_extraction",
+      model: "claude-haiku-4-5",
+      tokensInput: 10,
+      tokensOutput: 5,
+      costUsd: 0.05,
+      refType: "request_body_facet",
+      refId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    } as const;
+
+    await write(dupRow);
+    await write(dupRow); // dedup no-op
+
+    expect(inc).toHaveBeenCalledTimes(1);
+
+    const rows = await db.execute<{ count: string }>(
+      sql`SELECT COUNT(*)::text AS count FROM llm_usage_events WHERE org_id = ${orgId}`,
+    );
+    expect(rows.rows[0]!.count).toBe("1");
+  });
 });

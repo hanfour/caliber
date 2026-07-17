@@ -2,8 +2,10 @@
  * Integration tests for the deep-analysis budget gate + ledger writer
  * (Per-project scoring PR2 — closes the spend-blind gap).
  *
- * Real Postgres testcontainer (so migration 0022's `llm_usage_dedup_idx`
- * partial unique index exists — the writer's `onConflictDoNothing` targets it).
+ * Real Postgres testcontainer (so the partial unique indexes exist): the
+ * deep-analysis writer dedups on 0033's `llm_usage_request_dedup_idx`, while
+ * 0022's `llm_usage_dedup_idx` — narrowed by 0033 to request-id-less rows —
+ * still guards the facet writer and legacy rows.
  *
  * Cases (per Task 2 brief, step 3):
  *   (a) org over budget → deepAnalysisBudgetGate({enforce:true}) → { skip: true }
@@ -265,6 +267,22 @@ describe("deepAnalysisBudgetGate", () => {
 
     expect(result.skip).toBe(false);
   });
+
+  it("fires onBudgetEvent even when no metrics are supplied (Task 5: the conditional-metrics bug)", async () => {
+    await setBudget("0.50");
+    await seedSpend("0.75"); // month-to-date 0.75 > 0.50 budget → halted/exceeded
+
+    const events: unknown[] = [];
+    const gate = await deepAnalysisBudgetGate({
+      db,
+      orgId,
+      enforce: true,
+      onBudgetEvent: (e) => void events.push(e),
+    });
+
+    expect(gate.skip).toBe(true);
+    expect(events).toHaveLength(1);
+  });
 });
 
 describe("writeDeepAnalysisLedger", () => {
@@ -368,6 +386,41 @@ describe("writeDeepAnalysisLedger", () => {
 
     expect(res.written).toBe(false);
     expect(await countLedger(reportId)).toBe(0);
+  });
+
+  it("(0033) a manual regenerate — same reportId, NEW request id — ledgers as its OWN row (does not dedup)", async () => {
+    // The money bug: the OLD dedup target was (ref_type, ref_id, event_type)
+    // keyed on the STABLE reportId, so a manual regenerate that re-spent real
+    // LLM money against the same report was silently swallowed as a dedup
+    // no-op — getMonthSpend under-counted and the budget gate went blind.
+    // Dedup now targets usage_log_request_id, so two DIFFERENT real upstream
+    // calls against the same reportId must both land.
+    const reportId = randomUuid();
+    const reqId1 = "req-deep-regen-001";
+    const reqId2 = "req-deep-regen-002";
+    await seedUsageLog(reqId1, { totalCost: "0.1000000000" });
+    await seedUsageLog(reqId2, { totalCost: "0.2000000000" });
+
+    const first = await writeDeepAnalysisLedger({
+      db,
+      orgId,
+      reportId,
+      refType: REF_TYPE_PERSON,
+      usageLogRequestId: reqId1,
+      sleepMs: noopSleep,
+    });
+    const second = await writeDeepAnalysisLedger({
+      db,
+      orgId,
+      reportId,
+      refType: REF_TYPE_PERSON,
+      usageLogRequestId: reqId2,
+      sleepMs: noopSleep,
+    });
+
+    expect(first.written).toBe(true);
+    expect(second.written).toBe(true); // NOT deduped — a real second spend
+    expect(await countLedger(reportId)).toBe(2);
   });
 
   it("refType is parameterised so PR3 can pass the per-key variant", async () => {

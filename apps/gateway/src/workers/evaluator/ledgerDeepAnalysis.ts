@@ -17,8 +17,13 @@
  *      `tokens_input` / `tokens_output` / `cost_usd` from the loopback
  *      `usage_logs` row the call produced (NOT-NULL columns — never a
  *      placeholder), and writes ONE `llm_usage_events` row with
- *      `onConflictDoNothing` against the `llm_usage_dedup_idx` partial unique
- *      index so BullMQ retries (attempts=3) cannot double-count.
+ *      `onConflictDoNothing` against the `llm_usage_request_dedup_idx` partial
+ *      unique index (migration 0033, keyed on `usage_log_request_id`) so
+ *      BullMQ retries (attempts=3) of the SAME upstream call cannot
+ *      double-count, while a manual regenerate (same reportId, a NEW request
+ *      id) still ledgers as its own row — the old `(ref_type, ref_id,
+ *      event_type)` index keyed on the STABLE reportId and silently swallowed
+ *      that real re-spend as a dedup no-op (#270).
  *
  * Honest-accounting contract (spec §6): the ledger row is written
  * UNCONDITIONALLY on success. The `EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS`
@@ -95,7 +100,7 @@ export function isDeepAnalysisEnforceEnabled(
 
 // ── Budget gate ──────────────────────────────────────────────────────────────
 
-type BudgetGateMetrics = Pick<
+export type BudgetGateMetrics = Pick<
   GatewayMetrics,
   "gwLlmBudgetWarnTotal" | "gwLlmBudgetExceededTotal"
 >;
@@ -130,7 +135,13 @@ export async function deepAnalysisBudgetGate(
   }
 
   const deps = createBudgetDeps(input.db);
-  const enforce = input.metrics
+  // Route through wrapEnforceBudget whenever EITHER metrics OR onBudgetEvent
+  // is present — the prior `input.metrics ? ... : ...` ternary silently
+  // dropped an onBudgetEvent passed without metrics (Task 5: the webhook
+  // alert never fired). wrapEnforceBudget's `metrics` param is optional and
+  // `?.`-guards its `.inc(...)` sites, so passing `undefined` metrics here is
+  // safe.
+  const enforce = input.metrics || input.onBudgetEvent
     ? wrapEnforceBudget(deps, input.metrics, input.onBudgetEvent)
     : (orgId: string, est: number) => enforceBudgetCore(orgId, est, deps);
 
@@ -198,8 +209,11 @@ export interface WriteDeepAnalysisLedgerResult {
  *   NOTHING (the NOT-NULL token columns cannot be honestly satisfied; we never
  *   write a 0/placeholder).
  * - INSERT uses `onConflictDoNothing` targeting the partial unique index
- *   `llm_usage_dedup_idx (ref_type, ref_id, event_type) WHERE ref_id IS NOT
- *   NULL`, so a BullMQ retry that re-runs the whole job cannot double-count.
+ *   `llm_usage_request_dedup_idx (usage_log_request_id) WHERE
+ *   usage_log_request_id IS NOT NULL` (migration 0033), so a BullMQ retry
+ *   that re-runs the whole job (same x-request-id) cannot double-count,
+ *   while a manual regenerate (new x-request-id, same reportId) still
+ *   ledgers as its own row.
  */
 export async function writeDeepAnalysisLedger(
   input: WriteDeepAnalysisLedgerInput,
@@ -265,14 +279,11 @@ export async function writeDeepAnalysisLedger(
       costUsd: recovered.totalCost,
       refType: input.refType,
       refId: input.reportId,
+      usageLogRequestId: input.usageLogRequestId,
     })
     .onConflictDoNothing({
-      target: [
-        llmUsageEvents.refType,
-        llmUsageEvents.refId,
-        llmUsageEvents.eventType,
-      ],
-      where: sql`${llmUsageEvents.refId} IS NOT NULL`,
+      target: llmUsageEvents.usageLogRequestId,
+      where: sql`${llmUsageEvents.usageLogRequestId} IS NOT NULL`,
     })
     .returning({ id: llmUsageEvents.id });
 

@@ -63,6 +63,7 @@ describe("migration 0004 cost infra", () => {
       "ref_type",
       "ref_id",
       "created_at",
+      "usage_log_request_id", // added by migration 0033
     ]);
   });
 

@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   buildDeliveryQualityPrompt,
   QUALITY_RETRY_SUFFIX,
+  MAX_REVIEW_COMMENTS,
+  PR_BODY_MAX_CHARS,
+  REVIEW_COMMENT_MAX_CHARS,
+  PR_TITLE_MAX_CHARS,
   type QualityPromptPr,
 } from "../../src/delivery/qualityPrompt";
 
@@ -63,5 +67,98 @@ describe("buildDeliveryQualityPrompt", () => {
     expect(QUALITY_RETRY_SUFFIX).toBe(
       "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object — no fences, no commentary.",
     );
+  });
+
+  it("never emits a lone surrogate when the cap bisects an emoji", () => {
+    // "😀" is a surrogate pair (2 code units). Placing it so the body cap lands
+    // between its halves is the emoji-at-the-boundary case: a naive slice would
+    // leave a trailing lone high surrogate in the prompt, risking an upstream
+    // 400 that burns all three BullMQ retries on an identical payload.
+    const { user } = buildDeliveryQualityPrompt({
+      windowDays: 30,
+      quantTotal: 88,
+      sectionSummary: [],
+      prs: [
+        {
+          repoFullName: "acme/web",
+          number: 1,
+          title: "t",
+          body: "B".repeat(PR_BODY_MAX_CHARS - 1) + "😀" + "tail",
+          diff: "diff --git a/x b/x",
+          reviewComments: ["C".repeat(REVIEW_COMMENT_MAX_CHARS - 1) + "😀" + "tail"],
+        },
+      ],
+    });
+    // Every surrogate code unit left in the prompt must be part of a valid pair.
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    expect(lone.test(user)).toBe(false);
+    expect(user).toContain("…[truncated]");
+  });
+
+  it("caps an oversized PR body, comment and title with a visible marker", () => {
+    const { user } = buildDeliveryQualityPrompt({
+      windowDays: 30,
+      quantTotal: 88,
+      sectionSummary: [],
+      prs: [
+        {
+          repoFullName: "acme/web",
+          number: 1,
+          title: "T".repeat(PR_TITLE_MAX_CHARS + 50),
+          body: "B".repeat(PR_BODY_MAX_CHARS + 5_000),
+          diff: "diff --git a/x b/x",
+          reviewComments: ["C".repeat(REVIEW_COMMENT_MAX_CHARS + 500), "short one"],
+        },
+      ],
+    });
+    expect(user).not.toContain("B".repeat(PR_BODY_MAX_CHARS + 1));
+    expect(user).not.toContain("C".repeat(REVIEW_COMMENT_MAX_CHARS + 1));
+    expect(user).not.toContain("T".repeat(PR_TITLE_MAX_CHARS + 1));
+    expect(user).toContain("…[truncated]");
+    expect(user).toContain("short one"); // untouched sibling
+  });
+
+  it("leaves under-cap content byte-identical", () => {
+    const { user } = buildDeliveryQualityPrompt({
+      windowDays: 30,
+      quantTotal: 88,
+      sectionSummary: [],
+      prs: [
+        {
+          repoFullName: "acme/web",
+          number: 1,
+          title: "fix: thing",
+          body: "short body",
+          diff: "diff --git a/x b/x",
+          reviewComments: ["nice"],
+        },
+      ],
+    });
+    expect(user).toContain("short body");
+    expect(user).toContain("nice");
+    expect(user).not.toContain("…[truncated]");
+  });
+
+  it("caps the comment COUNT at MAX_REVIEW_COMMENTS", () => {
+    const { user } = buildDeliveryQualityPrompt({
+      windowDays: 30,
+      quantTotal: 88,
+      sectionSummary: [],
+      prs: [
+        {
+          repoFullName: "acme/web",
+          number: 1,
+          title: "t",
+          body: null,
+          diff: "d",
+          reviewComments: Array.from(
+            { length: MAX_REVIEW_COMMENTS + 5 },
+            (_, i) => `comment-${i}`,
+          ),
+        },
+      ],
+    });
+    expect(user).toContain(`comment-${MAX_REVIEW_COMMENTS - 1}`);
+    expect(user).not.toContain(`comment-${MAX_REVIEW_COMMENTS}`);
   });
 });

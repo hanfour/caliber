@@ -4,6 +4,7 @@
  * The system message pins a strict JSON-only output contract so the
  * companion parser (qualityParser.ts) can coerce the reply reliably.
  */
+import { stripInvalidJsonbChars } from "../util/jsonbText.js";
 
 export interface QualityPromptPr {
   repoFullName: string;
@@ -31,7 +32,28 @@ export interface DeliveryQualityPrompt {
   user: string;
 }
 
-const MAX_REVIEW_COMMENTS = 20;
+export const MAX_REVIEW_COMMENTS = 20;
+export const PR_BODY_MAX_CHARS = 4_000;
+export const REVIEW_COMMENT_MAX_CHARS = 1_000;
+export const PR_TITLE_MAX_CHARS = 300;
+
+const TRUNCATED_MARKER = "\n…[truncated]\n";
+
+/**
+ * Cap free-form GitHub text. Never throws; marker is visible to the model.
+ *
+ * The slice is stripped because cutting at a code-unit offset can bisect an
+ * emoji's surrogate pair, and a lone surrogate in the prompt risks an upstream
+ * 400 — which rethrows as a transport error and burns all three BullMQ retries
+ * on a deterministically-identical payload. That is the same retry-burn this
+ * cap exists to prevent, just triggered by an emoji instead of raw length.
+ * Same strip-after-slice idiom as qualityParser.ts's quote handling.
+ */
+function capText(text: string, maxChars: number): string {
+  return text.length <= maxChars
+    ? text
+    : stripInvalidJsonbChars(text.slice(0, maxChars)) + TRUNCATED_MARKER;
+}
 
 const SYSTEM_PROMPT = [
   "You are a senior engineer assessing the delivery quality of a teammate's recent merged pull requests, based on the real PR titles, descriptions, review comments, and diffs provided in the user message.",
@@ -74,13 +96,15 @@ export function buildDeliveryQualityPrompt(
 function formatPr(pr: QualityPromptPr): string {
   const comments = pr.reviewComments.slice(0, MAX_REVIEW_COMMENTS);
   return [
-    `## ${pr.repoFullName}#${pr.number} — ${pr.title}`,
+    `## ${pr.repoFullName}#${pr.number} — ${capText(pr.title, PR_TITLE_MAX_CHARS)}`,
     "",
     "### Description",
-    pr.body ?? "(no description)",
+    capText(pr.body ?? "(no description)", PR_BODY_MAX_CHARS),
     "",
     `### Review comments (${comments.length})`,
-    ...(comments.length > 0 ? comments.map((c) => `- ${c}`) : ["(none)"]),
+    ...(comments.length > 0
+      ? comments.map((c) => `- ${capText(c, REVIEW_COMMENT_MAX_CHARS)}`)
+      : ["(none)"]),
     "",
     "### Diff",
     "```diff",

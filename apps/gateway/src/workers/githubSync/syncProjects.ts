@@ -72,37 +72,66 @@ interface ItemsPage {
   } | null;
 }
 
+interface LoggerLike {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
+// Safety caps, mirroring the REST client's precedent (githubClient.ts:117-119):
+// a server returning `hasNextPage: true` with a non-advancing `endCursor`
+// must not loop forever.
+export const PROJECTS_MAX_PAGES = 50;
+export const PROJECT_ITEMS_MAX_PAGES = 50;
+
 export interface SyncOrgProjectsInput {
   db: Database;
   client: GithubClient;
   orgId: string;
   ownerLogin: string;
+  logger?: LoggerLike;
 }
 
 export async function syncOrgProjects(
   input: SyncOrgProjectsInput,
 ): Promise<{ projectItems: number }> {
-  const { db, client, orgId, ownerLogin } = input;
+  const { db, client, orgId, ownerLogin, logger } = input;
   let count = 0;
 
   let projCursor: string | null = null;
-  do {
-    const page: ProjectsPage = await client.graphql<ProjectsPage>(
+  for (let page = 0; page < PROJECTS_MAX_PAGES; page++) {
+    const projPage: ProjectsPage = await client.graphql<ProjectsPage>(
       PROJECTS_QUERY,
       { owner: ownerLogin, cursor: projCursor },
     );
-    const conn = page.organization?.projectsV2;
-    if (!conn) break;
+    const conn = projPage.organization?.projectsV2;
+    if (!conn) {
+      logger?.warn(
+        { orgId, ownerLogin },
+        "github projects: no projects connection returned (token may lack Projects: read)",
+      );
+      break;
+    }
 
     for (const project of conn.nodes) {
       let itemCursor: string | null = null;
-      do {
+      for (
+        let itemPage = 0;
+        itemPage < PROJECT_ITEMS_MAX_PAGES;
+        itemPage++
+      ) {
         const itemsPage: ItemsPage = await client.graphql<ItemsPage>(
           PROJECT_ITEMS_QUERY,
           { projectId: project.id, cursor: itemCursor },
         );
         const items = itemsPage.node?.items;
-        if (!items) break;
+        if (!items) {
+          logger?.warn(
+            { orgId, projectId: project.id },
+            "github projects: no items connection returned",
+          );
+          break;
+        }
 
         for (const raw of items.nodes) {
           const node: GithubProjectItemNode = {
@@ -137,10 +166,24 @@ export async function syncOrgProjects(
           count++;
         }
         itemCursor = items.pageInfo.hasNextPage ? items.pageInfo.endCursor : null;
-      } while (itemCursor !== null);
+        if (itemCursor === null) break;
+      }
+      if (itemCursor !== null) {
+        logger?.warn(
+          { orgId, projectId: project.id, cap: PROJECT_ITEMS_MAX_PAGES },
+          "github projects: hit the item page cap; later items skipped",
+        );
+      }
     }
     projCursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
-  } while (projCursor !== null);
+    if (projCursor === null) break;
+  }
+  if (projCursor !== null) {
+    logger?.warn(
+      { orgId, ownerLogin, cap: PROJECTS_MAX_PAGES },
+      "github projects: hit the project page cap; later projects skipped",
+    );
+  }
 
   return { projectItems: count };
 }
