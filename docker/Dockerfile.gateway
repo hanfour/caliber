@@ -22,6 +22,7 @@ COPY packages/config/package.json packages/config/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/evaluator/package.json packages/evaluator/package.json
 COPY packages/gateway-core/package.json packages/gateway-core/package.json
+COPY packages/queue/package.json packages/queue/package.json
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
@@ -35,6 +36,7 @@ COPY packages/config packages/config
 COPY packages/db packages/db
 COPY packages/evaluator packages/evaluator
 COPY packages/gateway-core packages/gateway-core
+COPY packages/queue packages/queue
 RUN pnpm turbo run build --filter=@caliber/gateway...
 RUN pnpm --filter=@caliber/gateway deploy --prod /out
 
