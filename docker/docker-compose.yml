@@ -77,6 +77,11 @@ x-app-env: &app-env
   # surprise halts. The two caps bound how many keys can be scored.
   ENABLE_PROJECT_EVALUATION: ${ENABLE_PROJECT_EVALUATION:-false}
   EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS: ${EVALUATOR_BUDGET_ENFORCE_DEEP_ANALYSIS:-true}
+  # Independent GitHub delivery-scoring track (org fine-grained PAT → sync →
+  # quant + LLM quality). Gates BOTH the api tRPC procedures (NOT_FOUND when
+  # off) and the gateway sync/delivery worker pipeline, so it MUST reach both
+  # containers via this anchor — setting it only in .env has no effect.
+  ENABLE_GITHUB_DELIVERY: ${ENABLE_GITHUB_DELIVERY:-false}
   EVALUATOR_MAX_PROJECT_KEYS_PER_USER: ${EVALUATOR_MAX_PROJECT_KEYS_PER_USER:-20}
   MAX_PROJECT_KEYS_PER_ORG: ${MAX_PROJECT_KEYS_PER_ORG:-50}
 
