@@ -48,4 +48,25 @@ describe("UpstreamOwnList", () => {
     render(<UpstreamOwnList />);
     expect(screen.queryByRole("button", { name: "Rotate credential for My key" })).not.toBeInTheDocument();
   });
+  it("shows the Re-authorize action for an ACTIVE oauth upstream (proactive refresh, not only on failure)", () => {
+    listOwnQuery.mockReturnValue({ data: [{ ...baseRow, type: "oauth", platform: "anthropic" }], isLoading: false, error: null });
+    render(<UpstreamOwnList />);
+    expect(screen.getByRole("button", { name: "Re-authorize My key" })).toBeInTheDocument();
+  });
+  it("still shows the Re-authorize action for an EXPIRED oauth upstream", () => {
+    // expiresAt in the past → deriveAccountStatus = "expired"
+    listOwnQuery.mockReturnValue({ data: [{ ...baseRow, type: "oauth", platform: "openai", expiresAt: "2020-01-01T00:00:00Z" }], isLoading: false, error: null });
+    render(<UpstreamOwnList />);
+    expect(screen.getByRole("button", { name: "Re-authorize My key" })).toBeInTheDocument();
+  });
+  it("does NOT show the Re-authorize action for an api_key upstream", () => {
+    listOwnQuery.mockReturnValue({ data: [baseRow], isLoading: false, error: null });
+    render(<UpstreamOwnList />);
+    expect(screen.queryByRole("button", { name: "Re-authorize My key" })).not.toBeInTheDocument();
+  });
+  it("does NOT show the Re-authorize action for an unsupported oauth platform", () => {
+    listOwnQuery.mockReturnValue({ data: [{ ...baseRow, type: "oauth", platform: "gemini" }], isLoading: false, error: null });
+    render(<UpstreamOwnList />);
+    expect(screen.queryByRole("button", { name: "Re-authorize My key" })).not.toBeInTheDocument();
+  });
 });
