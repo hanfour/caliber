@@ -119,9 +119,15 @@ export function UpstreamOwnList() {
                               <RefreshCw className="h-4 w-4" />
                             </Button>
                           )}
+                          {/* Re-authorize is available for ANY own OAuth upstream, not
+                              only expired/error ones: a member may want to proactively
+                              refresh a still-working authorization (re-consent, scope
+                              change, or a credential misbehaving before its status
+                              flips) without deleting and re-creating the upstream. The
+                              wizard re-runs the OAuth flow against the SAME upstream id,
+                              so an active credential is simply refreshed in place. */}
                           {row.type === "oauth" &&
-                            (row.platform === "openai" || row.platform === "anthropic") &&
-                            ["expired", "error"].includes(deriveAccountStatus(row)) && (
+                            (row.platform === "openai" || row.platform === "anthropic") && (
                               <Button
                                 variant="ghost"
                                 size="sm"
