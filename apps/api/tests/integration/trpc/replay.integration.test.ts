@@ -12,8 +12,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import pg from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "@caliber/db";
+import * as schema from "@caliber/db/schema";
 import {
   apiKeys,
   auditLogs,
@@ -33,6 +36,8 @@ import {
   defaultTestRedis,
   noopTestLogger,
 } from "../../factories/index.js";
+// Not re-exported from factories/index.js — imported from the module directly.
+import { ignorePoolTeardownErrors } from "../../factories/db.js";
 import { createCallerFactory } from "../../../src/trpc/procedures.js";
 import { appRouter } from "../../../src/trpc/router.js";
 import { REPLAY_HOURLY_LIMIT } from "../../../src/trpc/routers/replay.js";
@@ -567,6 +572,67 @@ describe("replay.enqueue", () => {
 
     expect(q.add).toHaveBeenCalledTimes(REPLAY_HOURLY_LIMIT);
     expect(await runsFor(t.db, s.requestId)).toHaveLength(REPLAY_HOURLY_LIMIT);
+  });
+
+  it(`${REPLAY_HOURLY_LIMIT + 10} CONCURRENT calls still buy only ${REPLAY_HOURLY_LIMIT} replays`, async () => {
+    // The sequential test above passes with or without a lock, so it does not
+    // cover the real threat: the only limiter in front of this endpoint is the
+    // global /trpc one at API_TRPC_RPM_LIMIT=2000 per minute, so an authorised
+    // caller can fire hundreds of enqueues at once. Counting outside the
+    // transaction lets every one of them read the same pre-limit count and
+    // buy a paid upstream call.
+    const s = await seedScenario(t.db);
+    const attempts = REPLAY_HOURLY_LIMIT + 10;
+
+    // A dedicated, larger pool. The shared fixture pool (factories/db.ts) uses
+    // node-postgres' default max of 10, which would throttle these calls into
+    // batches of 10 — and 10 divides REPLAY_HOURLY_LIMIT exactly, so an
+    // unlocked implementation would coincidentally land on 20 and the test
+    // would pass for the wrong reason. With max >= attempts they are genuinely
+    // simultaneous, so removing the lock produces `attempts` rows and fails.
+    const pool = ignorePoolTeardownErrors(
+      new pg.Pool({ connectionString: t.url, max: attempts + 5 }),
+    );
+    const concurrentDb = drizzle(pool, { schema }) as unknown as Database;
+
+    try {
+      const q = makeFakeQueue();
+      const callers = await Promise.all(
+        Array.from({ length: attempts }, () =>
+          callerFor({
+            db: concurrentDb,
+            userId: s.owner.id,
+            replayQueue: q.queue,
+          }),
+        ),
+      );
+
+      const results = await Promise.allSettled(
+        callers.map((c) =>
+          c.replay.enqueue({
+            orgId: s.org.id,
+            requestId: s.requestId,
+            targetModel: TARGET_MODEL,
+          }),
+        ),
+      );
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+
+      expect(fulfilled).toHaveLength(REPLAY_HOURLY_LIMIT);
+      expect(rejected).toHaveLength(attempts - REPLAY_HOURLY_LIMIT);
+      for (const r of rejected) {
+        expect(r.reason).toMatchObject({ code: "TOO_MANY_REQUESTS" });
+      }
+
+      // The rows are what actually cost money — assert on them, not just on
+      // the returned promises.
+      expect(await runsFor(t.db, s.requestId)).toHaveLength(REPLAY_HOURLY_LIMIT);
+      expect(q.add).toHaveBeenCalledTimes(REPLAY_HOURLY_LIMIT);
+    } finally {
+      await pool.end();
+    }
   });
 
   it("one user's spent quota does not block another user", async () => {

@@ -186,9 +186,9 @@ export const replayRouter = router({
    *   2. source lookup       → NOT_FOUND
    *   3. permission          → FORBIDDEN
    *   4. fidelity precheck   → PRECONDITION_FAILED
-   *   5. rate limit          → TOO_MANY_REQUESTS
-   *   6. INSERT + audit in one transaction
-   *   7. enqueue — only after (6) has committed
+   *   5. one transaction, behind a per-user advisory lock: count the last
+   *      hour's runs → TOO_MANY_REQUESTS, else INSERT the run + its audit row
+   *   6. enqueue — only after (5) has committed
    */
   enqueue: evaluatorProcedure
     .input(enqueueInput)
@@ -259,35 +259,57 @@ export const replayRouter = router({
         });
       }
 
-      // ── Rate limit ────────────────────────────────────────────────────────
-      // Count-then-insert, so N genuinely simultaneous calls from one user can
-      // each read the same sub-limit count and overshoot by up to N-1. Making
-      // this exact needs a per-user lock held across the INSERT; the ceiling
-      // exists to stop click-spam from draining a budget, and a bounded
-      // overshoot under true concurrency does not defeat that. Deliberate.
+      // ── Rate limit, then persist, then enqueue ────────────────────────────
+      // Counting and inserting live in ONE transaction behind a per-user
+      // advisory lock. Counting on `ctx.db` before the transaction would not
+      // bound spend at all: the only other limiter in front of this endpoint is
+      // the global per-user /trpc limiter, whose default is
+      // API_TRPC_RPM_LIMIT=2000 per minute, so an authorised caller can fire
+      // hundreds of concurrent enqueues, have every one of them read the same
+      // pre-limit count, and buy hundreds of paid upstream calls against a
+      // ceiling of 20. The limit exists precisely to stop that.
+      //
+      // `pg_advisory_xact_lock` is transaction-scoped: it releases on commit or
+      // rollback, so no path can leak it. Concurrent calls from one user
+      // serialise on the same key and each sees its predecessors' committed
+      // rows — that relies on READ COMMITTED (the default), where every
+      // statement takes a fresh snapshot, so the count *after* the lock sees
+      // whatever committed while we waited for it.
+      //
+      // `hashtext` collisions between two different users cost only some
+      // needless serialisation, never a wrong answer: the count itself is
+      // always filtered by `triggered_by`.
+      //
+      // Postgres stays the source of truth deliberately — a Redis counter would
+      // be atomic but could drift from the rows it claims to count, and the
+      // rows are what actually cost money.
+      //
+      // The audit row shares this transaction too, so a replay can never exist
+      // without the record of who started it.
       const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
-      const recentRuns = await ctx.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(replayRuns)
-        .where(
-          and(
-            eq(replayRuns.triggeredBy, ctx.user.id),
-            gte(replayRuns.createdAt, windowStart),
-          ),
-        )
-        .then((r) => r[0]?.count ?? 0);
-
-      if (recentRuns >= REPLAY_HOURLY_LIMIT) {
-        throw new TRPCError({
-          code: "TOO_MANY_REQUESTS",
-          message: `Replay limit reached: at most ${REPLAY_HOURLY_LIMIT} replays per hour`,
-        });
-      }
-
-      // ── Persist, then enqueue ─────────────────────────────────────────────
-      // The audit row shares the transaction with the run so a replay can never
-      // exist without the record of who started it.
       const runId = await ctx.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${ctx.user.id})::bigint)`,
+        );
+
+        const recentRuns = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(replayRuns)
+          .where(
+            and(
+              eq(replayRuns.triggeredBy, ctx.user.id),
+              gte(replayRuns.createdAt, windowStart),
+            ),
+          )
+          .then((r) => r[0]?.count ?? 0);
+
+        if (recentRuns >= REPLAY_HOURLY_LIMIT) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: `Replay limit reached: at most ${REPLAY_HOURLY_LIMIT} replays per hour`,
+          });
+        }
+
         const inserted = await tx
           .insert(replayRuns)
           .values({
