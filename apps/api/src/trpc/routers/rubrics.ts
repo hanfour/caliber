@@ -7,7 +7,7 @@ import {
   organizations,
   requestBodyFacets,
   rubrics,
-  usageLogs,
+  usageLogsScored,
 } from "@caliber/db";
 import type { Database } from "@caliber/db";
 import { can } from "@caliber/auth";
@@ -471,23 +471,25 @@ export const rubricsRouter = router({
         periodEnd.getTime() - input.days * 24 * 60 * 60 * 1000,
       );
 
+      // 讀 usage_logs_scored 而非 usage_logs：重放流量不得計入任何人的分數。
+      // 判準——「這個人這段期間做了什麼」用 view，「這一筆花多少錢」用原表。
       const usageRowsRaw = await ctx.db
         .select({
-          requestId: usageLogs.requestId,
-          requestedModel: usageLogs.requestedModel,
-          inputTokens: usageLogs.inputTokens,
-          outputTokens: usageLogs.outputTokens,
-          cacheReadTokens: usageLogs.cacheReadTokens,
-          cacheCreationTokens: usageLogs.cacheCreationTokens,
-          totalCost: usageLogs.totalCost,
+          requestId: usageLogsScored.requestId,
+          requestedModel: usageLogsScored.requestedModel,
+          inputTokens: usageLogsScored.inputTokens,
+          outputTokens: usageLogsScored.outputTokens,
+          cacheReadTokens: usageLogsScored.cacheReadTokens,
+          cacheCreationTokens: usageLogsScored.cacheCreationTokens,
+          totalCost: usageLogsScored.totalCost,
         })
-        .from(usageLogs)
+        .from(usageLogsScored)
         .where(
           and(
-            eq(usageLogs.orgId, input.orgId),
-            eq(usageLogs.userId, input.userId),
-            gte(usageLogs.createdAt, periodStart),
-            lt(usageLogs.createdAt, periodEnd),
+            eq(usageLogsScored.orgId, input.orgId),
+            eq(usageLogsScored.userId, input.userId),
+            gte(usageLogsScored.createdAt, periodStart),
+            lt(usageLogsScored.createdAt, periodEnd),
           ),
         );
 

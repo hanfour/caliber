@@ -16,7 +16,7 @@ import {
   evaluationReports,
   requestBodies,
   requestBodyFacets,
-  usageLogs,
+  usageLogsScored,
 } from "@caliber/db";
 import { decryptBody } from "../../capture/encrypt.js";
 import {
@@ -114,17 +114,19 @@ export async function runRuleBased(
   // only logs produced by that key are fetched.  Body/facet scoping follows
   // transitively because both queries use inArray(requestId, requestIds) derived
   // from this filtered usage set — no other changes needed.
+  // 讀 usage_logs_scored 而非 usage_logs：重放流量不得計入任何人的分數。
+  // 判準——「這個人這段期間做了什麼」用 view，「這一筆花多少錢」用原表。
   const usageRowsRaw = await db
     .select()
-    .from(usageLogs)
+    .from(usageLogsScored)
     .where(
       and(
-        eq(usageLogs.orgId, orgId),
-        eq(usageLogs.userId, userId),
-        gte(usageLogs.createdAt, periodStart),
-        lt(usageLogs.createdAt, periodEnd),
+        eq(usageLogsScored.orgId, orgId),
+        eq(usageLogsScored.userId, userId),
+        gte(usageLogsScored.createdAt, periodStart),
+        lt(usageLogsScored.createdAt, periodEnd),
         input.apiKeyId
-          ? eq(usageLogs.apiKeyId, input.apiKeyId)
+          ? eq(usageLogsScored.apiKeyId, input.apiKeyId)
           : undefined,
       ),
     );

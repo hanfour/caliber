@@ -28,7 +28,7 @@ import {
   apiKeys,
   organizations,
   organizationMembers,
-  usageLogs,
+  usageLogsScored,
   users,
 } from "@caliber/db";
 import {
@@ -172,15 +172,17 @@ export async function enqueueDailyEvaluatorJobs(
             eq(apiKeys.orgId, org.id),
             eq(apiKeys.evaluateAsProject, true),
             isNull(apiKeys.revokedAt),
+            // 讀 usage_logs_scored 而非 usage_logs：重放流量不得計入任何人的分數。
+            // 判準——「這個人這段期間做了什麼」用 view，「這一筆花多少錢」用原表。
             exists(
               db
                 .select({ one: sql<number>`1` })
-                .from(usageLogs)
+                .from(usageLogsScored)
                 .where(
                   and(
-                    eq(usageLogs.apiKeyId, apiKeys.id),
-                    gte(usageLogs.createdAt, yesterday00Utc),
-                    lt(usageLogs.createdAt, today00Utc),
+                    eq(usageLogsScored.apiKeyId, apiKeys.id),
+                    gte(usageLogsScored.createdAt, yesterday00Utc),
+                    lt(usageLogsScored.createdAt, today00Utc),
                   ),
                 ),
             ),

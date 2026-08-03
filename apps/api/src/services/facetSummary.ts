@@ -1,12 +1,14 @@
 import { and, eq, gte, lte } from "drizzle-orm";
 import type { Database } from "@caliber/db";
-import { requestBodyFacets, usageLogs } from "@caliber/db";
+import { requestBodyFacets, usageLogsScored } from "@caliber/db";
 
 /**
  * Aggregate facet stats for one (org, user, period) window.
  *
- * Joins `request_body_facets` to `usage_logs` (via request_id) so we can
+ * Joins `request_body_facets` to `usage_logs_scored` (via request_id) so we can
  * filter by the report subject (user_id) and the report window (created_at).
+ * The view excludes replay traffic, so replayed requests never reach a facet
+ * summary that feeds someone's report.
  *
  * Returns the same kind of summary the rule-engine signals consume, plus
  * raw counters useful for the report-page drill-down (Plan 4C follow-up #3).
@@ -57,7 +59,9 @@ export async function getFacetSummary(
   windowFrom: Date,
   windowTo: Date,
 ): Promise<FacetSummary> {
-  // Join facet → usage_logs to filter by user_id + ts.
+  // Join facet → usage_logs_scored to filter by user_id + ts.
+  // 讀 usage_logs_scored 而非 usage_logs：重放流量不得計入任何人的分數。
+  // 判準——「這個人這段期間做了什麼」用 view，「這一筆花多少錢」用原表。
   const rows = await db
     .select({
       sessionType: requestBodyFacets.sessionType,
@@ -69,13 +73,16 @@ export async function getFacetSummary(
       extractionError: requestBodyFacets.extractionError,
     })
     .from(requestBodyFacets)
-    .innerJoin(usageLogs, eq(requestBodyFacets.requestId, usageLogs.requestId))
+    .innerJoin(
+      usageLogsScored,
+      eq(requestBodyFacets.requestId, usageLogsScored.requestId),
+    )
     .where(
       and(
         eq(requestBodyFacets.orgId, orgId),
-        eq(usageLogs.userId, userId),
-        gte(usageLogs.createdAt, windowFrom),
-        lte(usageLogs.createdAt, windowTo),
+        eq(usageLogsScored.userId, userId),
+        gte(usageLogsScored.createdAt, windowFrom),
+        lte(usageLogsScored.createdAt, windowTo),
       ),
     );
 
