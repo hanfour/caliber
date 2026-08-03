@@ -147,7 +147,16 @@ export default defineConfig({
           // Probes GET / and receives 200 JSON so wait-on / the webServer
           // readiness check pass cleanly.
           command: `node apps/web/e2e/fixtures/run-fake-anthropic.mjs`,
-          cwd: "../..",
+          // Playwright resolves a relative webServer.cwd against the config
+          // FILE's directory (apps/web/e2e), not the process's cwd — so
+          // reaching the repo root (which `command`'s path is written
+          // relative to) needs three levels up (e2e→web→apps→root), not two.
+          // Two levels landed at `apps/`, so the spawned command's relative
+          // path resolved to `apps/apps/web/e2e/fixtures/...` and crashed
+          // with MODULE_NOT_FOUND on every local run (CI never hit this —
+          // isCI skips this whole webServer block and starts processes via
+          // nohup instead).
+          cwd: "../../..",
           url: `http://localhost:${FAKE_ANTHROPIC_PORT}/`,
           timeout: 30_000,
           reuseExistingServer: true,
