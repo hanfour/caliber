@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { trpc } from "@/lib/trpc/client";
@@ -48,6 +48,16 @@ export default function OrgRequestsPage() {
     { enabled: !!orgId },
   );
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  // Next.js's App Router reuses this page's component instance across
+  // /organizations/<A>/requests -> /organizations/<B>/requests navigations
+  // (same route pattern, different [id]) — without this reset, an admin
+  // switching orgs would keep the PREVIOUS org's selected member, which is
+  // at best a confusing "no permission" dead end and at worst silently
+  // shows the wrong org's member if the same user id happens to exist in
+  // both.
+  useEffect(() => {
+    setSelectedUserId(null);
+  }, [orgId]);
   const effectiveUserId = selectedUserId ?? perm?.userId ?? null;
 
   if (!orgId || !effectiveUserId) {
