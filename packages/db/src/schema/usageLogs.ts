@@ -10,6 +10,7 @@ import {
   inet,
   index,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { users } from "./auth.js";
 import { organizations, teams } from "./org.js";
 import { apiKeys } from "./apiKeys.js";
@@ -141,6 +142,8 @@ export const usageLogs = pgTable(
     teamTimeIdx: index("usage_logs_team_time_idx").on(t.teamId, t.createdAt),
     modelIdx: index("usage_logs_model_idx").on(t.requestedModel),
     groupTimeIdx: index("usage_logs_group_time_idx").on(t.groupId, t.createdAt),
-    replayIdx: index("usage_logs_replay_idx").on(t.replayOfRequestId),
+    replayIdx: index("usage_logs_replay_idx")
+      .on(t.replayOfRequestId)
+      .where(sql`${t.replayOfRequestId} IS NOT NULL`),
   }),
 );

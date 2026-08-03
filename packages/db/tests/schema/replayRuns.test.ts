@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { replayRuns } from "../../src/schema/replayRuns";
 import { usageLogs } from "../../src/schema/usageLogs";
 
@@ -29,6 +30,25 @@ describe("usageLogs schema — replay column", () => {
   it("exports replayOfRequestId", () => {
     const cols = Object.keys(usageLogs);
     expect(cols).toContain("replayOfRequestId");
+  });
+
+  // Pins the TS index definition to the PARTIAL index actually created by
+  // 0034_replay_runs.sql (`WHERE "replay_of_request_id" IS NOT NULL`).
+  // Without this, usage_logs_replay_idx could silently regress to a full
+  // index in TS (misrepresenting the DB) with no test catching it — the
+  // exact drift class the migration's own header comment warns about.
+  it("usage_logs_replay_idx is a partial index scoped to non-null replayOfRequestId", () => {
+    const { indexes } = getTableConfig(usageLogs);
+    const replayIdx = indexes.find(
+      (idx) => idx.config.name === "usage_logs_replay_idx",
+    );
+    expect(replayIdx).toBeDefined();
+    expect(replayIdx?.config.where).toBeDefined();
+
+    const { sql: whereSql } = new PgDialect().sqlToQuery(
+      replayIdx!.config.where!,
+    );
+    expect(whereSql).toBe('"usage_logs"."replay_of_request_id" IS NOT NULL');
   });
 });
 
