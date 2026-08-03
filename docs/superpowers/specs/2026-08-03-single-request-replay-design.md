@@ -103,22 +103,34 @@ partial index 讓非重放列（絕大多數）不佔索引空間。
 
 ## Component 2 — 污染防治：view，不是 14 個 WHERE
 
-`usage_logs` 目前有 **14 個查詢點散在 9 個檔案**：
+`usage_logs` 目前有 **14 個查詢點散在 9 個檔案**。逐一檢視用途後，只有**依
+user/org/期間做聚合**的查詢會被重放污染——那種查詢會把重放誤算成某人的工作。
+依 `requestId` 精準查單列的查詢不但不受影響，**改讀 view 反而會壞掉**。
+
+**必須改讀 view（4 處，聚合型）**
 
 ```
-6  apps/api/src/trpc/routers/usage.ts                        ← 成本側
-1  apps/api/src/trpc/routers/reports.ts                      ← 評分側
-1  apps/api/src/trpc/routers/rubrics.ts                      ← 評分側
-1  apps/api/src/services/facetSummary.ts                     ← 評分側
-1  apps/gateway/src/workers/evaluator/runRuleBased.ts        ← 評分側
-1  apps/gateway/src/workers/evaluator/runLlm.ts              ← 評分側
-1  apps/gateway/src/workers/evaluator/cron.ts                ← 評分側
-1  apps/gateway/src/workers/evaluator/ledgerDeepAnalysis.ts  ← 評分側
-1  apps/gateway/src/workers/githubDelivery/runDeliveryQuality.ts ← 評分側
+apps/api/src/trpc/routers/rubrics.ts:484              rubric 校準取某成員某期間全部 usage
+apps/api/src/services/facetSummary.ts:72              facet 聚合，join usage_logs 篩 user + 期間
+apps/gateway/src/workers/evaluator/runRuleBased.ts:119 評分主查詢
+apps/gateway/src/workers/evaluator/cron.ts:178        評分候選選取
 ```
 
-在 14 處各補一個 `AND replay_of_request_id IS NULL` 是「今天做對、半年後被新程式碼
-默默破壞」的解法，而破壞的形式是**某人的考績多了幾分**，不會有人察覺。
+**必須維持讀原表（4 處）**
+
+```
+apps/gateway/src/workers/evaluator/runLlm.ts:182               WHERE requestId = <該次 LLM 呼叫> 回填成本
+apps/gateway/src/workers/evaluator/ledgerDeepAnalysis.ts:242   同上，ledger 回填
+apps/gateway/src/workers/githubDelivery/runDeliveryQuality.ts:393  同上（pollUsageLogCost）
+apps/api/src/trpc/routers/reports.ts:767                       GDPR exportOwn，資料可攜需完整
+```
+
+前三者是單列成本回填：查的是「剛才那次呼叫花了多少錢」。若改讀 view，一旦該次
+呼叫本身帶有 `replay_of_request_id`（未來重放若要回填成本即是此情形），成本將
+**永遠查不回來**——view 看不到它。此處無污染風險（本就只查一列），換了純屬有害。
+
+在所有查詢點各補一個 `AND replay_of_request_id IS NULL` 則是「今天做對、半年後被
+新程式碼默默破壞」的解法，而破壞的形式是**某人的考績多了幾分**，不會有人察覺。
 
 改為預設安全：
 
@@ -128,12 +140,16 @@ CREATE VIEW usage_logs_scored AS
 ```
 
 本專案已有 view 前例（`packages/db/drizzle/0014_evaluator_events_view.sql`），
-不是新發明。消費端切成兩層：
+不是新發明。消費端切成三層：
 
-- **評分側 8 處** → 一律改讀 `usage_logs_scored`。日後新寫的評分程式碼沿用慣例
-  即自動安全。
+- **聚合型評分查詢（上列 4 處）** → 改讀 `usage_logs_scored`。日後新寫的評分
+  程式碼沿用慣例即自動安全。
+- **單列成本回填與 GDPR 匯出（上列 4 處）** → 維持原表，不動。
 - **成本側（`usage.ts` 6 處）** → 繼續讀原表，但**把重放的成本獨立成一行顯示**。
   「寫入但標記排除」的初衷就是不要有黑洞，那就要真的看得見。
+
+判準一句話：**查的是「這個人這段期間做了什麼」就用 view；查的是「這一筆花了
+多少錢」就用原表。**
 
 ## Component 3 — 保真度閘門
 
