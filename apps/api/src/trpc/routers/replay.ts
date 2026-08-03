@@ -37,6 +37,7 @@ import { enqueueReplay, type QueueLike as ReplayQueue } from "@caliber/queue";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 import { writeAudit } from "../../services/audit.js";
+import { getReplayComparison } from "../../services/replayComparison.js";
 
 // Re-exported for downstream importers (trpc/procedures.ts, trpc/context.ts,
 // apps/api/src/server.ts) — mirrors how reports.ts re-exports EvaluatorQueue.
@@ -102,6 +103,11 @@ const enqueueInput = z.object({
 });
 
 const getInput = z.object({ runId: z.string().uuid() });
+
+const getComparisonInput = z.object({
+  orgId: z.string().uuid(),
+  runId: z.string().uuid(),
+});
 
 const listForRequestInput = z.object({
   orgId: z.string().uuid(),
@@ -414,6 +420,30 @@ export const replayRouter = router({
 
     return run;
   }),
+
+  /**
+   * The side-by-side comparison for one run: both response bodies decrypted,
+   * both sets of metrics, and what may honestly be compared between them.
+   *
+   * A boundary only. Everything that decides what the operator is allowed to
+   * see, and what they are allowed to conclude, lives in
+   * `services/replayComparison.ts` — decryption plus two `request_bodies`
+   * reads plus comparability is a different kind of work from this file's
+   * authorise-and-write procedures, and the rules it encodes deserve to be
+   * read (and reviewed) in one piece.
+   */
+  getComparison: evaluatorProcedure
+    .input(getComparisonInput)
+    .query(async ({ ctx, input }) =>
+      getReplayComparison({
+        db: ctx.db,
+        env: ctx.env,
+        perm: ctx.perm,
+        orgId: input.orgId,
+        runId: input.runId,
+        logger: ctx.logger,
+      }),
+    ),
 
   /**
    * Every run for one source request, newest first — the history a comparison

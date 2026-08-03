@@ -1,0 +1,219 @@
+import { test, expect } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { resetDb, seedDb } from "../fixtures/seed-db";
+import { signInWithSession } from "../fixtures/mock-oauth";
+import { E2E_GATEWAY_BASE_URL } from "../fixtures/gateway-env";
+
+/**
+ * single-request-replay Task 11 — 對照頁 (apps/web/src/app/dashboard/
+ * organizations/[id]/requests/[requestId]/page.tsx).
+ *
+ * This spec drives the REAL replay pipeline end to end rather than seeding a
+ * finished run: enabling content capture provisions the org eval key into
+ * Redis (apps/api's contentCapture.setSettings → provisionLlmEvalKey), which
+ * is exactly what apps/gateway's replay worker reads before its loopback call.
+ * A seeded `replay_runs` row would prove the page renders SOMETHING; only the
+ * real pipeline proves the page renders the two bodies that actually came back
+ * from two different models.
+ *
+ * ENVIRONMENT PREREQUISITE (same as specs 20/30/40): ENABLE_EVALUATOR=true
+ * must be exported for the local run — the replay router is behind
+ * `evaluatorProcedure` and the gateway only wires the replay worker inside the
+ * same ENABLE_EVALUATOR block. CI's e2e job sets it at the job level.
+ */
+test("comparison page: fidelity warning sits above the comparison, latency is never presented as comparable, and a same-model baseline can be started", async ({
+  page,
+  context,
+}) => {
+  const orgId = randomUUID();
+  const adminToken = "e2e-replay-cmp-admin-" + Date.now();
+  const orgSlug = "e2e-replay-comparison";
+
+  // ── Seed: org + super_admin user ──────────────────────────────────────
+  await resetDb();
+  const seed = await seedDb({
+    reset: false,
+    orgs: [{ id: orgId, slug: orgSlug, name: "E2E Replay Comparison" }],
+    users: [{ email: "admin-replay-cmp@e2e.test", sessionToken: adminToken }],
+  });
+  const admin = seed.users[0];
+  if (!admin) throw new Error("admin not seeded");
+  await seedDb({
+    reset: false,
+    orgMembers: [{ orgId, userId: admin.id }],
+    roleAssignments: [
+      { userId: admin.id, role: "super_admin", scopeType: "global" },
+    ],
+  });
+  await signInWithSession(context, { sessionToken: adminToken });
+
+  // ── 1. Upstream account ───────────────────────────────────────────────
+  await page.goto(`/dashboard/organizations/${orgId}/accounts/new`);
+  await page.getByLabel("Name").fill("e2e-replay-cmp-key");
+  await page.getByLabel("Credentials").fill("sk-ant-fake-e2e-replay-cmp");
+  await page.getByRole("button", { name: /create account/i }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`^.*/dashboard/organizations/${orgId}/accounts$`),
+  );
+
+  // ── 2. Platform API key ───────────────────────────────────────────────
+  await page.goto("/dashboard/profile");
+  await page.getByRole("button", { name: /new key/i }).click();
+  const keyDialog = page.getByRole("dialog");
+  await keyDialog.getByLabel("Name").fill("e2e-replay-cmp-apikey");
+  await keyDialog.getByRole("button", { name: /generate key/i }).click();
+  const keyCode = keyDialog.locator("#apiKeyRaw");
+  await expect(keyCode).toBeVisible();
+  const rawKey = (await keyCode.textContent())?.trim();
+  expect(rawKey, "reveal panel should surface the raw key").toBeTruthy();
+  await keyDialog.getByRole("button", { name: /done/i }).click();
+
+  // ── 3. Enable content capture (also provisions the org eval key the
+  //      replay worker authenticates its loopback call with) ────────────
+  await page.goto(`/dashboard/organizations/${orgId}/evaluator/settings`);
+  const captureToggle = page.locator(
+    '[role="switch"][id="contentCaptureEnabled"]',
+  );
+  await expect(captureToggle).toBeVisible();
+  if ((await captureToggle.getAttribute("aria-checked")) !== "true") {
+    await captureToggle.click();
+  }
+  await Promise.all([
+    page.waitForResponse(
+      (res) =>
+        res.url().includes("/trpc/contentCapture.setSettings") &&
+        res.request().method() === "POST",
+      { timeout: 15000 },
+    ),
+    page.getByRole("button", { name: /save settings/i }).click(),
+  ]);
+
+  // ── 4. One real captured request to be the comparison's source ────────
+  const gwRes = await page.request.post(`${E2E_GATEWAY_BASE_URL}/v1/messages`, {
+    headers: {
+      "x-api-key": rawKey!,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    data: {
+      model: "comparison-source-model",
+      max_tokens: 8,
+      messages: [{ role: "user", content: "which model is at fault?" }],
+    },
+  });
+  expect(gwRes.status(), await gwRes.text()).toBe(200);
+
+  // Body capture is asynchronous (BullMQ) — poll until the row is replayable.
+  let sourceRequestId = "";
+  await expect(async () => {
+    const from = new Date(Date.now() - 3_600_000).toISOString();
+    const to = new Date(Date.now() + 3_600_000).toISOString();
+    const input = encodeURIComponent(
+      JSON.stringify({ "0": { orgId, userId: admin.id, from, to, limit: 50 } }),
+    );
+    const res = await page.request.get(
+      `/trpc/usage.listRequests?batch=1&input=${input}`,
+    );
+    expect(res.status(), await res.text()).toBe(200);
+    const body = (await res.json()) as Array<{
+      result?: {
+        data?: {
+          rows: Array<{
+            requestId: string;
+            requestedModel: string;
+            hasBody: boolean;
+            bodyTruncated: boolean;
+          }>;
+        };
+      };
+    }>;
+    const row = body[0]?.result?.data?.rows.find(
+      (r) => r.requestedModel === "comparison-source-model",
+    );
+    expect(row, `full body=${JSON.stringify(body)}`).toBeTruthy();
+    expect(row!.hasBody).toBe(true);
+    expect(row!.bodyTruncated).toBe(false);
+    sourceRequestId = row!.requestId;
+  }).toPass({ timeout: 20_000, intervals: [500, 1000, 2000] });
+
+  // ── 5. Start a replay against a DIFFERENT model, the way an operator
+  //      does: from the request list. This lands on the comparison page.
+  //
+  //      Locale is pinned only now — the boilerplate above reuses English
+  //      labels from specs 10/20 (see 40-requests-list.spec.ts).
+  await context.addCookies([
+    { name: "NEXT_LOCALE", value: "zh-TW", domain: "localhost", path: "/" },
+  ]);
+
+  await page.goto(`/dashboard/organizations/${orgSlug}/requests`);
+  await page
+    .getByRole("row", { name: /comparison-source-model/ })
+    .getByRole("button", { name: "重放" })
+    .click();
+  const replayDialog = page.getByRole("dialog");
+  await expect(replayDialog).toBeVisible();
+  await replayDialog
+    .getByLabel(/target model|目標模型/i)
+    .fill("comparison-target-model");
+  await Promise.all([
+    page.waitForResponse(
+      (res) =>
+        res.url().includes("/trpc/replay.enqueue") &&
+        res.request().method() === "POST",
+    ),
+    replayDialog
+      .getByRole("button", { name: /^(開始重放|start replay)$/i })
+      .click(),
+  ]);
+
+  await expect(page).toHaveURL(
+    new RegExp(
+      `^.*/dashboard/organizations/${orgId}/requests/${sourceRequestId}$`,
+    ),
+  );
+
+  // ── 6. The comparison itself ──────────────────────────────────────────
+  // The page polls while the run is queued/running and while the replay's own
+  // usage_logs row is still being written, so both panels appearing is proof
+  // the whole pipeline (enqueue → worker → loopback → capture) completed.
+  await expect(page.getByTestId("source-response")).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByTestId("replay-response")).toBeVisible({
+    timeout: 60_000,
+  });
+
+  // The caveat must sit ABOVE what it qualifies. A footnote under the
+  // comparison has already failed at its job.
+  const banner = page.getByTestId("fidelity-banner");
+  const content = page.getByTestId("comparison-content");
+  await expect(banner).toBeVisible();
+  await expect(content).toBeVisible();
+  const bannerBox = await banner.boundingBox();
+  const contentBox = await content.boundingBox();
+  expect(bannerBox, "fidelity banner should have a box").toBeTruthy();
+  expect(contentBox, "comparison content should have a box").toBeTruthy();
+  expect(bannerBox!.y).toBeLessThan(contentBox!.y);
+
+  // Latency is never presented as a comparable number.
+  await expect(page.getByText("延遲不可比").first()).toBeVisible();
+
+  // The noise baseline is not optional: without a same-model rerun the reader
+  // cannot tell a model-change difference from ordinary sampling variance.
+  const baseline = page.getByRole("button", {
+    name: "用同一模型再跑一次",
+  });
+  await expect(baseline).toBeEnabled();
+
+  // And it must actually start a run against the SOURCE model.
+  const [baselineRes] = await Promise.all([
+    page.waitForResponse(
+      (res) =>
+        res.url().includes("/trpc/replay.enqueue") &&
+        res.request().method() === "POST",
+    ),
+    baseline.click(),
+  ]);
+  expect(baselineRes.status(), await baselineRes.text()).toBe(200);
+  expect(baselineRes.request().postData()).toContain("comparison-source-model");
+});

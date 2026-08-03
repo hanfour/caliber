@@ -61,15 +61,22 @@ export async function resetApiKeyCredentialHealth(
 // requires this key whenever the gateway is enabled, so reaching the throw
 // branch indicates a misconfiguration upstream — guard so we never call
 // encryptCredential with undefined.
-export function requireMasterKeyHex(env: {
-  CREDENTIAL_ENCRYPTION_KEY?: string;
-}): string {
+//
+// `notConfigured` lets a caller restate the SAME missing-key fact as its own
+// kind of failure without duplicating the check (and therefore the env var
+// name) elsewhere. The replay comparison endpoint uses it: for a read-only
+// page, "this deployment cannot decrypt captured content" is a precondition
+// the UI must render honestly, not a 500 that shows the reader a blank screen.
+export function requireMasterKeyHex(
+  env: { CREDENTIAL_ENCRYPTION_KEY?: string },
+  notConfigured: { code: TRPCError["code"]; message: string } = {
+    code: "INTERNAL_SERVER_ERROR",
+    message: "CREDENTIAL_ENCRYPTION_KEY not configured",
+  },
+): string {
   const key = env.CREDENTIAL_ENCRYPTION_KEY;
   if (!key) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "CREDENTIAL_ENCRYPTION_KEY not configured",
-    });
+    throw new TRPCError(notConfigured);
   }
   return key;
 }

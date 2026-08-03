@@ -1,7 +1,8 @@
-import { encryptBodyRaw, decryptBodyRaw } from '@caliber/gateway-core'
-
-const NONCE_LEN = 12
-const TAG_LEN = 16
+import {
+  encryptBodyRaw,
+  decryptStoredBody,
+  packSealedBody,
+} from '@caliber/gateway-core'
 
 export interface EncryptBodyInput {
   masterKeyHex: string
@@ -20,23 +21,13 @@ export interface EncryptBodyResult {
 }
 
 export function encryptBody(input: EncryptBodyInput): EncryptBodyResult {
-  const { nonce, ciphertext, authTag } = encryptBodyRaw(input)
-  return {
-    sealed: Buffer.concat([nonce, ciphertext, authTag]),
-  }
+  return { sealed: packSealedBody(encryptBodyRaw(input)) }
 }
 
 export function decryptBody(input: DecryptBodyInput): string {
-  const { sealed, masterKeyHex, requestId } = input
-  if (sealed.length < NONCE_LEN + TAG_LEN) {
-    throw new Error('sealed buffer too small')
-  }
-  const nonce = sealed.subarray(0, NONCE_LEN)
-  const authTag = sealed.subarray(sealed.length - TAG_LEN)
-  const ciphertext = sealed.subarray(NONCE_LEN, sealed.length - TAG_LEN)
-  return decryptBodyRaw({
-    masterKeyHex,
-    requestId,
-    sealed: { nonce, ciphertext, authTag },
+  return decryptStoredBody({
+    masterKeyHex: input.masterKeyHex,
+    requestId: input.requestId,
+    stored: input.sealed,
   })
 }
