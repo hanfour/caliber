@@ -3,8 +3,9 @@
 // raw values exist only in gateway-internal Redis, so an external client
 // cannot hold one — making the prefix a sufficient anti-forgery gate.
 
+import { EVAL_KEY_PREFIX } from "./evalKeyPrefix.js";
+
 export const EVAL_PIN_HEADER = "x-caliber-eval-account-id";
-const EVAL_KEY_PREFIX = "caliber-eval";
 
 export function evalAccountPin(req: {
   apiKey?: { keyPrefix?: string } | null;

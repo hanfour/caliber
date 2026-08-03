@@ -198,6 +198,33 @@ describe("writeUsageLogBatch — standalone helper", () => {
     expect(Number(keyRow!.used)).toBeCloseTo(2.5, 8);
   });
 
+  it("persists a non-null replayOfRequestId verbatim (Task 3 anti-forgery: mutation-kill for the insert-values line)", async () => {
+    // The shared factory defaults replayOfRequestId to null and every other
+    // case in this file uses that default, so nothing else in the suite
+    // would notice if writeUsageLogBatch's `replayOfRequestId: p.replayOfRequestId`
+    // insert-values line were deleted. This case overrides the factory to
+    // pin that the column actually round-trips a non-null marker end to end
+    // — the mirror-image failure mode of the forgery test: if this silently
+    // stopped persisting, a real replay (Task 6) would land with
+    // replay_of_request_id NULL and get counted as real traffic in
+    // usage_logs_scored, exactly what Tasks 1/2 exist to prevent.
+    const key = await seedApiKey("k-replay-marker");
+    const payload = makePayload(key.id, "0.0050000000", "req-replay-1");
+    const marked: UsageLogJobPayload = {
+      ...payload,
+      replayOfRequestId: "req-original",
+    };
+
+    await writeUsageLogBatch(db, [marked]);
+
+    const rows = await db
+      .select({ replayOfRequestId: usageLogs.replayOfRequestId })
+      .from(usageLogs)
+      .where(eq(usageLogs.requestId, "req-replay-1"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.replayOfRequestId).toBe("req-original");
+  });
+
   it("is a no-op for an empty payload list", async () => {
     // Empty input must not open a txn or touch any table.
     await writeUsageLogBatch(db, []);

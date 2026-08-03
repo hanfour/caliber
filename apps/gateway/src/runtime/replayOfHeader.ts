@@ -7,8 +7,9 @@
 // removes the request from `usage_logs_scored`, i.e. it lets a member hide
 // their own traffic from scoring. Never widen the trust condition here.
 
+import { EVAL_KEY_PREFIX } from "./evalKeyPrefix.js";
+
 export const REPLAY_OF_HEADER = "x-caliber-replay-of";
-const EVAL_KEY_PREFIX = "caliber-eval";
 
 export function replayOfHeader(req: {
   apiKey?: { keyPrefix?: string } | null;
@@ -17,5 +18,10 @@ export function replayOfHeader(req: {
   if (req.apiKey?.keyPrefix !== EVAL_KEY_PREFIX) return undefined;
   const raw = req.headers[REPLAY_OF_HEADER];
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return value || undefined;
+  // Blank (empty OR whitespace-only) is treated the same as absent: a blank
+  // value would still satisfy `!== null` in Postgres (`'' IS NULL` and
+  // `'   ' IS NULL` are both false), so it would silently persist and pull
+  // the row out of `usage_logs_scored` — the same scoring-evasion outcome as
+  // a forged header, just reached via a degenerate value instead.
+  return value?.trim() || undefined;
 }

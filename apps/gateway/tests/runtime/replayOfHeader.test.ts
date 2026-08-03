@@ -4,7 +4,13 @@ import { replayOfHeader, REPLAY_OF_HEADER } from "../../src/runtime/replayOfHead
 function req(opts: { keyPrefix?: string; header?: string }) {
   return {
     apiKey: opts.keyPrefix ? { keyPrefix: opts.keyPrefix } : null,
-    headers: opts.header ? { [REPLAY_OF_HEADER]: opts.header } : {},
+    // NOTE: must distinguish "header omitted" from "header sent as the empty
+    // string" — `opts.header ? … : {}` collapsed both to an absent header,
+    // which meant the "header 為空字串" case below never actually built a
+    // `""`-valued header (see task-3-report.md fix round for the review
+    // finding this fixes).
+    headers:
+      opts.header === undefined ? {} : { [REPLAY_OF_HEADER]: opts.header },
   };
 }
 
@@ -27,6 +33,10 @@ describe("replayOfHeader", () => {
 
   it("header 為空字串 → undefined（不得寫入空字串）", () => {
     expect(replayOfHeader(req({ keyPrefix: "caliber-eval", header: "" }))).toBeUndefined();
+  });
+
+  it("header 為純空白字串 → undefined（同一漏洞類別：'   ' IS NULL 為 false，會逃過評分排除）", () => {
+    expect(replayOfHeader(req({ keyPrefix: "caliber-eval", header: "   " }))).toBeUndefined();
   });
 
   it("header 重複出現時取第一個", () => {
