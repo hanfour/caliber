@@ -51,6 +51,7 @@ export function makeUsageLogJobPayload(
     failedAccountIds: [],
     userAgent: null,
     ipAddress: null,
+    replayOfRequestId: null,
     ...overrides,
   };
 }

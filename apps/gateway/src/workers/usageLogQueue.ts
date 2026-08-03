@@ -135,6 +135,12 @@ export const UsageLogJobPayload = z.object({
   // Client metadata (nullable — depends on trust-proxy chain + UA presence)
   userAgent: z.string().nullable(),
   ipAddress: z.string().nullable(),
+
+  // Non-null means this row was produced by a replay, and the value is the
+  // original request_id being replayed. Can ONLY originate from
+  // replayOfHeader() — which already passed the eval-key-prefix anti-forgery
+  // gate — so this field must never be set from an untrusted client value.
+  replayOfRequestId: z.string().nullable().default(null),
 });
 
 export type UsageLogJobPayload = z.infer<typeof UsageLogJobPayload>;

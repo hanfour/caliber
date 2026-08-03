@@ -93,6 +93,7 @@ export async function writeUsageLogBatch(
           failedAccountIds: p.failedAccountIds,
           userAgent: p.userAgent,
           ipAddress: p.ipAddress,
+          replayOfRequestId: p.replayOfRequestId,
         })),
       )
       .onConflictDoNothing({ target: usageLogs.requestId })

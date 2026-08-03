@@ -38,6 +38,7 @@ import {
   type UsageLogJobPayload,
 } from "../workers/usageLogQueue.js";
 import { writeIdempotencyRecord } from "./idempotencyRecord.js";
+import { replayOfHeader } from "./replayOfHeader.js";
 
 // ── Pricing cache ────────────────────────────────────────────────────────────
 
@@ -394,6 +395,10 @@ export async function buildUsageLogPayload(
       typeof input.req.ip === "string" && input.req.ip.length > 0
         ? input.req.ip
         : null,
+    // Only trusted when the request authenticated with an eval key — see
+    // replayOfHeader.ts. An ordinary member key can never set this field,
+    // even if it sends the header.
+    replayOfRequestId: replayOfHeader(input.req) ?? null,
   };
 
   return { payload, cost };
