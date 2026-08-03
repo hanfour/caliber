@@ -577,6 +577,66 @@ describe("usage.listRequests", () => {
     expect(seen).toEqual(expectedOrder);
   });
 
+  it("replayEnabled mirrors ENABLE_EVALUATOR=true (default test env)", async () => {
+    // The web app (Task 10) has no other way to learn whether the replay
+    // pipeline is deployed — `replay.*` procedures are gated behind
+    // evaluatorProcedure and 404 when ENABLE_EVALUATOR=false, but this
+    // procedure is never gated on that flag (see the test below). Without
+    // this field the UI would render an enabled "重放" button that always
+    // fails.
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const result = await caller.usage.listRequests({
+      orgId: org.id,
+      userId: owner.id,
+    });
+    expect(result.replayEnabled).toBe(true);
+  });
+
+  it("replayEnabled reflects ENABLE_EVALUATOR=false, but the call itself still succeeds (listRequests is NEVER gated on ENABLE_EVALUATOR)", async () => {
+    // This is the one assertion protecting the controller decision in the
+    // Task 9 hand-off: listRequests must stay reachable when replay is
+    // disabled (it's ordinary usage history, not a replay feature), while
+    // still telling the caller that the replay button won't work. A future
+    // edit that wraps this procedure in `evaluatorProcedure` (hiding
+    // legitimate usage history) would fail this test with NOT_FOUND instead
+    // of a successful, replayEnabled:false response.
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+    await seedRequest(t.db, {
+      orgId: org.id,
+      userId: owner.id,
+      apiKeyId: key,
+      accountId: account,
+    });
+
+    const caller = await callerFor({
+      db: t.db,
+      userId: owner.id,
+      env: { ...defaultTestEnv, ENABLE_EVALUATOR: false },
+    });
+    const result = await caller.usage.listRequests({
+      orgId: org.id,
+      userId: owner.id,
+    });
+    expect(result.replayEnabled).toBe(false);
+    expect(result.rows).toHaveLength(1);
+  });
+
   it("ENABLE_GATEWAY=false → NOT_FOUND", async () => {
     const org = await makeOrg(t.db);
     const owner = await makeUser(t.db, {

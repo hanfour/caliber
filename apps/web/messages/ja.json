@@ -180,7 +180,8 @@
       "usage": "使用量",
       "evaluator": "Evaluator",
       "audit": "監査",
-      "sessions": "セッション"
+      "sessions": "セッション",
+      "requests": "リクエスト"
     }
   },
   "org": {
@@ -696,7 +697,9 @@
       "requests": "リクエスト数",
       "totalCost": "総コスト",
       "totalTokens": "総トークン数",
-      "topModel": "最も使用したモデル"
+      "topModel": "最も使用したモデル",
+      "replayCost": "リプレイ費用",
+      "replayCostSubtext": "上記の合計費用に含まれています"
     },
     "topModels": "コスト順のモデル",
     "requestsTitle": "リクエスト",
@@ -1318,5 +1321,38 @@
     "colSources": "ソース",
     "colFirst": "初回アクティビティ",
     "colLast": "最終アクティビティ"
+  },
+  "requests": {
+    "title": "リクエスト",
+    "subtitle": "メンバー1人分のキャプチャ済みゲートウェイリクエストを閲覧し、別モデルでリプレイして比較できます。",
+    "loading": "読み込み中…",
+    "loadError": "リクエストの読み込みに失敗しました。",
+    "empty": "この期間にリクエスト記録はありません。",
+    "noPermission": "このメンバーのリクエストを閲覧する権限がありません。",
+    "memberSelectLabel": "メンバー",
+    "colTime": "時刻",
+    "colModel": "リクエストモデル",
+    "colUpstreamModel": "実際のモデル",
+    "colTokens": "トークン",
+    "colCost": "費用",
+    "colStatus": "ステータス",
+    "colDuration": "所要時間",
+    "colStopReason": "終了理由",
+    "colReplay": "リプレイ",
+    "replayButton": "リプレイ",
+    "replayBadge": "リプレイ結果",
+    "loadMore": "もっと読み込む",
+    "disabledTruncated": "この内容は切り詰められているため、リプレイ結果は比較できません",
+    "disabledNoBody": "保存期限を過ぎたため内容は削除されています",
+    "replayNotEnabledBanner": "この環境ではリプレイ機能が有効になっていません。管理者に ENABLE_EVALUATOR の有効化を依頼してください。",
+    "dialog": {
+      "title": "リプレイするモデルを選択",
+      "description": "このリクエストを別のモデルで再送信し、元の結果がモデル自体の問題かどうかを比較します。",
+      "modelLabel": "対象モデル",
+      "modelPlaceholder": "例：claude-opus-4-1-20250805",
+      "submit": "リプレイを開始",
+      "submitting": "送信中…",
+      "success": "リプレイをキューに追加しました"
+    }
   }
 }

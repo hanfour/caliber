@@ -180,7 +180,8 @@
       "usage": "用量",
       "evaluator": "評估器",
       "audit": "稽核",
-      "sessions": "工作階段"
+      "sessions": "工作階段",
+      "requests": "請求"
     }
   },
   "org": {
@@ -697,7 +698,9 @@
       "requests": "請求數",
       "totalCost": "總費用",
       "totalTokens": "總 Token 數",
-      "topModel": "使用最多的模型"
+      "topModel": "使用最多的模型",
+      "replayCost": "重放費用",
+      "replayCostSubtext": "已計入上方總費用"
     },
     "topModels": "依費用排序的模型",
     "requestsTitle": "請求",
@@ -1358,5 +1361,38 @@
     "colSources": "來源",
     "colFirst": "首次活動",
     "colLast": "最近活動"
+  },
+  "requests": {
+    "title": "請求",
+    "subtitle": "瀏覽單一成員擷取到的 gateway 請求，可挑選任一筆換一個模型重放比較。",
+    "loading": "載入中…",
+    "loadError": "載入請求失敗。",
+    "empty": "此區間內沒有請求記錄。",
+    "noPermission": "你沒有檢視此成員請求的權限。",
+    "memberSelectLabel": "成員",
+    "colTime": "時間",
+    "colModel": "請求模型",
+    "colUpstreamModel": "實際模型",
+    "colTokens": "Token",
+    "colCost": "費用",
+    "colStatus": "狀態",
+    "colDuration": "耗時",
+    "colStopReason": "結束原因",
+    "colReplay": "重放",
+    "replayButton": "重放",
+    "replayBadge": "重放結果",
+    "loadMore": "載入更多",
+    "disabledTruncated": "此筆內容已截斷，重放結果不可比",
+    "disabledNoBody": "已超過保存期限，內容已刪除",
+    "replayNotEnabledBanner": "此部署尚未啟用重放功能，清單僅供查閱；請聯絡管理員開啟後再試。",
+    "dialog": {
+      "title": "選擇重放模型",
+      "description": "把這筆請求換一個模型重新送出，用來比對原始結果是否為模型本身的問題。",
+      "modelLabel": "目標模型",
+      "modelPlaceholder": "例如：claude-opus-4-1-20250805",
+      "submit": "開始重放",
+      "submitting": "送出中…",
+      "success": "已加入重放佇列"
+    }
   }
 }

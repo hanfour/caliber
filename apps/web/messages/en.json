@@ -180,7 +180,8 @@
       "usage": "Usage",
       "evaluator": "Evaluator",
       "audit": "Audit",
-      "sessions": "Sessions"
+      "sessions": "Sessions",
+      "requests": "Requests"
     }
   },
   "org": {
@@ -697,7 +698,9 @@
       "requests": "Requests",
       "totalCost": "Total cost",
       "totalTokens": "Total tokens",
-      "topModel": "Top model"
+      "topModel": "Top model",
+      "replayCost": "Replay cost",
+      "replayCostSubtext": "Included in total cost above"
     },
     "topModels": "Top models by cost",
     "requestsTitle": "Requests",
@@ -1358,5 +1361,38 @@
     "colSources": "Sources",
     "colFirst": "First activity",
     "colLast": "Last activity"
+  },
+  "requests": {
+    "title": "Requests",
+    "subtitle": "Browse one member's captured gateway requests and replay any of them against a different model.",
+    "loading": "Loading…",
+    "loadError": "Failed to load requests.",
+    "empty": "No requests in this range.",
+    "noPermission": "You don't have permission to view this member's requests.",
+    "memberSelectLabel": "Member",
+    "colTime": "Time",
+    "colModel": "Requested model",
+    "colUpstreamModel": "Upstream model",
+    "colTokens": "Tokens",
+    "colCost": "Cost",
+    "colStatus": "Status",
+    "colDuration": "Duration",
+    "colStopReason": "Stop reason",
+    "colReplay": "Replay",
+    "replayButton": "Replay",
+    "replayBadge": "Replay result",
+    "loadMore": "Load more",
+    "disabledTruncated": "This request's captured body was truncated — the replay would not be a fair comparison",
+    "disabledNoBody": "Past its retention period — the captured content has been deleted",
+    "replayNotEnabledBanner": "Replay is not enabled on this deployment, so this list is read-only. Ask an admin to enable ENABLE_EVALUATOR.",
+    "dialog": {
+      "title": "Choose a replay model",
+      "description": "Re-send this request with a different model, to compare whether the original result was a model issue.",
+      "modelLabel": "Target model",
+      "modelPlaceholder": "e.g. claude-opus-4-1-20250805",
+      "submit": "Start replay",
+      "submitting": "Starting…",
+      "success": "Replay queued"
+    }
   }
 }

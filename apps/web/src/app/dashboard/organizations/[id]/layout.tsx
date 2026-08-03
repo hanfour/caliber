@@ -110,6 +110,11 @@ export default function OrganizationLayout({
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
     },
     {
+      href: "/requests",
+      labelKey: "tabs.requests",
+      visible: (p) => p.isSuperAdmin || p.isOrgAdmin,
+    },
+    {
       href: "/evaluator/status",
       labelKey: "tabs.evaluator",
       visible: (p) => p.isSuperAdmin || p.isOrgAdmin,

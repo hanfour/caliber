@@ -521,6 +521,17 @@ export const usageRouter = router({
           replayOfRequestId: r.replayOfRequestId,
         })),
         nextCursor,
+        // Capability signal for the web UI (Task 10), NOT a gate on this
+        // procedure. `replay.*` (apps/api/src/trpc/routers/replay.ts) is
+        // wrapped in `evaluatorProcedure` and 404s whenever ENABLE_EVALUATOR
+        // is false — but apps/web has no other way to learn that, since
+        // this endpoint deliberately stays reachable either way (it's
+        // ordinary usage history, not a replay feature; see
+        // `ensureGatewayEnabled` above, the only gate this procedure has).
+        // Read directly off ctx.env rather than caching/deriving it so it
+        // can never drift from the flag apps/gateway and replay.ts actually
+        // check.
+        replayEnabled: ctx.env.ENABLE_EVALUATOR,
       };
     }),
 
