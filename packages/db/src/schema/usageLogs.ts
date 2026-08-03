@@ -120,6 +120,9 @@ export const usageLogs = pgTable(
     deviceId: uuid("device_id").references(() => devices.id, {
       onDelete: "set null",
     }),
+    // 非 null 表示這是一筆重放，值為被重放的原始 request_id。評分側一律透過
+    // `usage_logs_scored` view 排除；成本側讀原表並獨立顯示。
+    replayOfRequestId: text("replay_of_request_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -138,5 +141,6 @@ export const usageLogs = pgTable(
     teamTimeIdx: index("usage_logs_team_time_idx").on(t.teamId, t.createdAt),
     modelIdx: index("usage_logs_model_idx").on(t.requestedModel),
     groupTimeIdx: index("usage_logs_group_time_idx").on(t.groupId, t.createdAt),
+    replayIdx: index("usage_logs_replay_idx").on(t.replayOfRequestId),
   }),
 );
