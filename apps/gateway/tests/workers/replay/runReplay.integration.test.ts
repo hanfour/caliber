@@ -145,6 +145,12 @@ beforeEach(async () => {
     .update(organizations)
     .set({ llmEvalAccountId: null })
     .where(eq(organizations.id, orgId));
+  // The shared upstream account is soft-deleted by one test below; un-delete it
+  // so the others see a live account.
+  await db
+    .update(upstreamAccounts)
+    .set({ deletedAt: null })
+    .where(eq(upstreamAccounts.id, accountId));
 
   redis = new RedisMock() as unknown as Redis;
   await redis.set(`${LLM_KEY_REDIS_PREFIX}${orgId}`, EVAL_KEY);
@@ -301,6 +307,29 @@ describe("runReplay", () => {
     expect(fidelity.originalAccountId).toBe(accountId);
     expect(fidelity.originalAccountStillExists).toBe(true);
     expect(row.completedAt).not.toBeNull();
+  });
+
+  it("原上游帳號已被軟刪除 → fidelity 記為不存在（仍可重放）", async () => {
+    const src = await seedCapturedRequest({});
+    const run = await seedReplayRun({ sourceRequestId: src.requestId });
+    // 帳號是軟刪除的（deleted_at），且 usage_logs.account_id 是 ON DELETE
+    // RESTRICT——實體列永遠還在。只看「join 得到列」會讓這個旗標恆為 true，
+    // 也就永遠揭露不了它存在的目的：原本那個上游帳號已經不在了。
+    await db
+      .update(upstreamAccounts)
+      .set({ deletedAt: new Date() })
+      .where(eq(upstreamAccounts.id, accountId));
+
+    await invoke({
+      runId: run.id,
+      sourceRequestId: src.requestId,
+      fetchImpl: async () => okResponse(),
+    });
+
+    const row = await readRun(run.id);
+    expect(row.status).toBe("ok");
+    expect((row.fidelity as Fidelity).originalAccountStillExists).toBe(false);
+    expect((row.fidelity as Fidelity).originalAccountId).toBe(accountId);
   });
 
   it("body_truncated → failed/truncated_not_replayable，且完全不呼叫 upstream", async () => {
@@ -525,6 +554,52 @@ describe("runReplay", () => {
     });
 
     expect(headers[EVAL_PIN_HEADER]).toBe(accountId);
+  });
+
+  // BullMQ 是 at-least-once：`attempts: 3` 會在 job handler 拋錯時重送，行程在
+  // fetch 途中被重啟也會觸發 stalled-job 重送。`enqueueReplay` 的 jobId 去重只
+  // 擋得住重複「入列」，擋不住重送。少了 claim 閘門，一次按鈕就會付兩次錢。
+  it("已完成的 run 被重送時不重跑，也不會再花一次錢", async () => {
+    const src = await seedCapturedRequest({});
+    const run = await seedReplayRun({ sourceRequestId: src.requestId });
+
+    await invoke({
+      runId: run.id,
+      sourceRequestId: src.requestId,
+      fetchImpl: async () => okResponse("replay-req-first"),
+    });
+    expect((await readRun(run.id)).status).toBe("ok");
+
+    const secondFetch = vi.fn();
+    await invoke({
+      runId: run.id,
+      sourceRequestId: src.requestId,
+      fetchImpl: secondFetch as unknown as typeof fetch,
+    });
+
+    expect(secondFetch).not.toHaveBeenCalled();
+    const row = await readRun(run.id);
+    expect(row.status).toBe("ok");
+    expect(row.replayRequestId).toBe("replay-req-first");
+  });
+
+  it("已在 running 的 run 被重送時不重跑（行程重啟後的 stalled 重送）", async () => {
+    const src = await seedCapturedRequest({});
+    const run = await seedReplayRun({ sourceRequestId: src.requestId });
+    await db
+      .update(replayRuns)
+      .set({ status: "running" })
+      .where(eq(replayRuns.id, run.id));
+
+    const fetchImpl = vi.fn();
+    await invoke({
+      runId: run.id,
+      sourceRequestId: src.requestId,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect((await readRun(run.id)).status).toBe("running");
   });
 
   it("replay_runs 該列不存在時不丟例外、也不呼叫 upstream", async () => {

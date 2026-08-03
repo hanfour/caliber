@@ -106,27 +106,65 @@ export async function runReplay(input: RunReplayInput): Promise<void> {
       .where(eq(replayRuns.id, payload.runId));
   };
 
-  // 1. 標記 running。以 org 一併過濾避免跨租戶執行；`returning` 為空代表該列
-  //    不存在（例如已被刪除），此時無處可寫，記一筆 log 後結束即可。
-  const marked = await db
+  // 1. 認領（claim）：`queued → running` 的單一 UPDATE 就是這次執行的閘門。
+  //
+  //    這道 `status = 'queued'` 條件不是裝飾。BullMQ 是 at-least-once：
+  //    `DEFAULT_JOB_OPTIONS.attempts = 3` 會在 handler 拋錯時重送，行程在
+  //    fetch 途中被重啟（例如一次部署）也會被 stalled-job 偵測重送。
+  //    `enqueueReplay` 用裸 runId 當 jobId 只擋得住重複「入列」，擋不住重送。
+  //    少了這道閘門，重送會把一列已經 `ok` 的紀錄翻回 `running` 並再打一次真實
+  //    的計費請求——使用者按一次按鈕卻付兩次錢，而且 `replay_request_id` 只會
+  //    留下最後一次，前一次的花費完全沒有痕跡。
+  //
+  //    單一 UPDATE 會鎖住該列，並行的第二個 writer 看到的就不再是 `queued`，
+  //    所以這是一道真正的 single-writer fence。
+  //
+  //    代價是：若 `finish()` 的寫入本身失敗，該列會停在 `running`，重送也不會
+  //    再跑。寧可留下一列需要人工重觸發的紀錄，也不要重複計費。
+  const claimed = await db
     .update(replayRuns)
     .set({ status: "running" })
     .where(
-      and(eq(replayRuns.id, payload.runId), eq(replayRuns.orgId, payload.orgId)),
+      and(
+        eq(replayRuns.id, payload.runId),
+        eq(replayRuns.orgId, payload.orgId),
+        eq(replayRuns.status, "queued"),
+      ),
     )
     .returning({ id: replayRuns.id });
 
-  if (marked.length === 0) {
+  if (claimed.length === 0) {
+    // 沒認領到有兩種可能：該列不存在，或已被認領／已結束。多讀一次狀態才能把
+    // 兩者記清楚——這條路徑很罕見，而「靜默不做事」正是本功能要避免的缺陷。
+    const existing = await db
+      .select({ status: replayRuns.status })
+      .from(replayRuns)
+      .where(eq(replayRuns.id, payload.runId))
+      .limit(1)
+      .then((r) => r[0]);
+
     input.logger?.warn(
-      { runId: payload.runId, orgId: payload.orgId },
-      "replay: replay_runs row not found — nothing to update",
+      {
+        runId: payload.runId,
+        orgId: payload.orgId,
+        currentStatus: existing?.status ?? null,
+      },
+      existing
+        ? "replay: run already claimed or finished — skipping to avoid a second billed replay"
+        : "replay: replay_runs row not found — nothing to update",
     );
     return;
   }
 
   // 2. 讀原始請求。單筆查詢用原表 `usage_logs`（`usage_logs_scored` view 只用於
-  //    「某人某期間做了什麼」這類聚合）。leftJoin 上游帳號是為了誠實記錄該帳號
-  //    是否還在。
+  //    「某人某期間做了什麼」這類聚合）。
+  //
+  //    leftJoin 上游帳號是為了誠實記錄「原本那個帳號是否還在」，判準是
+  //    `deleted_at IS NULL`——upstream_accounts 走的是軟刪除（schema 的每個
+  //    partial index 與 apps/api 的每支查詢都以此為準），而
+  //    `usage_logs.account_id` 是 ON DELETE RESTRICT，實體列永遠不會消失。
+  //    只判斷「join 有沒有拿到列」會讓這個旗標恆為 true，等於永遠揭露不了它
+  //    存在的目的。
   const source = await db
     .select({
       requestBodySealed: requestBodies.requestBodySealed,
@@ -135,7 +173,8 @@ export async function runReplay(input: RunReplayInput): Promise<void> {
       retentionUntil: requestBodies.retentionUntil,
       cacheReadTokens: usageLogs.cacheReadTokens,
       accountId: usageLogs.accountId,
-      existingAccountId: upstreamAccounts.id,
+      joinedAccountId: upstreamAccounts.id,
+      accountDeletedAt: upstreamAccounts.deletedAt,
     })
     .from(requestBodies)
     .innerJoin(usageLogs, eq(usageLogs.requestId, requestBodies.requestId))
@@ -165,7 +204,10 @@ export async function runReplay(input: RunReplayInput): Promise<void> {
     toolResultTruncated: source.toolResultTruncated,
     cacheReadTokens: source.cacheReadTokens,
     accountId: source.accountId,
-    accountStillExists: source.existingAccountId !== null,
+    // 「還在」= 列還在 **且** 未被軟刪除。少了前半段，一列真的消失時
+    // `accountDeletedAt` 同樣是 null，會反過來回報「還在」。
+    accountStillExists:
+      source.joinedAccountId !== null && source.accountDeletedAt === null,
   });
 
   if (!replayable) {
