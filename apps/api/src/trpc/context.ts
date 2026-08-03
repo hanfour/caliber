@@ -10,6 +10,7 @@ import type {
   GithubSyncQueue,
   GithubDeliveryQueue,
 } from "./routers/githubDelivery.js";
+import type { ReplayQueue } from "./routers/replay.js";
 
 // Parse a single cookie value out of the raw `Cookie:` header. Implemented
 // inline rather than relying on @fastify/cookie's `req.cookies` type
@@ -86,6 +87,13 @@ export interface TrpcContext {
   // configured (e.g. test mode without a queue). The githubDelivery.generate
   // handler falls back to testMode when undefined.
   githubDeliveryQueue?: GithubDeliveryQueue;
+  // BullMQ Queue for single-request replay jobs. This is the api's OWN client
+  // — apps/gateway decorates its Fastify instance with a `replayQueue`, but
+  // that lives in a different process and is unreachable from here. Undefined
+  // when ENABLE_EVALUATOR=false or no REDIS_URL is configured; replay.enqueue
+  // then refuses with PRECONDITION_FAILED rather than recording a run that
+  // nothing can ever pick up.
+  replayQueue?: ReplayQueue;
 }
 
 export interface CreateContextDeps {
@@ -94,6 +102,7 @@ export interface CreateContextDeps {
   evaluatorQueue?: EvaluatorQueue;
   githubSyncQueue?: GithubSyncQueue;
   githubDeliveryQueue?: GithubDeliveryQueue;
+  replayQueue?: ReplayQueue;
 }
 
 // Factory: bind the parsed env + shared redis client at server-startup time,
@@ -123,6 +132,7 @@ export function createContextFactory(deps: CreateContextDeps) {
       evaluatorQueue: deps.evaluatorQueue,
       githubSyncQueue: deps.githubSyncQueue,
       githubDeliveryQueue: deps.githubDeliveryQueue,
+      replayQueue: deps.replayQueue,
     };
   };
 }

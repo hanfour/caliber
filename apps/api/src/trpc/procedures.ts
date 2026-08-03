@@ -20,6 +20,7 @@ import type {
   GithubSyncQueue,
   GithubDeliveryQueue,
 } from "./routers/githubDelivery.js";
+import type { ReplayQueue } from "./routers/replay.js";
 
 // errorFormatter must be passed to initTRPC.create() so it's woven into the
 // router shape — passing it via the fastify adapter's trpcOptions is silently
@@ -105,6 +106,7 @@ interface ProtectedCtx {
   evaluatorQueue?: EvaluatorQueue;
   githubSyncQueue?: GithubSyncQueue;
   githubDeliveryQueue?: GithubDeliveryQueue;
+  replayQueue?: ReplayQueue;
 }
 
 // Narrow user/perm to non-null by returning a new ctx object (tRPC v11 uses the
@@ -130,6 +132,7 @@ export const protectedProcedure = publicProcedure.use(async ({ ctx, next }) => {
       evaluatorQueue: ctx.evaluatorQueue,
       githubSyncQueue: ctx.githubSyncQueue,
       githubDeliveryQueue: ctx.githubDeliveryQueue,
+      replayQueue: ctx.replayQueue,
     },
   });
 });

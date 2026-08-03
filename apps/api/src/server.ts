@@ -9,6 +9,7 @@ import {
   createEvaluatorQueue,
   createGithubSyncQueue,
   createGithubDeliveryQueue,
+  createReplayQueue,
 } from "@caliber/queue";
 import { healthRoutes } from "./rest/health.js";
 import { deviceAuthRoutes } from "./rest/deviceAuth.js";
@@ -148,7 +149,18 @@ export async function buildServer() {
   // Instantiate the evaluator BullMQ queue when the feature flag is on.
   // Skipped entirely when ENABLE_EVALUATOR=false or REDIS_URL is absent —
   // reports.rerun will gracefully return testMode:true in those cases.
+  //
+  // The single-request replay queue is created in the SAME block on purpose:
+  // apps/gateway wires its replay worker inside its own ENABLE_EVALUATOR block
+  // (replay reuses the evaluator's captured bodies and org eval key), and
+  // replay.enqueue is gated by evaluatorProcedure. Enqueueing with the flag off
+  // would pile up jobs no worker will ever run.
+  //
+  // This is the api's own client. apps/gateway decorates its Fastify instance
+  // with `replayQueue`, but that decoration lives in another process — the api
+  // cannot read it and must construct its own.
   let evaluatorQueue: ReturnType<typeof createEvaluatorQueue> | undefined;
+  let replayQueue: ReturnType<typeof createReplayQueue> | undefined;
   if (env.ENABLE_EVALUATOR && env.REDIS_URL) {
     bullmqRedis = new Redis(env.REDIS_URL, {
       enableAutoPipelining: true,
@@ -158,6 +170,7 @@ export async function buildServer() {
       app.log.warn({ err: err.message }, "evaluator redis error");
     });
     evaluatorQueue = createEvaluatorQueue({ connection: bullmqRedis });
+    replayQueue = createReplayQueue({ connection: bullmqRedis });
   }
 
   // Instantiate the github-sync BullMQ queue when the feature flag is on.
@@ -219,6 +232,9 @@ export async function buildServer() {
       await evaluatorQueue?.close().catch((err: Error) => {
         app.log.warn({ err: err.message }, "evaluator queue close failed");
       });
+      await replayQueue?.close().catch((err: Error) => {
+        app.log.warn({ err: err.message }, "replay queue close failed");
+      });
       await githubSyncQueue?.close().catch((err: Error) => {
         app.log.warn({ err: err.message }, "github-sync queue close failed");
       });
@@ -256,6 +272,7 @@ export async function buildServer() {
             evaluatorQueue,
             githubSyncQueue,
             githubDeliveryQueue,
+            replayQueue,
           }),
           // errorFormatter is set on initTRPC.create() in trpc/procedures.ts —
           // setting it here on the adapter is silently ignored by tRPC v11.

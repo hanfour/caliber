@@ -15,10 +15,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // file, so the mocks they reference must be created inside vi.hoisted() —
 // a plain `const quit = vi.fn()` above the vi.mock calls would still throw
 // "Cannot access before initialization" once hoisting reorders things.
-const { quit, evaluatorClose, syncClose, deliveryClose, redisCtor } =
+const { quit, evaluatorClose, replayClose, syncClose, deliveryClose, redisCtor } =
   vi.hoisted(() => {
     const quit = vi.fn().mockResolvedValue("OK");
     const evaluatorClose = vi.fn().mockResolvedValue(undefined);
+    const replayClose = vi.fn().mockResolvedValue(undefined);
     const syncClose = vi.fn().mockResolvedValue(undefined);
     const deliveryClose = vi.fn().mockResolvedValue(undefined);
     // server.ts calls `new Redis(url, opts)`, so the mock must be
@@ -27,7 +28,14 @@ const { quit, evaluatorClose, syncClose, deliveryClose, redisCtor } =
     const redisCtor = vi.fn(function RedisMock() {
       return { quit, on: vi.fn() };
     });
-    return { quit, evaluatorClose, syncClose, deliveryClose, redisCtor };
+    return {
+      quit,
+      evaluatorClose,
+      replayClose,
+      syncClose,
+      deliveryClose,
+      redisCtor,
+    };
   });
 
 vi.mock("ioredis", () => ({ Redis: redisCtor, default: redisCtor }));
@@ -36,6 +44,7 @@ vi.mock("@caliber/queue", async (orig) => ({
   createEvaluatorQueue: vi.fn(() => ({ close: evaluatorClose })),
   createGithubSyncQueue: vi.fn(() => ({ close: syncClose })),
   createGithubDeliveryQueue: vi.fn(() => ({ close: deliveryClose })),
+  createReplayQueue: vi.fn(() => ({ close: replayClose })),
 }));
 
 // server.ts exports an async `buildServer()` that self-configures entirely
@@ -88,10 +97,17 @@ describe("server.ts onClose: quit-exactly-once shared bullmq connection", () => 
 
     expect(redisCtor).toHaveBeenCalledTimes(1);
     expect(evaluatorClose).toHaveBeenCalledTimes(1);
+    // The replay queue shares the evaluator's flag + connection (apps/gateway
+    // wires its replay worker in the same ENABLE_EVALUATOR block), so it must
+    // be created and torn down alongside it.
+    expect(replayClose).toHaveBeenCalledTimes(1);
     expect(syncClose).not.toHaveBeenCalled();
     expect(deliveryClose).not.toHaveBeenCalled();
     expect(quit).toHaveBeenCalledTimes(1);
     expect(evaluatorClose.mock.invocationCallOrder[0]).toBeLessThan(
+      quit.mock.invocationCallOrder[0]!,
+    );
+    expect(replayClose.mock.invocationCallOrder[0]).toBeLessThan(
       quit.mock.invocationCallOrder[0]!,
     );
   });
@@ -103,6 +119,7 @@ describe("server.ts onClose: quit-exactly-once shared bullmq connection", () => 
 
     expect(redisCtor).toHaveBeenCalledTimes(1);
     expect(evaluatorClose).not.toHaveBeenCalled();
+    expect(replayClose).not.toHaveBeenCalled();
     expect(syncClose).toHaveBeenCalledTimes(1);
     expect(deliveryClose).toHaveBeenCalledTimes(1);
     expect(quit).toHaveBeenCalledTimes(1);
@@ -114,17 +131,21 @@ describe("server.ts onClose: quit-exactly-once shared bullmq connection", () => 
     );
   });
 
-  it("both flags on: the bullmq connection is reused (one redisCtor call), all three queues close before the single quit", async () => {
+  it("both flags on: the bullmq connection is reused (one redisCtor call), all four queues close before the single quit", async () => {
     stubEnv({ ENABLE_EVALUATOR: "true", ENABLE_GITHUB_DELIVERY: "true" });
     const app = await buildServer();
     await app.close();
 
     expect(redisCtor).toHaveBeenCalledTimes(1);
     expect(evaluatorClose).toHaveBeenCalledTimes(1);
+    expect(replayClose).toHaveBeenCalledTimes(1);
     expect(syncClose).toHaveBeenCalledTimes(1);
     expect(deliveryClose).toHaveBeenCalledTimes(1);
     expect(quit).toHaveBeenCalledTimes(1);
     expect(evaluatorClose.mock.invocationCallOrder[0]).toBeLessThan(
+      quit.mock.invocationCallOrder[0]!,
+    );
+    expect(replayClose.mock.invocationCallOrder[0]).toBeLessThan(
       quit.mock.invocationCallOrder[0]!,
     );
     expect(syncClose.mock.invocationCallOrder[0]).toBeLessThan(
