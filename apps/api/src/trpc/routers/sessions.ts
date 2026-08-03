@@ -1,10 +1,15 @@
 import { z } from "zod";
-import { and, desc, eq, gte, inArray, lte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { clientEvents, clientSessions, users } from "@caliber/db";
 import { can } from "@caliber/auth";
 import type { UserPermissions } from "@caliber/auth";
 import { protectedProcedure, router } from "../procedures.js";
+import {
+  decodeKeysetCursor,
+  encodeKeysetCursor,
+  keysetBeforeCursor,
+} from "./_keysetCursor.js";
 
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime();
@@ -133,7 +138,17 @@ export const sessionsRouter = router({
 
   /**
    * Paginated session list for one member, newest first, with a per-session
-   * event count. Cursor is the startedAt ISO string of the last row seen.
+   * event count.
+   *
+   * Cursor: a `(startedAt, id)` keyset cursor via the shared
+   * `_keysetCursor` helper (see that file's header) — NOT a bare startedAt
+   * ISO string. The original ISO-string cursor silently dropped rows: it
+   * compared the raw `client_sessions.started_at` column (microsecond
+   * precision) against a JS `Date` derived from the previous page's last
+   * row (millisecond precision, floored), so any row whose true timestamp
+   * fell in the truncated gap — ordinary under concurrent same-millisecond
+   * session starts — was skipped with no signal (found in Task 9 review,
+   * fixed here alongside the identical defect in usage.listRequests).
    */
   listForUser: protectedProcedure
     .input(
@@ -143,13 +158,16 @@ export const sessionsRouter = router({
         from: isoDateTime.optional(),
         to: isoDateTime.optional(),
         limit: z.number().int().min(1).max(MAX_PAGE_SIZE).optional(),
-        cursor: isoDateTime.optional(),
+        cursor: z.string().min(1).max(500).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       ensureCanReadUser(ctx.perm, input.orgId, input.userId, ctx.user.id);
       const { from, to } = resolveWindow(input.from, input.to);
       const limit = input.limit ?? DEFAULT_PAGE_SIZE;
+      const cursor = input.cursor
+        ? decodeKeysetCursor(input.cursor)
+        : undefined;
 
       const rows = await ctx.db
         .select({
@@ -160,6 +178,10 @@ export const sessionsRouter = router({
           cliVersion: clientSessions.cliVersion,
           startedAt: clientSessions.startedAt,
           lastEventAt: clientSessions.lastEventAt,
+          // Full-precision cursor material — see _keysetCursor.ts. Never
+          // used for display; only to build the next page's cursor, and
+          // stripped out of the response below.
+          startedAtText: sql<string>`${clientSessions.startedAt}::text`,
         })
         .from(clientSessions)
         .where(
@@ -168,19 +190,26 @@ export const sessionsRouter = router({
             eq(clientSessions.userId, input.userId),
             gte(clientSessions.startedAt, from),
             lte(clientSessions.startedAt, to),
-            input.cursor
-              ? lt(clientSessions.startedAt, new Date(input.cursor))
+            cursor
+              ? keysetBeforeCursor(
+                  clientSessions.startedAt,
+                  clientSessions.id,
+                  "text",
+                  cursor,
+                )
               : undefined,
           ),
         )
-        .orderBy(desc(clientSessions.startedAt))
+        .orderBy(desc(clientSessions.startedAt), desc(clientSessions.id))
         .limit(limit + 1);
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
-      const nextCursor = hasMore
-        ? page[page.length - 1]!.startedAt.toISOString()
-        : null;
+      const last = page[page.length - 1];
+      const nextCursor =
+        hasMore && last
+          ? encodeKeysetCursor({ ts: last.startedAtText, id: last.id })
+          : null;
 
       // Per-session event counts for the page (separate query, merged in JS —
       // a correlated subquery loses drizzle's table qualifier and collides
@@ -200,7 +229,13 @@ export const sessionsRouter = router({
 
       return {
         sessions: page.map((s) => ({
-          ...s,
+          id: s.id,
+          sourceClient: s.sourceClient,
+          cwd: s.cwd,
+          gitBranch: s.gitBranch,
+          cliVersion: s.cliVersion,
+          startedAt: s.startedAt,
+          lastEventAt: s.lastEventAt,
           eventCount: countBySession.get(s.id) ?? 0,
         })),
         nextCursor,

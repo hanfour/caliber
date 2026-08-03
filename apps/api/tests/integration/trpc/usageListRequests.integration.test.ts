@@ -12,6 +12,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { sql } from "drizzle-orm";
 import type { Database } from "@caliber/db";
 import { apiKeys, upstreamAccounts, usageLogs, requestBodies } from "@caliber/db";
 import { resolvePermissions } from "@caliber/auth";
@@ -106,11 +107,14 @@ interface SeedRequestOpts {
   actualCostUsd?: string;
   statusCode?: number;
   replayOfRequestId?: string | null;
-  /** Set false to omit the request_bodies row entirely (retention expired). */
+  /** Set false to omit the request_bodies row entirely (already purged). */
   withBody?: boolean;
   bodyTruncated?: boolean;
   toolResultTruncated?: boolean;
   stopReason?: string | null;
+  /** Defaults to 30 days in the future. Pass a past Date to simulate a row
+   * whose retention window has lapsed but has not yet been purged. */
+  retentionUntil?: Date;
 }
 
 /**
@@ -152,11 +156,31 @@ async function seedRequest(db: Database, opts: SeedRequestOpts): Promise<string>
       stopReason: opts.stopReason ?? "end_turn",
       bodyTruncated: opts.bodyTruncated ?? false,
       toolResultTruncated: opts.toolResultTruncated ?? false,
-      retentionUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      retentionUntil:
+        opts.retentionUntil ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     });
   }
 
   return requestId;
+}
+
+/**
+ * Overwrite a row's `created_at` with a raw, microsecond-precise literal via
+ * `UPDATE`, bypassing `.values()` entirely. A JS `Date` cannot carry
+ * sub-millisecond precision at all (it is not a representational gap that
+ * opens only when reading a value back — `new Date(...)` already can't hold
+ * it going in), so the only way to seed a genuine same-millisecond,
+ * different-microsecond fixture is a raw SQL literal that never passes
+ * through a `Date` object.
+ */
+async function setCreatedAtPrecise(
+  db: Database,
+  requestId: string,
+  isoWithMicroseconds: string,
+): Promise<void> {
+  await db.execute(
+    sql`UPDATE usage_logs SET created_at = ${isoWithMicroseconds}::timestamptz WHERE request_id = ${requestId}`,
+  );
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -198,7 +222,7 @@ describe("usage.listRequests", () => {
       inputTokens: 10,
       outputTokens: 20,
       cacheReadTokens: 3,
-      totalCost: "0.0042000000",
+      costUsd: "0.0042000000",
       statusCode: 200,
       durationMs: 150,
       stopReason: "end_turn",
@@ -210,7 +234,7 @@ describe("usage.listRequests", () => {
     expect(rows[0]!.createdAt).toBeInstanceOf(Date);
   });
 
-  it("a row whose retention already expired (request_bodies gone) reports hasBody: false", async () => {
+  it("a row whose request_bodies has already been purged reports hasBody: false", async () => {
     const org = await makeOrg(t.db);
     const owner = await makeUser(t.db, {
       role: "member",
@@ -240,6 +264,47 @@ describe("usage.listRequests", () => {
     expect(row!.hasBody).toBe(false);
     // No captured body → the truncation flags default to "not truncated",
     // distinct from hasBody: false. The UI checks both signals separately.
+    expect(row!.bodyTruncated).toBe(false);
+    expect(row!.toolResultTruncated).toBe(false);
+    expect(row!.stopReason).toBeNull();
+  });
+
+  it("a row whose request_bodies STILL EXISTS but whose retention has lapsed also reports hasBody: false (review Finding 1)", async () => {
+    // Bodies are purged by a scheduled sweep, so there is a real window
+    // where retention_until is in the past but the row has not been deleted
+    // yet. hasBody must reflect "still usable for replay" (same rule as
+    // replay.enqueue's own retentionUntil < now() precondition), not mere
+    // row presence — otherwise the UI renders an enabled replay button for
+    // a request that is guaranteed to fail.
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    const lapsedId = await seedRequest(t.db, {
+      orgId: org.id,
+      userId: owner.id,
+      apiKeyId: key,
+      accountId: account,
+      bodyTruncated: false,
+      stopReason: "end_turn",
+      retentionUntil: new Date(Date.now() - 60_000),
+    });
+
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const { rows } = await caller.usage.listRequests({
+      orgId: org.id,
+      userId: owner.id,
+    });
+
+    const row = rows.find((r) => r.requestId === lapsedId);
+    expect(row).toBeDefined();
+    expect(row!.hasBody).toBe(false);
     expect(row!.bodyTruncated).toBe(false);
     expect(row!.toolResultTruncated).toBe(false);
     expect(row!.stopReason).toBeNull();
@@ -450,6 +515,66 @@ describe("usage.listRequests", () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.requestId).toBe(recentId);
+  });
+
+  it("cursor pagination does not skip rows that share a millisecond but differ only in microseconds (review Finding 3)", async () => {
+    // A naive `lt(createdAt, new Date(cursor))` cursor compares the raw
+    // (microsecond-precision) column against a JS Date that has already
+    // floored the previous page's boundary row to millisecond precision.
+    // Rows whose true timestamp falls between the floored cursor and the
+    // boundary row's true value then vanish — never re-shown, never shown
+    // at all. This seeds three rows sharing one millisecond but with
+    // distinct microseconds (ordinary under concurrent same-millisecond
+    // gateway traffic) and walks them one at a time, proving each survives.
+    const org = await makeOrg(t.db);
+    const owner = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: owner.id, orgId: org.id });
+
+    const base = "2026-02-01T00:00:00.100";
+    const specs: Array<{ id: string; iso: string }> = [];
+    for (const micros of ["900", "500", "100"]) {
+      const requestId = await seedRequest(t.db, {
+        orgId: org.id,
+        userId: owner.id,
+        apiKeyId: key,
+        accountId: account,
+      });
+      // Full microsecond literal: base ms digits + 3 more digits of
+      // sub-millisecond precision, e.g. "...100900" for 100.900 ms.
+      await setCreatedAtPrecise(t.db, requestId, `${base}${micros}+00`);
+      specs.push({ id: requestId, iso: `${base}${micros}+00` });
+    }
+    // Descending true-precision order: 900 > 500 > 100.
+    const expectedOrder = [specs[0]!.id, specs[1]!.id, specs[2]!.id];
+
+    const caller = await callerFor({ db: t.db, userId: owner.id });
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < expectedOrder.length + 1; i += 1) {
+      const page = await caller.usage.listRequests({
+        orgId: org.id,
+        userId: owner.id,
+        // Explicit window: the seeded rows are dated 2026-02-01 so the
+        // procedure's default 30-day lookback (relative to "now") would
+        // exclude them entirely.
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-03-01T00:00:00Z",
+        limit: 1,
+        cursor: cursor ?? undefined,
+      });
+      if (page.rows.length === 0) break;
+      seen.push(...page.rows.map((r) => r.requestId));
+      cursor = page.nextCursor;
+      if (!cursor) break;
+    }
+
+    expect(seen).toEqual(expectedOrder);
   });
 
   it("ENABLE_GATEWAY=false → NOT_FOUND", async () => {

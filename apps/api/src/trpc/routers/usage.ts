@@ -1,10 +1,15 @@
 import { z } from "zod";
-import { and, desc, eq, gte, isNull, lt, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { usageLogs, apiKeys, users, modelPricing, requestBodies } from "@caliber/db";
 import { can, type Action } from "@caliber/auth";
 import type { UserPermissions } from "@caliber/auth";
 import { protectedProcedure, router } from "../procedures.js";
+import {
+  decodeKeysetCursor,
+  encodeKeysetCursor,
+  keysetBeforeCursor,
+} from "./_keysetCursor.js";
 
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime();
@@ -383,20 +388,30 @@ export const usageRouter = router({
   // `usage_logs_scored` — for two reasons: (1) replay rows are legitimate
   // history the operator must be able to see (the view would hide every past
   // replay from this list), and (2) this is not a scoring surface, so the
-  // pollution the view guards against does not apply here. `leftJoin`s
-  // `requestBodies` to surface the retention/truncation flags the replay
-  // button needs; `hasBody` is derived from whether that join matched a row
-  // at all (retention-expired / never-captured requests join to nothing).
+  // pollution the view guards against does not apply here.
+  //
+  // `leftJoin`s `requestBodies` to surface the retention/truncation flags
+  // the replay button needs. The join condition ALSO requires
+  // `retentionUntil > now()` — not just `requestId` equality — so `hasBody`
+  // means "still usable for replay", matching replay.enqueue's own
+  // precondition (replay.ts's third check is the identical
+  // `retentionUntil.getTime() < Date.now()`). Without the retention half of
+  // that condition, a row whose body has expired but not yet been purged by
+  // the retention sweep would show `hasBody: true` here, the UI would render
+  // an enabled replay button, and the click would fail — exactly the
+  // silent-trap `hasBody` exists to prevent.
   //
   // Permission reuses this file's existing `usage.read_user` action via
   // `ensureCanReadScope` — same rule as `summary`/`list` scope=user: the
   // request's own author, or an org_admin, may read it.
   //
-  // Cursor pagination on `createdAt` mirrors sessions.ts's `listForUser`
-  // (limit+1 probe, slice, cursor = last row's createdAt) rather than this
-  // file's own page/pageSize `list` — the brief calls for the sessions.ts
-  // shape specifically, and cursoring suits an unbounded, append-only feed
-  // better than an absolute page count.
+  // Cursor pagination mirrors sessions.ts's `listForUser` (limit+1 probe,
+  // slice) rather than this file's own page/pageSize `list` — the brief
+  // calls for the sessions.ts shape specifically, and cursoring suits an
+  // unbounded, append-only feed better than an absolute page count. Unlike
+  // sessions.ts's original ISO-string cursor, this uses the shared
+  // `_keysetCursor` helper (see that file for why): a `(createdAt, id)`
+  // keyset cursor carried as opaque, full-precision text, never a JS `Date`.
   listRequests: protectedProcedure
     .input(
       z.object({
@@ -405,7 +420,7 @@ export const usageRouter = router({
         from: isoDateTime.optional(),
         to: isoDateTime.optional(),
         limit: z.number().int().min(1).max(MAX_PAGE_SIZE).optional(),
-        cursor: isoDateTime.optional(),
+        cursor: z.string().min(1).max(500).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -419,11 +434,18 @@ export const usageRouter = router({
 
       const { from, to } = resolveWindow(input.from, input.to);
       const limit = input.limit ?? DEFAULT_REQUEST_LIST_LIMIT;
+      const cursor = input.cursor
+        ? decodeKeysetCursor(input.cursor)
+        : undefined;
 
       const rows = await ctx.db
         .select({
+          id: usageLogs.id,
           requestId: usageLogs.requestId,
           createdAt: usageLogs.createdAt,
+          // Full-precision cursor material — see _keysetCursor.ts. Never
+          // used for display; only to build the next page's cursor.
+          createdAtText: sql<string>`${usageLogs.createdAt}::text`,
           requestedModel: usageLogs.requestedModel,
           upstreamModel: usageLogs.upstreamModel,
           inputTokens: usageLogs.inputTokens,
@@ -433,7 +455,7 @@ export const usageRouter = router({
           // field this router surfaces (summary.totalCostUsd, byModel/byKey
           // .costUsd, list.costUsd). Never the raw pre-multiplier
           // usage_logs.total_cost, which this router never exposes as-is.
-          totalCost: usageLogs.actualCostUsd,
+          costUsd: usageLogs.actualCostUsd,
           statusCode: usageLogs.statusCode,
           durationMs: usageLogs.durationMs,
           replayOfRequestId: usageLogs.replayOfRequestId,
@@ -442,33 +464,43 @@ export const usageRouter = router({
           toolResultTruncated: requestBodies.toolResultTruncated,
           // Presence sentinel for the LEFT JOIN, same pattern as
           // replay.ts's enqueue precondition check: null here means no
-          // request_bodies row exists (never captured, or its retention
-          // already expired), not "captured with null fields".
+          // USABLE request_bodies row exists — never captured, retention
+          // expired, or (in practice, same thing) already purged.
           capturedRequestId: requestBodies.requestId,
         })
         .from(usageLogs)
         .leftJoin(
           requestBodies,
-          eq(requestBodies.requestId, usageLogs.requestId),
+          and(
+            eq(requestBodies.requestId, usageLogs.requestId),
+            gt(requestBodies.retentionUntil, new Date()),
+          ),
         )
         .where(
           and(
             ...scopeWhere(scope, ctx.user.id),
             gte(usageLogs.createdAt, from),
             lte(usageLogs.createdAt, to),
-            input.cursor
-              ? lt(usageLogs.createdAt, new Date(input.cursor))
+            cursor
+              ? keysetBeforeCursor(
+                  usageLogs.createdAt,
+                  usageLogs.id,
+                  "bigint",
+                  cursor,
+                )
               : undefined,
           ),
         )
-        .orderBy(desc(usageLogs.createdAt))
+        .orderBy(desc(usageLogs.createdAt), desc(usageLogs.id))
         .limit(limit + 1);
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
-      const nextCursor = hasMore
-        ? page[page.length - 1]!.createdAt.toISOString()
-        : null;
+      const last = page[page.length - 1];
+      const nextCursor =
+        hasMore && last
+          ? encodeKeysetCursor({ ts: last.createdAtText, id: last.id.toString() })
+          : null;
 
       return {
         rows: page.map((r) => ({
@@ -479,7 +511,7 @@ export const usageRouter = router({
           inputTokens: r.inputTokens,
           outputTokens: r.outputTokens,
           cacheReadTokens: r.cacheReadTokens,
-          totalCost: r.totalCost,
+          costUsd: r.costUsd,
           statusCode: r.statusCode,
           durationMs: r.durationMs,
           stopReason: r.stopReason,

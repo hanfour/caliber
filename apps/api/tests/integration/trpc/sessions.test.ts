@@ -95,7 +95,31 @@ async function seedSession(
     timestamp: opts.startedAt,
     source: "transcript",
   }));
-  await db.insert(clientEvents).values(rows);
+  // `.values([])` throws ("must be called with at least one value") — a
+  // session legitimately can have zero events (e.g. a fixture that only
+  // cares about ordering), so guard rather than forcing every caller to
+  // pass events: 1+.
+  if (rows.length > 0) {
+    await db.insert(clientEvents).values(rows);
+  }
+}
+
+/**
+ * Overwrite a row's `started_at` with a raw, microsecond-precise literal via
+ * `UPDATE`, bypassing `.values()` entirely — a JS `Date` cannot represent
+ * sub-millisecond precision at all, so this is the only way to seed a
+ * genuine same-millisecond, different-microsecond fixture. Mirrors
+ * usageListRequests.integration.test.ts's identical helper (Task 9 review,
+ * Finding 3 — both routers share the same cursor defect and fix).
+ */
+async function setStartedAtPrecise(
+  db: Database,
+  sessionId: string,
+  isoWithMicroseconds: string,
+): Promise<void> {
+  await db.execute(
+    sql`UPDATE client_sessions SET started_at = ${isoWithMicroseconds}::timestamptz WHERE id = ${sessionId}`,
+  );
 }
 
 describe("sessions router — integration", () => {
@@ -193,6 +217,54 @@ describe("sessions router — integration", () => {
     expect(second.sessions).toHaveLength(1);
     expect(second.sessions[0]!.id).toBe("p0");
     expect(second.nextCursor).toBeNull();
+  });
+
+  it("listForUser's cursor does not skip rows that share a millisecond but differ only in microseconds (review Finding 3)", async () => {
+    // Same defect class as usage.listRequests (Task 9 review, Finding 3): a
+    // naive `lt(startedAt, new Date(cursor))` cursor floors the previous
+    // page's boundary row to millisecond precision, so any row whose true
+    // timestamp lands between that floored value and the boundary row's
+    // real value is silently dropped. Three sessions share one millisecond
+    // here but differ only in microseconds — ordinary under concurrent
+    // same-millisecond session starts.
+    const org = await makeOrg(t.db);
+    const member = await makeUser(t.db, { orgId: org.id });
+
+    const base = "2024-06-01T10:00:00.200";
+    const ids = ["m900", "m500", "m100"];
+    const micros = ["900", "500", "100"];
+    for (let i = 0; i < ids.length; i += 1) {
+      await seedSession(t.db, {
+        userId: member.id,
+        orgId: org.id,
+        sessionId: ids[i]!,
+        startedAt: new Date("2024-06-01T10:00:00.200Z"),
+        events: 0,
+      });
+      await setStartedAtPrecise(t.db, ids[i]!, `${base}${micros[i]}+00`);
+    }
+    // Descending true-precision order: 900 > 500 > 100.
+    const expectedOrder = ["m900", "m500", "m100"];
+
+    const caller = await callerFor({ db: t.db, userId: member.id });
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < expectedOrder.length + 1; i += 1) {
+      const page = await caller.sessions.listForUser({
+        orgId: org.id,
+        userId: member.id,
+        from: "2024-05-01T00:00:00Z",
+        to: "2024-07-01T00:00:00Z",
+        limit: 1,
+        cursor: cursor ?? undefined,
+      });
+      if (page.sessions.length === 0) break;
+      seen.push(...page.sessions.map((s) => s.id));
+      cursor = page.nextCursor;
+      if (!cursor) break;
+    }
+
+    expect(seen).toEqual(expectedOrder);
   });
 
   it("listForUser lets a member read their OWN sessions", async () => {
