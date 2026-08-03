@@ -263,15 +263,48 @@ function okResponse(requestId = "replay-req-1"): Response {
   });
 }
 
+/**
+ * A `db` stand-in that delegates to the real one, but makes `.update()` throw
+ * while `shouldFail()` holds — at most `maxFailures` times. Lets a test inject
+ * a failure at an exact point in the flow (e.g. only once the upstream call has
+ * been made). Methods are bound to the real instance so drizzle's private
+ * fields still resolve through the proxy.
+ *
+ * `maxFailures` matters for the post-spend test: if *every* update failed, a
+ * rollback that should not be there would also fail, and the assertion would
+ * pass for the wrong reason. Failing exactly once lets any subsequent write
+ * succeed, so the test proves the rollback is genuinely absent.
+ */
+function dbFailingUpdatesWhen(
+  shouldFail: () => boolean,
+  maxFailures = Number.POSITIVE_INFINITY,
+): Database {
+  let failures = 0;
+  return new Proxy(db as object, {
+    get(target, prop) {
+      if (prop === "update" && shouldFail() && failures < maxFailures) {
+        failures += 1;
+        return () => {
+          throw new Error("db down");
+        };
+      }
+      const value = Reflect.get(target, prop, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Database;
+}
+
 function invoke(args: {
   runId: string;
   sourceRequestId: string;
   fetchImpl: typeof fetch;
   targetModel?: string;
+  db?: Database;
+  redis?: Redis;
 }): Promise<void> {
   return runReplay({
-    db,
-    redis,
+    db: args.db ?? db,
+    redis: args.redis ?? redis,
     masterKeyHex: TEST_MASTER_KEY,
     gatewayBaseUrl: GATEWAY_BASE_URL,
     payload: {
@@ -495,8 +528,11 @@ describe("runReplay", () => {
     const src = await seedCapturedRequest({});
     const run = await seedReplayRun({ sourceRequestId: src.requestId });
 
-    let sent: { url: string; body: string; headers: Record<string, string> } | null =
-      null;
+    let sent: {
+      url: string;
+      body: string;
+      headers: Record<string, string>;
+    } | null = null;
     const fetchImpl: typeof fetch = async (url, init) => {
       sent = {
         url: String(url),
@@ -522,12 +558,15 @@ describe("runReplay", () => {
     // 除了 model 與 stream，其餘欄位必須與原 body 逐一相同——唯一變因是模型，
     // 否則差異無法歸因。
     const { model: _m, stream: _s, ...restOfReplay } = parsed;
-    const { model: _om, stream: _os, ...restOfOriginal } = ORIGINAL_BODY as Record<
-      string,
-      unknown
-    >;
+    const {
+      model: _om,
+      stream: _os,
+      ...restOfOriginal
+    } = ORIGINAL_BODY as Record<string, unknown>;
     expect(restOfReplay).toEqual(restOfOriginal);
-    expect(Object.keys(parsed).sort()).toEqual(Object.keys(ORIGINAL_BODY).sort());
+    expect(Object.keys(parsed).sort()).toEqual(
+      Object.keys(ORIGINAL_BODY).sort(),
+    );
 
     expect(captured.headers[REPLAY_OF_HEADER]).toBe(src.requestId);
     expect(captured.headers.Authorization).toBe(`Bearer ${EVAL_KEY}`);
@@ -600,6 +639,79 @@ describe("runReplay", () => {
 
     expect(fetchImpl).not.toHaveBeenCalled();
     expect((await readRun(run.id)).status).toBe("running");
+  });
+
+  // claim 閘門的存在是為了「不要付兩次錢」，所以它的作用範圍必須剛好等於花錢的
+  // 窗口。花錢**之前**的暫時性故障（Postgres/Redis 抽風）本來就該讓 BullMQ 重試
+  // 成功；若也被閘門擋住，該列會永遠停在 running 且 failure_reason 是 NULL——
+  // 正好就是設計上禁止的「靜默不做事」，只是換了個位置發生。
+  it("花錢前的暫時性故障會把 claim 還回去，讓 BullMQ 重試能重新認領", async () => {
+    const src = await seedCapturedRequest({});
+    const run = await seedReplayRun({ sourceRequestId: src.requestId });
+    const fetchImpl = vi.fn();
+
+    // Redis 故障發生在 eval key 查詢，也就是 fetch 之前。
+    const brokenRedis = {
+      get: async () => {
+        throw new Error("redis down");
+      },
+    } as unknown as Redis;
+
+    await expect(
+      invoke({
+        runId: run.id,
+        sourceRequestId: src.requestId,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        redis: brokenRedis,
+      }),
+    ).rejects.toThrow("redis down");
+
+    expect(fetchImpl).not.toHaveBeenCalled(); // 沒花到錢
+    const afterThrow = await readRun(run.id);
+    expect(afterThrow.status).toBe("queued");
+    expect(afterThrow.failureReason).toBeNull();
+    expect(afterThrow.completedAt).toBeNull();
+
+    // 而且重試真的能重新認領並跑完——不只是欄位被改回去而已。
+    await invoke({
+      runId: run.id,
+      sourceRequestId: src.requestId,
+      fetchImpl: async () => okResponse("replay-after-retry"),
+    });
+
+    const afterRetry = await readRun(run.id);
+    expect(afterRetry.status).toBe("ok");
+    expect(afterRetry.replayRequestId).toBe("replay-after-retry");
+  });
+
+  it("花錢後的故障仍然停在 running，不還回 claim（寧可卡住也不重複計費）", async () => {
+    const src = await seedCapturedRequest({});
+    const run = await seedReplayRun({ sourceRequestId: src.requestId });
+
+    let spent = false;
+    // 只有在 upstream 已被呼叫（= 已計費）之後才讓 UPDATE 壞掉，模擬 finish()
+    // 寫入失敗。此時絕不能把狀態還原成 queued，否則重試會再付一次錢。
+    //
+    // 只壞「一次」是刻意的：若之後真的多了一個不該有的 rollback，它會寫成功並
+    // 把該列變回 queued，本測試就會失敗。若讓每次 UPDATE 都壞，那個 rollback
+    // 也會失敗，該列照樣停在 running——測試就會因為錯誤的理由而通過。
+    const flakyDb = dbFailingUpdatesWhen(() => spent, 1);
+
+    await expect(
+      invoke({
+        runId: run.id,
+        sourceRequestId: src.requestId,
+        db: flakyDb,
+        fetchImpl: async () => {
+          spent = true;
+          return okResponse();
+        },
+      }),
+    ).rejects.toThrow("db down");
+
+    const row = await readRun(run.id);
+    expect(row.status).toBe("running");
+    expect(row.replayRequestId).toBeNull();
   });
 
   it("replay_runs 該列不存在時不丟例外、也不呼叫 upstream", async () => {

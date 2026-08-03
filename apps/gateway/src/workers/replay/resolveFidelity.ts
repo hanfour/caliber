@@ -1,3 +1,5 @@
+import type { ReplayFailureReason } from "./failureReasons.js";
+
 export interface Fidelity {
   toolResultTruncated: boolean;
   originalCacheReadTokens: number;
@@ -17,7 +19,8 @@ export interface ResolveFidelityInput {
 
 export interface ResolveFidelityResult {
   replayable: boolean;
-  failureReason?: string;
+  /** 封閉列舉，不是任意字串——見 `failureReasons.ts`。 */
+  failureReason?: ReplayFailureReason;
   fidelity: Fidelity;
 }
 
@@ -28,7 +31,9 @@ export interface ResolveFidelityResult {
  * 重放結果無法歸因於模型，讓它跑只會產出「看起來嚴謹、實際錯誤」的結論。
  * 其餘旗標一律放行但據實記錄，由 UI 揭露給使用者判斷。
  */
-export function resolveFidelity(input: ResolveFidelityInput): ResolveFidelityResult {
+export function resolveFidelity(
+  input: ResolveFidelityInput,
+): ResolveFidelityResult {
   const fidelity: Fidelity = {
     toolResultTruncated: input.toolResultTruncated,
     originalCacheReadTokens: input.cacheReadTokens,
@@ -38,7 +43,11 @@ export function resolveFidelity(input: ResolveFidelityInput): ResolveFidelityRes
   };
 
   if (input.bodyTruncated) {
-    return { replayable: false, failureReason: "truncated_not_replayable", fidelity };
+    return {
+      replayable: false,
+      failureReason: "truncated_not_replayable",
+      fidelity,
+    };
   }
   return { replayable: true, fidelity };
 }
