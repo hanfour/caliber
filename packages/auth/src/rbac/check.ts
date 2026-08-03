@@ -245,6 +245,11 @@ export function can(perm: UserPermissions, action: Action): boolean {
     case "report.read_user":
       if (action.targetUserId === perm.userId) return true;
       return rolesAt(perm, "organization", action.orgId).has("org_admin");
+    // 重放會解密他人 prompt 全文且花費真實金額，故不比照 read_user 開放給
+    // team_manager——僅限本人與 org_admin。
+    case "request.replay":
+      if (action.targetUserId === perm.userId) return true;
+      return rolesAt(perm, "organization", action.orgId).has("org_admin");
     case "report.read_team":
       return (
         (teamBelongsToOrg(perm, action.teamId, action.orgId) &&

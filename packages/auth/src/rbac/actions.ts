@@ -102,6 +102,7 @@ export type Action =
     }
   | { type: "report.export_own" }
   | { type: "report.delete_own" }
+  | { type: "request.replay"; orgId: string; targetUserId: string }
   | { type: "rubric.read"; orgId: string }
   | { type: "rubric.create"; orgId: string }
   | { type: "rubric.update"; orgId: string; rubricId: string }
