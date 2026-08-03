@@ -8,6 +8,7 @@ import {
   accountGroupMembers,
 } from "@caliber/db";
 import { setupTestDb, type TestDb } from "../../factories/db.js";
+import { withUsageLogsScoredDropped } from "../../factories/usageLogsScoredView.js";
 import { makeOrg } from "../../factories/org.js";
 import { makeUser } from "../../factories/user.js";
 
@@ -382,19 +383,27 @@ describe("migration 0008 down migration", () => {
     // usage_logs.group_id → account_groups). Real-world rollback order is
     // 0010_down → 0009_down → 0008_down; mirror that here so the FK is
     // dropped before account_groups disappears.
-    await testDb.db.execute(sql`
-      DROP INDEX IF EXISTS usage_logs_group_time_idx;
-      ALTER TABLE usage_logs
-        DROP CONSTRAINT IF EXISTS usage_logs_group_id_account_groups_id_fk;
-      ALTER TABLE usage_logs
-        DROP COLUMN IF EXISTS group_id,
-        DROP COLUMN IF EXISTS actual_cost_usd,
-        DROP COLUMN IF EXISTS cached_input_cost,
-        DROP COLUMN IF EXISTS cached_input_tokens,
-        DROP COLUMN IF EXISTS cache_creation_1h_tokens,
-        DROP COLUMN IF EXISTS cache_creation_5m_tokens;
-      DROP TABLE IF EXISTS model_pricing;
-    `);
+    //
+    // Same reason for withUsageLogsScoredDropped: 0034 put a `SELECT *` view
+    // on usage_logs, which pins every column against DROP COLUMN. A real
+    // newest-first rollback would already have run 0034_down; this test jumps
+    // straight to an old _down block, so it has to model that step itself.
+    // Do NOT remove — without it these DROP COLUMNs fail with 2BP01.
+    await withUsageLogsScoredDropped(testDb, () =>
+      testDb.db.execute(sql`
+        DROP INDEX IF EXISTS usage_logs_group_time_idx;
+        ALTER TABLE usage_logs
+          DROP CONSTRAINT IF EXISTS usage_logs_group_id_account_groups_id_fk;
+        ALTER TABLE usage_logs
+          DROP COLUMN IF EXISTS group_id,
+          DROP COLUMN IF EXISTS actual_cost_usd,
+          DROP COLUMN IF EXISTS cached_input_cost,
+          DROP COLUMN IF EXISTS cached_input_tokens,
+          DROP COLUMN IF EXISTS cache_creation_1h_tokens,
+          DROP COLUMN IF EXISTS cache_creation_5m_tokens;
+        DROP TABLE IF EXISTS model_pricing;
+      `),
+    );
 
     await testDb.db.execute(sql`
       ALTER TABLE upstream_accounts

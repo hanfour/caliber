@@ -57,6 +57,42 @@ the original narrative fallback.
 | `packages/gateway-core` | Scoring engine (rule interpreter, LLM prompt generation) |
 | `@caliber/db` | Schema: `rubrics`, `member_scores`, `score_evidence`, `gdpr_requests` |
 
+### Scoring reads `usage_logs_scored`, never `usage_logs`
+
+Single-request replay (model time machine) sends historical requests back through
+the real gateway, so a replay produces a real `usage_logs` row. Left alone, every
+replay would quietly inflate whoever owned the original request — a failure nobody
+would notice, because the symptom is "someone's appraisal gained a few points".
+
+Migration `0034` therefore adds `usage_logs.replay_of_request_id` and the view
+`usage_logs_scored`, which is `usage_logs` filtered to
+`replay_of_request_id IS NULL`. **Aggregate scoring queries read the view.**
+
+> The rule, worth memorising rather than re-deriving per query: *"what did this
+> person do in this period"* → `usageLogsScored`. *"what did this one request
+> cost"* → `usageLogs` raw table.
+
+Reading the raw table is correct for single-row cost backfills (`runLlm.ts`,
+`ledgerDeepAnalysis.ts`, `runDeliveryQuality.ts` — each a
+`WHERE request_id = <the call we just made>`), for the GDPR `exportOwn` query
+(portability requires completeness), for billing reconciliation, and for the
+cost-side `usage.ts` router. Switching those to the view would be a bug.
+
+**Consequence for future migrations.** The view is defined as `SELECT *`, which
+Postgres expands at creation time — so it holds a dependency on *every* column of
+`usage_logs`. Any migration that drops a `usage_logs` column must `DROP VIEW
+usage_logs_scored` first and recreate it afterwards, or it fails with
+`2BP01: … other objects depend on it`. Real rollbacks run newest-first and get
+this for free (`0034_down` drops the view), but migration tests that apply the
+full chain and then execute one old `_down` block directly must model the drop
+themselves — see `withUsageLogsScoredDropped` in
+`apps/api/tests/factories/usageLogsScoredView.ts`.
+
+The property is pinned by
+`apps/gateway/tests/workers/evaluator/replayExclusion.integration.test.ts`, which
+asserts that adding a replay row to a user's window leaves the rule-based scoring
+output byte-identical.
+
 ---
 
 ## 2. Opt-in capture process

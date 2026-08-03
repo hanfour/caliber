@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
 import { setupTestDb, type TestDb } from "../../factories/db.js";
+import { withUsageLogsScoredDropped } from "../../factories/usageLogsScoredView.js";
 
 // Plan 5A migration 0010 — additive extension of usage_logs:
 //   * cache_creation_5m_tokens / cache_creation_1h_tokens (Anthropic split)
@@ -136,19 +137,25 @@ describe("migration 0010 usage_logs extension", () => {
         )
       `);
 
-      // Apply 0010_down.
-      await downDb.db.execute(sql`
-        DROP INDEX IF EXISTS usage_logs_group_time_idx;
-        ALTER TABLE usage_logs
-          DROP CONSTRAINT IF EXISTS usage_logs_group_id_account_groups_id_fk;
-        ALTER TABLE usage_logs
-          DROP COLUMN IF EXISTS group_id,
-          DROP COLUMN IF EXISTS actual_cost_usd,
-          DROP COLUMN IF EXISTS cached_input_cost,
-          DROP COLUMN IF EXISTS cached_input_tokens,
-          DROP COLUMN IF EXISTS cache_creation_1h_tokens,
-          DROP COLUMN IF EXISTS cache_creation_5m_tokens;
-      `);
+      // Apply 0010_down. The withUsageLogsScoredDropped wrapper models the
+      // 0034_down step that a real newest-first rollback would already have
+      // run: 0034's `SELECT *` view pins every usage_logs column against
+      // DROP COLUMN. Do NOT remove — without it these DROP COLUMNs fail
+      // with 2BP01.
+      await withUsageLogsScoredDropped(downDb, () =>
+        downDb.db.execute(sql`
+          DROP INDEX IF EXISTS usage_logs_group_time_idx;
+          ALTER TABLE usage_logs
+            DROP CONSTRAINT IF EXISTS usage_logs_group_id_account_groups_id_fk;
+          ALTER TABLE usage_logs
+            DROP COLUMN IF EXISTS group_id,
+            DROP COLUMN IF EXISTS actual_cost_usd,
+            DROP COLUMN IF EXISTS cached_input_cost,
+            DROP COLUMN IF EXISTS cached_input_tokens,
+            DROP COLUMN IF EXISTS cache_creation_1h_tokens,
+            DROP COLUMN IF EXISTS cache_creation_5m_tokens;
+        `),
+      );
 
       // The seeded row still exists and is readable via the original
       // 4A column set.
