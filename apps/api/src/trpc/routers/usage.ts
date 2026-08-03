@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { and, desc, eq, gte, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, lte, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { usageLogs, apiKeys, users, modelPricing } from "@caliber/db";
+import { usageLogs, apiKeys, users, modelPricing, requestBodies } from "@caliber/db";
 import { can, type Action } from "@caliber/auth";
 import type { UserPermissions } from "@caliber/auth";
 import { protectedProcedure, router } from "../procedures.js";
@@ -25,6 +25,10 @@ const MAX_BY_MODEL_GROUPS = 50;
 // Cap how many byKey (per-API-key) groups we surface in `summary`. Keys per
 // user/org is small in practice; 100 is generous headroom.
 const MAX_BY_KEY_GROUPS = 100;
+
+// Default page size for `listRequests` when the caller omits `limit`.
+// Mirrors sessions.ts's DEFAULT_PAGE_SIZE.
+const DEFAULT_REQUEST_LIST_LIMIT = 50;
 
 // Discriminated scope: tags every query with a kind (own / user / team / org)
 // plus the IDs the WHERE filter and the RBAC check both need. Keeping the IDs
@@ -199,7 +203,18 @@ export const usageRouter = router({
       const [totals] = await ctx.db
         .select({
           totalRequests: sql<number>`COUNT(*)::int`,
+          // Total spend for the scope+window, INCLUDING replays — replays
+          // are real gateway calls that spend real money, so they must never
+          // be netted out of this number. See replayCostUsd below.
           totalCostUsd: sql<string>`COALESCE(SUM(${usageLogs.actualCostUsd}), 0)::text`,
+          // Replay spend broken out as an ADDITIONAL dimension, never
+          // subtracted from totalCostUsd above. This is the one place in the
+          // codebase with no CI safety net for the cost side (the scoring
+          // side is protected by usage_logs_scored): if this column silently
+          // disappeared, replay spend would blend back into a member's own
+          // cost with nothing to catch it. Reads the same raw `usageLogs`
+          // FROM/WHERE as totalCostUsd — only the FILTER differs.
+          replayCostUsd: sql<string>`COALESCE(SUM(${usageLogs.actualCostUsd}) FILTER (WHERE ${usageLogs.replayOfRequestId} IS NOT NULL), 0)::text`,
           totalInputTokens: sql<number>`COALESCE(SUM(${usageLogs.inputTokens}), 0)::int`,
           totalOutputTokens: sql<number>`COALESCE(SUM(${usageLogs.outputTokens}), 0)::int`,
           totalCacheCreationTokens: sql<number>`COALESCE(SUM(${usageLogs.cacheCreationTokens}), 0)::int`,
@@ -280,6 +295,7 @@ export const usageRouter = router({
       return {
         totalRequests: totals?.totalRequests ?? 0,
         totalCostUsd: totals?.totalCostUsd ?? "0",
+        replayCostUsd: totals?.replayCostUsd ?? "0",
         totalInputTokens: totals?.totalInputTokens ?? 0,
         totalOutputTokens: totals?.totalOutputTokens ?? 0,
         totalCacheCreationTokens: totals?.totalCacheCreationTokens ?? 0,
@@ -358,6 +374,121 @@ export const usageRouter = router({
         page: input.page,
         pageSize: input.pageSize,
         totalCount: countRow?.totalCount ?? 0,
+      };
+    }),
+
+  // Cursor-paginated request picker for the single-request-replay UI
+  // (Task 10): an operator browses one member's captured requests and picks
+  // one to replay. Reads the RAW `usageLogs` table — never
+  // `usage_logs_scored` — for two reasons: (1) replay rows are legitimate
+  // history the operator must be able to see (the view would hide every past
+  // replay from this list), and (2) this is not a scoring surface, so the
+  // pollution the view guards against does not apply here. `leftJoin`s
+  // `requestBodies` to surface the retention/truncation flags the replay
+  // button needs; `hasBody` is derived from whether that join matched a row
+  // at all (retention-expired / never-captured requests join to nothing).
+  //
+  // Permission reuses this file's existing `usage.read_user` action via
+  // `ensureCanReadScope` — same rule as `summary`/`list` scope=user: the
+  // request's own author, or an org_admin, may read it.
+  //
+  // Cursor pagination on `createdAt` mirrors sessions.ts's `listForUser`
+  // (limit+1 probe, slice, cursor = last row's createdAt) rather than this
+  // file's own page/pageSize `list` — the brief calls for the sessions.ts
+  // shape specifically, and cursoring suits an unbounded, append-only feed
+  // better than an absolute page count.
+  listRequests: protectedProcedure
+    .input(
+      z.object({
+        orgId: uuid,
+        userId: uuid,
+        from: isoDateTime.optional(),
+        to: isoDateTime.optional(),
+        limit: z.number().int().min(1).max(MAX_PAGE_SIZE).optional(),
+        cursor: isoDateTime.optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      ensureGatewayEnabled(ctx.env);
+      const scope: Scope = {
+        type: "user",
+        userId: input.userId,
+        orgId: input.orgId,
+      };
+      ensureCanReadScope(ctx.perm, scope);
+
+      const { from, to } = resolveWindow(input.from, input.to);
+      const limit = input.limit ?? DEFAULT_REQUEST_LIST_LIMIT;
+
+      const rows = await ctx.db
+        .select({
+          requestId: usageLogs.requestId,
+          createdAt: usageLogs.createdAt,
+          requestedModel: usageLogs.requestedModel,
+          upstreamModel: usageLogs.upstreamModel,
+          inputTokens: usageLogs.inputTokens,
+          outputTokens: usageLogs.outputTokens,
+          cacheReadTokens: usageLogs.cacheReadTokens,
+          // Billable cost (post rate-multiplier) — matches every other cost
+          // field this router surfaces (summary.totalCostUsd, byModel/byKey
+          // .costUsd, list.costUsd). Never the raw pre-multiplier
+          // usage_logs.total_cost, which this router never exposes as-is.
+          totalCost: usageLogs.actualCostUsd,
+          statusCode: usageLogs.statusCode,
+          durationMs: usageLogs.durationMs,
+          replayOfRequestId: usageLogs.replayOfRequestId,
+          stopReason: requestBodies.stopReason,
+          bodyTruncated: requestBodies.bodyTruncated,
+          toolResultTruncated: requestBodies.toolResultTruncated,
+          // Presence sentinel for the LEFT JOIN, same pattern as
+          // replay.ts's enqueue precondition check: null here means no
+          // request_bodies row exists (never captured, or its retention
+          // already expired), not "captured with null fields".
+          capturedRequestId: requestBodies.requestId,
+        })
+        .from(usageLogs)
+        .leftJoin(
+          requestBodies,
+          eq(requestBodies.requestId, usageLogs.requestId),
+        )
+        .where(
+          and(
+            ...scopeWhere(scope, ctx.user.id),
+            gte(usageLogs.createdAt, from),
+            lte(usageLogs.createdAt, to),
+            input.cursor
+              ? lt(usageLogs.createdAt, new Date(input.cursor))
+              : undefined,
+          ),
+        )
+        .orderBy(desc(usageLogs.createdAt))
+        .limit(limit + 1);
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const nextCursor = hasMore
+        ? page[page.length - 1]!.createdAt.toISOString()
+        : null;
+
+      return {
+        rows: page.map((r) => ({
+          requestId: r.requestId,
+          createdAt: r.createdAt,
+          requestedModel: r.requestedModel,
+          upstreamModel: r.upstreamModel,
+          inputTokens: r.inputTokens,
+          outputTokens: r.outputTokens,
+          cacheReadTokens: r.cacheReadTokens,
+          totalCost: r.totalCost,
+          statusCode: r.statusCode,
+          durationMs: r.durationMs,
+          stopReason: r.stopReason,
+          bodyTruncated: r.bodyTruncated ?? false,
+          toolResultTruncated: r.toolResultTruncated ?? false,
+          hasBody: r.capturedRequestId !== null,
+          replayOfRequestId: r.replayOfRequestId,
+        })),
+        nextCursor,
       };
     }),
 

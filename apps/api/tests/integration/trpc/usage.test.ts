@@ -109,6 +109,8 @@ interface SeedRow {
   cacheReadTokens?: number;
   statusCode?: number;
   createdAt?: Date;
+  /** Task 9: marks this row as a replay of `replayOfRequestId`. */
+  replayOfRequestId?: string;
 }
 
 async function insertUsageRow(db: Database, opts: SeedRow) {
@@ -141,6 +143,7 @@ async function insertUsageRow(db: Database, opts: SeedRow) {
     statusCode: opts.statusCode ?? 200,
     durationMs: 1234,
     upstreamRetries: 0,
+    replayOfRequestId: opts.replayOfRequestId ?? null,
     ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
   });
 }
@@ -803,6 +806,128 @@ describe("usage router", () => {
 
     expect(page.items).toHaveLength(1);
     expect(Number(page.items[0]!.notionalCost)).toBeCloseTo(18, 4);
+  });
+});
+
+// Task 9 (single-request-replay): the cost side reads the RAW usage_logs
+// table (never usage_logs_scored), and replay spend must be broken out as
+// an independently visible number rather than silently blended into a
+// member's own cost. This is the one part of the feature with no CI
+// safety net beyond these tests — see docs/superpowers/specs/
+// 2026-08-03-single-request-replay-design.md §Component 2.
+describe("summary: replay cost breakout", () => {
+  it("replay spend is broken out AND still counted in the total (not subtracted)", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: user.id, orgId: org.id });
+
+    // The member's own request.
+    await insertUsageRow(t.db, {
+      userId: user.id,
+      apiKeyId: key,
+      accountId: account,
+      orgId: org.id,
+      totalCost: "1.0000000000",
+      actualCostUsd: "1.0000000000",
+    });
+    // A replay of some historical request, run under the same user/org/key —
+    // exactly the row that would silently blend into "the member's cost" if
+    // this query read usage_logs_scored (which drops replay rows) instead
+    // of the raw table.
+    await insertUsageRow(t.db, {
+      userId: user.id,
+      apiKeyId: key,
+      accountId: account,
+      orgId: org.id,
+      totalCost: "0.5000000000",
+      actualCostUsd: "0.5000000000",
+      replayOfRequestId: "some-source-request-id",
+    });
+
+    const caller = await callerFor({ db: t.db, userId: user.id });
+    const summary = await caller.usage.summary({ scope: { type: "own" } });
+
+    expect(Number(summary.replayCostUsd)).toBeCloseTo(0.5, 8);
+    // The total must include BOTH rows: replay cost is an additional
+    // breakdown, never a subtraction from the true total spend.
+    expect(Number(summary.totalCostUsd)).toBeCloseTo(1.5, 8);
+    expect(Number(summary.totalCostUsd)).toBeCloseTo(
+      1.0 + Number(summary.replayCostUsd),
+      8,
+    );
+  });
+
+  it("a scope with no replays reports replayCostUsd as zero, not null/undefined", async () => {
+    const org = await makeOrg(t.db);
+    const user = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const key = await seedApiKey(t.db, { userId: user.id, orgId: org.id });
+    await insertUsageRow(t.db, {
+      userId: user.id,
+      apiKeyId: key,
+      accountId: account,
+      orgId: org.id,
+      totalCost: "1.0000000000",
+    });
+
+    const caller = await callerFor({ db: t.db, userId: user.id });
+    const summary = await caller.usage.summary({ scope: { type: "own" } });
+    expect(typeof summary.replayCostUsd).toBe("string");
+    expect(Number(summary.replayCostUsd)).toBe(0);
+    expect(Number(summary.totalCostUsd)).toBeCloseTo(1.0, 8);
+  });
+
+  it("scope=org: replay cost aggregates across every member's replays in the org", async () => {
+    const org = await makeOrg(t.db);
+    const admin = await makeUser(t.db, {
+      role: "org_admin",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const member = await makeUser(t.db, {
+      role: "member",
+      scopeType: "organization",
+      scopeId: org.id,
+      orgId: org.id,
+    });
+    const account = await seedAccount(t.db, org.id);
+    const memberKey = await seedApiKey(t.db, { userId: member.id, orgId: org.id });
+    await insertUsageRow(t.db, {
+      userId: member.id,
+      apiKeyId: memberKey,
+      accountId: account,
+      orgId: org.id,
+      totalCost: "2.0000000000",
+      actualCostUsd: "2.0000000000",
+    });
+    await insertUsageRow(t.db, {
+      userId: member.id,
+      apiKeyId: memberKey,
+      accountId: account,
+      orgId: org.id,
+      totalCost: "0.3000000000",
+      actualCostUsd: "0.3000000000",
+      replayOfRequestId: "another-source-request-id",
+    });
+
+    const caller = await callerFor({ db: t.db, userId: admin.id });
+    const summary = await caller.usage.summary({
+      scope: { type: "org", orgId: org.id },
+    });
+    expect(Number(summary.replayCostUsd)).toBeCloseTo(0.3, 8);
+    expect(Number(summary.totalCostUsd)).toBeCloseTo(2.3, 8);
   });
 });
 
