@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { parseServerEnv, type ServerEnv } from "@caliber/config";
 import { LOG_REDACT_PATHS } from "@caliber/gateway-core";
 import type { Database } from "@caliber/db";
+import { createReplayQueue, type ReplayJobPayload } from "@caliber/queue";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
 import { metricsPlugin } from "./plugins/metrics.js";
@@ -34,6 +35,7 @@ import {
   type EvaluatorJobPayload,
 } from "./workers/evaluator/queue.js";
 import { createEvaluatorWorker } from "./workers/evaluator/worker.js";
+import { createReplayWorker } from "./workers/replay/worker.js";
 import {
   maybeSendBudgetAlert,
   type BudgetAlertEvent,
@@ -100,6 +102,13 @@ declare module "fastify" {
      * queues). Cron handler subscribes to this queue to enqueue daily jobs.
      */
     evaluatorQueue?: Queue<EvaluatorJobPayload>;
+    /**
+     * BullMQ single-request replay queue. Decorated only when
+     * ENABLE_GATEWAY=true AND ENABLE_EVALUATOR=true AND no test-injected Redis
+     * was provided (same escape hatch as the other queues) — replay depends on
+     * captured bodies and the org eval key, both evaluator-gated.
+     */
+    replayQueue?: Queue<ReplayJobPayload>;
     /**
      * Live model catalog registry (model-alias resolution). Always decorated;
      * its background refresh loop only runs when GATEWAY_ENABLE_MODEL_ALIAS is
@@ -627,6 +636,10 @@ function buildOnBudgetEventSink(
  * itself via the EvaluatorCronHandle; only the queue is decorated here so the
  * cron can enqueue jobs.
  *
+ * Also wires the single-request replay queue + worker, which reuse this
+ * block's two Redis connections (replay depends on the same captured bodies
+ * and org eval key as the evaluator, so it shares the ENABLE_EVALUATOR gate).
+ *
  * Uses a separate Redis connection from other pipelines (same rationale: BullMQ
  * Lua scripts cannot share the prefixed `fastify.redis` client).
  */
@@ -696,6 +709,21 @@ async function wireEvaluatorPipeline(
 
   app.decorate("evaluatorQueue", queue);
 
+  // Single-request replay (Task 6). Shares this block's two Redis connections
+  // on purpose: `bullmqRedis` for BullMQ's Lua scripts, `workerRedis` for the
+  // un-prefixed org-eval-key lookup the replay does before every loopback call.
+  const replayQueue = createReplayQueue({ connection: bullmqRedis });
+  const replayWorker = createReplayWorker({
+    connection: bullmqRedis,
+    db: app.db,
+    redis: workerRedis,
+    masterKeyHex: credentialEncryptionKey,
+    gatewayBaseUrl: env.GATEWAY_LOCAL_BASE_URL,
+    logger: app.log,
+  });
+
+  app.decorate("replayQueue", replayQueue);
+
   app.addHook("onClose", async () => {
     try {
       await worker.close();
@@ -706,11 +734,27 @@ async function wireEvaluatorPipeline(
       );
     }
     try {
+      await replayWorker.close();
+    } catch (err) {
+      app.log.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "replay worker close failed",
+      );
+    }
+    try {
       await queue.close();
     } catch (err) {
       app.log.warn(
         { err: err instanceof Error ? err.message : String(err) },
         "evaluator queue close failed",
+      );
+    }
+    try {
+      await replayQueue.close();
+    } catch (err) {
+      app.log.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "replay queue close failed",
       );
     }
     await workerRedis.quit().catch((err: Error) => {
