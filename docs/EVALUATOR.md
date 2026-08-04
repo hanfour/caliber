@@ -78,6 +78,18 @@ Reading the raw table is correct for single-row cost backfills (`runLlm.ts`,
 (portability requires completeness), for billing reconciliation, and for the
 cost-side `usage.ts` router. Switching those to the view would be a bug.
 
+**The count, so nobody has to grep to find out if they missed one.** Exactly
+four call sites read `usageLogsScored` — all aggregate, all "what did this
+person do in this period": `runRuleBased.ts` (rule-based scoring),
+`cron.ts` (the per-key evaluation fan-out), `rubrics.ts` (dry-run sample
+selection) and `facetSummary.ts` (facet aggregation for the continuous
+rubric). Exactly four read raw `usage_logs` for a single-row cost or GDPR
+lookup — `runLlm.ts`, `ledgerDeepAnalysis.ts`, `runDeliveryQuality.ts` and
+`reports.ts`'s `exportOwn` — plus the cost-side `usage.ts` router, which is
+aggregate but deliberately off the view (§ below). If a change to scoring
+adds a fifth aggregate query, it belongs on the first list; a new per-request
+cost lookup belongs on the second. There should be no third kind.
+
 **Consequence for future migrations.** The view is defined as `SELECT *`, which
 Postgres expands at creation time — so it holds a dependency on *every* column of
 `usage_logs`. Any migration that drops a `usage_logs` column must `DROP VIEW
@@ -92,6 +104,53 @@ The property is pinned by
 `apps/gateway/tests/workers/evaluator/replayExclusion.integration.test.ts`, which
 asserts that adding a replay row to a user's window leaves the rule-based scoring
 output byte-identical.
+
+### Replay's operational prerequisite: `ENABLE_EVALUATOR` must agree on both processes
+
+`apps/api` and `apps/gateway` are separate deployments that each read their own
+`ENABLE_EVALUATOR`. The replay BullMQ worker is created inside
+`wireEvaluatorPipeline` (`apps/gateway/src/server.ts`), which only runs when the
+*gateway's* flag is `true` — with it `false`, the gateway wires no worker at all,
+full stop.
+
+The API side does not know that. `replay.enqueue` is gated by the same flag via
+`evaluatorProcedure` (`apps/api/src/trpc/routers/_evaluatorGate.ts`), but that
+only checks the *API's own* environment, and the underlying queue is built off
+`REDIS_URL` alone. So a deployment where the API has `ENABLE_EVALUATOR=true` but
+the gateway still has it `false` (a stale rollout, a flag flipped in one service's
+`.env` and not the other's — the same class of miss as the `ENABLE_GITHUB_DELIVERY`
+compose-anchor bug) accepts replay requests without complaint: each call inserts a
+`replay_runs` row and pushes a job to Redis, and nothing is ever there to consume
+it. The row sits at `queued` forever with `failure_reason` still `NULL` — there is
+no timeout that flips it to `failed`, because from the API's perspective the job
+was successfully handed off.
+
+The web UI's only signal here is `replayEnabled` on `usage.listRequests`
+(`ctx.env.ENABLE_EVALUATOR`, read from the API process), which drives whether the
+requests-list page even offers the replay affordance. It says nothing about
+whether a gateway process anywhere is actually running the worker. An operator
+turning `ENABLE_EVALUATOR` off — or on — needs to flip it on **both** services, and
+should confirm with `gw_eval_dlq_count` / a live worker log line rather than trust
+the UI alone.
+
+### Known gap: a crashed replay worker can strand a row at `running`
+
+`runReplay.ts` (`apps/gateway/src/workers/replay/runReplay.ts`) claims a run with
+a `queued → running` UPDATE, and everything before the outbound `fetch` is inside
+a try/catch that releases the claim (`running → queued`) on any thrown error, so
+BullMQ's retries can pick it back up. Once `fetch` is called, money may have been
+spent, so the code deliberately stops releasing the claim on failure — better a
+row stuck at `running` than a second billed replay for the same click.
+
+That trade-off has a hole: it only covers *catchable* failures. A hard process
+crash (OOM kill, `SIGKILL`, a bad deploy landing mid-request) during that
+post-fetch window leaves the row at `running` permanently — there is no sweeper
+that reclaims stale `running` rows the way BullMQ reclaims stalled jobs. The
+comparison page (`ReplayComparisonView.tsx`) treats a sufficiently old `running`
+row as `stale_running` and keeps polling it indefinitely rather than rendering it
+as a hard failure, so the gap is visible (an operator watching the page sees "no
+result yet" forever, not a false success) rather than silent. There is no
+automatic recovery: an operator has to identify the row and re-run manually.
 
 ---
 
