@@ -114,11 +114,13 @@ output byte-identical.
 full stop.
 
 The API side does not know that. `replay.enqueue` is gated by the same flag via
-`evaluatorProcedure` (`apps/api/src/trpc/routers/_evaluatorGate.ts`), but that
-only checks the *API's own* environment, and the underlying queue is built off
-`REDIS_URL` alone. So a deployment where the API has `ENABLE_EVALUATOR=true` but
-the gateway still has it `false` (a stale rollout, a flag flipped in one service's
-`.env` and not the other's — the same class of miss as the `ENABLE_GITHUB_DELIVERY`
+`evaluatorProcedure` (`apps/api/src/trpc/routers/_evaluatorGate.ts`), and the
+underlying queue (`apps/api/src/server.ts`) is only constructed when
+`env.ENABLE_EVALUATOR && env.REDIS_URL` — but both of those checks read the
+*API's own* environment, never the gateway's. So a deployment where the API has
+`ENABLE_EVALUATOR=true` (and `REDIS_URL` set) but the gateway still has
+`ENABLE_EVALUATOR=false` (a stale rollout, a flag flipped in one service's `.env`
+and not the other's — the same class of miss as the `ENABLE_GITHUB_DELIVERY`
 compose-anchor bug) accepts replay requests without complaint: each call inserts a
 `replay_runs` row and pushes a job to Redis, and nothing is ever there to consume
 it. The row sits at `queued` forever with `failure_reason` still `NULL` — there is

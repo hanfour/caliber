@@ -92,6 +92,9 @@
         "tokenTooShort": "Token looks too short",
         "tokenTooLong": "Token looks too long",
         "probeFailed": "Connection probe failed: {reason}"
+      },
+      "replay": {
+        "hourlyLimitReached": "Replay limit reached: at most {max} replays per hour"
       }
     }
   }

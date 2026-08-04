@@ -92,6 +92,9 @@
         "tokenTooShort": "トークンが短すぎるようです",
         "tokenTooLong": "トークンが長すぎるようです",
         "probeFailed": "接続の確認に失敗しました: {reason}"
+      },
+      "replay": {
+        "hourlyLimitReached": "リプレイの上限に達しました:1時間あたり最大 {max} 回まで"
       }
     }
   }

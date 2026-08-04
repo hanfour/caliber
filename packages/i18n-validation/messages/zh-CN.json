@@ -92,6 +92,9 @@
         "tokenTooShort": "Token 长度过短",
         "tokenTooLong": "Token 长度过长",
         "probeFailed": "连接探测失败：{reason}"
+      },
+      "replay": {
+        "hourlyLimitReached": "重放次数已达上限：每小时最多 {max} 次"
       }
     }
   }

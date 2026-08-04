@@ -92,6 +92,9 @@
         "tokenTooShort": "토큰이 너무 짧은 것 같습니다",
         "tokenTooLong": "토큰이 너무 긴 것 같습니다",
         "probeFailed": "연결 확인에 실패했습니다: {reason}"
+      },
+      "replay": {
+        "hourlyLimitReached": "리플레이 한도에 도달했습니다: 시간당 최대 {max}회"
       }
     }
   }

@@ -34,6 +34,7 @@ import type { Database } from "@caliber/db";
 import { replayRuns, requestBodies, usageLogs } from "@caliber/db";
 import { can } from "@caliber/auth";
 import { enqueueReplay, type QueueLike as ReplayQueue } from "@caliber/queue";
+import { formatValidationKey } from "@caliber/i18n-validation";
 import { router } from "../procedures.js";
 import { evaluatorProcedure } from "./_evaluatorGate.js";
 import { writeAudit } from "../../services/audit.js";
@@ -312,7 +313,10 @@ export const replayRouter = router({
         if (recentRuns >= REPLAY_HOURLY_LIMIT) {
           throw new TRPCError({
             code: "TOO_MANY_REQUESTS",
-            message: `Replay limit reached: at most ${REPLAY_HOURLY_LIMIT} replays per hour`,
+            message: formatValidationKey(
+              "validation.custom.replay.hourlyLimitReached",
+              { max: REPLAY_HOURLY_LIMIT },
+            ),
           });
         }
 
