@@ -96,7 +96,15 @@ beforeAll(async () => {
 
   const [org] = await db
     .insert(organizations)
-    .values({ slug: "run-replay-test-org", name: "Run Replay Test Org" })
+    .values({
+      slug: "run-replay-test-org",
+      name: "Run Replay Test Org",
+      // A real precondition of the feature, not fixture noise: replay borrows
+      // the org's LLM-eval key, so `runReplay` refuses outright when the org
+      // has LLM eval turned off. Every test below except the one that asserts
+      // that refusal needs this on.
+      llmEvalEnabled: true,
+    })
     .returning();
   orgId = org!.id;
 
@@ -141,9 +149,11 @@ beforeEach(async () => {
   await db.execute(sql`TRUNCATE TABLE replay_runs RESTART IDENTITY CASCADE`);
   await db.execute(sql`TRUNCATE TABLE request_bodies RESTART IDENTITY CASCADE`);
   await db.execute(sql`TRUNCATE TABLE usage_logs RESTART IDENTITY CASCADE`);
+  // Both org-level replay preconditions are restored here: one test below
+  // pins the account, another turns the eval flag off.
   await db
     .update(organizations)
-    .set({ llmEvalAccountId: null })
+    .set({ llmEvalAccountId: null, llmEvalEnabled: true })
     .where(eq(organizations.id, orgId));
   // The shared upstream account is soft-deleted by one test below; un-delete it
   // so the others see a live account.
@@ -443,6 +453,34 @@ describe("runReplay", () => {
     const src = await seedCapturedRequest({});
     const run = await seedReplayRun({ sourceRequestId: src.requestId });
     await redis.del(`${LLM_KEY_REDIS_PREFIX}${orgId}`);
+    const fetchImpl = vi.fn();
+
+    await invoke({
+      runId: run.id,
+      sourceRequestId: src.requestId,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const row = await readRun(run.id);
+    expect(row.status).toBe("failed");
+    expect(row.failureReason).toBe("eval_key_unavailable");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // 金鑰是「有沒有東西可以用」，旗標是「這個組織准不准用」——兩者獨立。
+  // `provisionLlmEvalKey` 寫 Redis 時沒有 TTL，而整個 repo 沒有任何 deprovision
+  // 路徑（contentCapture 只處理「開啟」），所以 org 關掉 llm_eval_enabled 之後，
+  // 金鑰會無限期留在 Redis 裡。少了這道檢查，重放就會在該組織自己的開關說不行的
+  // 情況下，解密成員的完整 prompt、送去 upstream、並記在該組織帳上。
+  // runLlm.ts 在同樣狀態下是拒絕的（`if (!orgRow?.llmEvalEnabled) return null`）。
+  it("org 的 llm_eval_enabled 為 false → failed/eval_key_unavailable，且不呼叫 upstream", async () => {
+    await db
+      .update(organizations)
+      .set({ llmEvalEnabled: false })
+      .where(eq(organizations.id, orgId));
+
+    const src = await seedCapturedRequest({});
+    const run = await seedReplayRun({ sourceRequestId: src.requestId });
     const fetchImpl = vi.fn();
 
     await invoke({

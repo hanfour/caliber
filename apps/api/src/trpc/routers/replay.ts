@@ -31,7 +31,12 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import type { Database } from "@caliber/db";
-import { replayRuns, requestBodies, usageLogs } from "@caliber/db";
+import {
+  organizations,
+  replayRuns,
+  requestBodies,
+  usageLogs,
+} from "@caliber/db";
 import { can } from "@caliber/auth";
 import { enqueueReplay, type QueueLike as ReplayQueue } from "@caliber/queue";
 import { formatValidationKey } from "@caliber/i18n-validation";
@@ -240,6 +245,45 @@ export const replayRouter = router({
       if (!source) throw new TRPCError({ code: "NOT_FOUND" });
 
       assertCanReplay(ctx.perm, input.orgId, source.userId);
+
+      // ── Org precondition: LLM eval must be ON ─────────────────────────────
+      // Replay authenticates with the org's LLM-eval key, so the org's own
+      // `llm_eval_enabled` switch governs it (design doc: 「重放因此綁在
+      // `organizations.llm_eval_enabled` 與 Redis 中存在 eval key 這兩個前提上。
+      // 任一不成立時，`replay.enqueue` 必須以明確錯誤拒絕」).
+      //
+      // This is reachable, not theoretical. `provisionLlmEvalKey` writes the
+      // key to Redis with a bare `set` — no TTL — and nothing in this repo ever
+      // deprovisions it (contentCapture.setSettings only handles turning eval
+      // ON).
+      // So an org that enabled eval and later disabled it still has a usable
+      // key sitting in Redis indefinitely. Without this check the worker would
+      // find that key and go on to decrypt a member's full prompt, POST it to
+      // the upstream and bill the org — in a configuration where the org's own
+      // control says not to. And `request.replay` grants a self-branch, so it
+      // is any member's own requests, not only an admin's.
+      //
+      // apps/gateway's runReplay refuses the same state (that is the authority,
+      // exactly like the fidelity gate below). Refusing HERE additionally means
+      // no billed round trip is ever queued.
+      //
+      // Checked after authorisation so an unauthorised caller learns nothing
+      // about the org's configuration — same rule as services/replayComparison.
+      const org = await ctx.db
+        .select({ llmEvalEnabled: organizations.llmEvalEnabled })
+        .from(organizations)
+        .where(eq(organizations.id, input.orgId))
+        .limit(1)
+        .then((r) => r[0]);
+
+      if (!org?.llmEvalEnabled) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          // Routed through formatValidationKey so the message is a translatable
+          // key rather than server-side prose — see scripts/audit-zod-i18n.mjs.
+          message: formatValidationKey("validation.custom.replay.evalDisabled"),
+        });
+      }
 
       // ── Fidelity precheck (UX only — apps/gateway's resolveFidelity is the
       //    authority; see the file header). Messages describe the capture, never

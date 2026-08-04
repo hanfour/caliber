@@ -99,7 +99,12 @@ test("requests list: renders captured requests, explains each disabled replay st
   );
   expect(nobodyRes.status(), await nobodyRes.text()).toBe(200);
 
-  // ── 4. Enable content capture via the Settings UI ────────────────────
+  // ── 4. Enable content capture AND LLM eval via the Settings UI ───────
+  //
+  //      LLM eval is not incidental here: replay borrows the org's eval key,
+  //      so `replay.enqueue` refuses with PRECONDITION_FAILED while
+  //      `llm_eval_enabled` is off — which step 10's happy path would then
+  //      read as a broken endpoint rather than a disabled feature.
   await page.goto(`/dashboard/organizations/${orgId}/evaluator/settings`);
   const captureToggle = page.locator(
     '[role="switch"][id="contentCaptureEnabled"]',
@@ -107,6 +112,11 @@ test("requests list: renders captured requests, explains each disabled replay st
   await expect(captureToggle).toBeVisible();
   if ((await captureToggle.getAttribute("aria-checked")) !== "true") {
     await captureToggle.click();
+  }
+  const llmEvalToggle = page.locator('[role="switch"][id="llmEvalEnabled"]');
+  await expect(llmEvalToggle).toBeVisible();
+  if ((await llmEvalToggle.getAttribute("aria-checked")) !== "true") {
+    await llmEvalToggle.click();
   }
   await Promise.all([
     page.waitForResponse(

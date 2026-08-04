@@ -94,7 +94,8 @@
         "probeFailed": "Connection probe failed: {reason}"
       },
       "replay": {
-        "hourlyLimitReached": "Replay limit reached: at most {max} replays per hour"
+        "hourlyLimitReached": "Replay limit reached: at most {max} replays per hour",
+        "evalDisabled": "Replay is unavailable: this organization has LLM evaluation turned off"
       }
     }
   }

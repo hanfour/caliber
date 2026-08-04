@@ -9,9 +9,10 @@ import { E2E_GATEWAY_BASE_URL } from "../fixtures/gateway-env";
  * organizations/[id]/requests/[requestId]/page.tsx).
  *
  * This spec drives the REAL replay pipeline end to end rather than seeding a
- * finished run: enabling content capture provisions the org eval key into
- * Redis (apps/api's contentCapture.setSettings → provisionLlmEvalKey), which
- * is exactly what apps/gateway's replay worker reads before its loopback call.
+ * finished run: enabling content capture AND LLM eval provisions the org eval
+ * key into Redis (apps/api's contentCapture.setSettings → provisionLlmEvalKey,
+ * which fires on the eval toggle specifically), which is exactly what
+ * apps/gateway's replay worker reads before its loopback call.
  * A seeded `replay_runs` row would prove the page renders SOMETHING; only the
  * real pipeline proves the page renders the two bodies that actually came back
  * from two different models.
@@ -68,8 +69,17 @@ test("comparison page: fidelity warning sits above the comparison, latency is ne
   expect(rawKey, "reveal panel should surface the raw key").toBeTruthy();
   await keyDialog.getByRole("button", { name: /done/i }).click();
 
-  // ── 3. Enable content capture (also provisions the org eval key the
-  //      replay worker authenticates its loopback call with) ────────────
+  // ── 3. Enable content capture AND LLM eval ────────────────────────────
+  //
+  //      Both are preconditions of replay, and for different reasons:
+  //      content capture is what stores the body there is anything to replay,
+  //      while `llm_eval_enabled` is the org's own switch governing the eval
+  //      key replay borrows — `replay.enqueue` refuses with
+  //      PRECONDITION_FAILED without it, and apps/gateway's `runReplay`
+  //      refuses again with `eval_key_unavailable`. Turning eval on is also
+  //      the ONLY path that provisions that key into Redis
+  //      (contentCapture.setSettings → provisionLlmEvalKey), so this toggle is
+  //      what makes the loopback call at step 6 possible at all.
   await page.goto(`/dashboard/organizations/${orgId}/evaluator/settings`);
   const captureToggle = page.locator(
     '[role="switch"][id="contentCaptureEnabled"]',
@@ -77,6 +87,11 @@ test("comparison page: fidelity warning sits above the comparison, latency is ne
   await expect(captureToggle).toBeVisible();
   if ((await captureToggle.getAttribute("aria-checked")) !== "true") {
     await captureToggle.click();
+  }
+  const llmEvalToggle = page.locator('[role="switch"][id="llmEvalEnabled"]');
+  await expect(llmEvalToggle).toBeVisible();
+  if ((await llmEvalToggle.getAttribute("aria-checked")) !== "true") {
+    await llmEvalToggle.click();
   }
   await Promise.all([
     page.waitForResponse(

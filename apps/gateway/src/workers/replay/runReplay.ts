@@ -273,8 +273,40 @@ export async function runReplay(input: RunReplayInput): Promise<void> {
       return;
     }
 
-    // 6. org eval key。重放以系統金鑰認證，故 usage_logs 會掛在該金鑰而非按下
-    //    按鈕的人身上——真正的 attribution 記在 `replay_runs.triggered_by`。
+    // 6. org 的兩個前提：`llm_eval_enabled` 為真，且 Redis 裡真的有 eval key。
+    //    設計文件把兩者並列，因為它們回答的是不同的問題——旗標是「這個組織准不
+    //    准用」，金鑰是「有沒有東西可以用」。
+    //
+    //    旗標先查、而且必須查：`provisionLlmEvalKey` 是 `redis.set` 且不帶 TTL，
+    //    整個 repo 也沒有任何 deprovision 路徑（apps/api 的 contentCapture 只處
+    //    理「開啟」），所以一個開過又關掉 LLM eval 的 org，金鑰會無限期留在
+    //    Redis。只看金鑰在不在，就會在該組織自己的開關說「不行」的情況下，把成員
+    //    的完整 prompt 解密、送去 upstream、並記到該組織帳上。evaluator 的
+    //    `runLlmDeepAnalysis` 在同樣狀態下是明確拒絕的，重放花的是同一筆錢、讀的
+    //    是同一份內容，沒有理由更寬鬆。
+    //
+    //    兩者都寫 `eval_key_unavailable`：`failure_reason` 是封閉列舉，而對操作者
+    //    而言結論相同——這個組織現在沒有可用的系統金鑰，重放送不出去。
+    const orgRow = await db
+      .select({
+        llmEvalEnabled: organizations.llmEvalEnabled,
+        llmEvalAccountId: organizations.llmEvalAccountId,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, payload.orgId))
+      .limit(1)
+      .then((r) => r[0]);
+
+    if (!orgRow?.llmEvalEnabled) {
+      await finish("failed", {
+        failureReason: "eval_key_unavailable",
+        fidelity,
+      });
+      return;
+    }
+
+    // 重放以系統金鑰認證，故 usage_logs 會掛在該金鑰而非按下按鈕的人身上——真正
+    // 的 attribution 記在 `replay_runs.triggered_by`。
     const rawKey = await input.redis.get(
       `${LLM_KEY_REDIS_PREFIX}${payload.orgId}`,
     );
@@ -285,13 +317,6 @@ export async function runReplay(input: RunReplayInput): Promise<void> {
       });
       return;
     }
-
-    const orgRow = await db
-      .select({ llmEvalAccountId: organizations.llmEvalAccountId })
-      .from(organizations)
-      .where(eq(organizations.id, payload.orgId))
-      .limit(1)
-      .then((r) => r[0]);
 
     // 7. 打回 gateway 自己。`REPLAY_OF_HEADER` 只有 eval key 前綴的請求會被信任，
     //    它讓這筆重放在 `usage_logs_scored` 中被排除，不會污染任何人的評分。

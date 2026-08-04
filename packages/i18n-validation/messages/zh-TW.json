@@ -94,7 +94,8 @@
         "probeFailed": "連線探測失敗:{reason}"
       },
       "replay": {
-        "hourlyLimitReached": "重放次數已達上限：每小時最多 {max} 次"
+        "hourlyLimitReached": "重放次數已達上限：每小時最多 {max} 次",
+        "evalDisabled": "無法重放：這個組織尚未啟用 LLM 評估"
       }
     }
   }

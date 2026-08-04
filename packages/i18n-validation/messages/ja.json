@@ -94,7 +94,8 @@
         "probeFailed": "接続の確認に失敗しました: {reason}"
       },
       "replay": {
-        "hourlyLimitReached": "リプレイの上限に達しました:1時間あたり最大 {max} 回まで"
+        "hourlyLimitReached": "リプレイの上限に達しました:1時間あたり最大 {max} 回まで",
+        "evalDisabled": "リプレイを利用できません:この組織では LLM 評価が有効になっていません"
       }
     }
   }

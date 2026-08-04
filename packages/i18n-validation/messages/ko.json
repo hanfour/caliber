@@ -94,7 +94,8 @@
         "probeFailed": "연결 확인에 실패했습니다: {reason}"
       },
       "replay": {
-        "hourlyLimitReached": "리플레이 한도에 도달했습니다: 시간당 최대 {max}회"
+        "hourlyLimitReached": "리플레이 한도에 도달했습니다: 시간당 최대 {max}회",
+        "evalDisabled": "리플레이를 사용할 수 없습니다: 이 조직은 LLM 평가가 꺼져 있습니다"
       }
     }
   }

@@ -187,8 +187,14 @@ async function seedCapturedRequest(
  * limit counts `replay_runs` rows per triggering user — sharing an actor
  * across tests would leak one test's quota into the next.
  */
-async function seedScenario(db: Database) {
-  const org = await makeOrg(db);
+async function seedScenario(
+  db: Database,
+  opts: { llmEvalEnabled?: boolean } = {},
+) {
+  // Replay borrows the org's LLM-eval key, so `llm_eval_enabled` is a real
+  // precondition of the endpoint — on by default here, off only where a test
+  // pins the refusal.
+  const org = await makeOrg(db, { llmEvalEnabled: opts.llmEvalEnabled ?? true });
   const owner = await makeUser(db, { orgId: org.id });
   const otherMember = await makeUser(db, { orgId: org.id });
   const admin = await makeUser(db, {
@@ -376,6 +382,57 @@ describe("replay.enqueue", () => {
       }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     expect(q.add).not.toHaveBeenCalled();
+  });
+
+  // Replay authenticates with the org's LLM-eval key, so the org's own
+  // `llm_eval_enabled` switch is a precondition of the feature (design doc:
+  // 「任一不成立時，`replay.enqueue` 必須以明確錯誤拒絕」). It is reachable, not
+  // hypothetical: turning eval off leaves the provisioned key in Redis forever
+  // (no TTL, no deprovision path anywhere), so without this check an enqueue
+  // would happily buy a billed upstream call and decrypt a member's full prompt
+  // in a configuration where the org said no. Refusing here means no billed
+  // round trip is ever queued.
+  it("org 已關閉 llm_eval_enabled → PRECONDITION_FAILED，什麼都不入列", async () => {
+    const s = await seedScenario(t.db, { llmEvalEnabled: false });
+    const q = makeFakeQueue();
+    const caller = await callerFor({
+      db: t.db,
+      userId: s.owner.id,
+      replayQueue: q.queue,
+    });
+
+    await expect(
+      caller.replay.enqueue({
+        orgId: s.org.id,
+        requestId: s.requestId,
+        targetModel: TARGET_MODEL,
+      }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+
+    expect(q.add).not.toHaveBeenCalled();
+    expect(await runsFor(t.db, s.requestId)).toHaveLength(0);
+  });
+
+  // The refusal must be a translatable key, not English prose: a CI audit step
+  // (scripts/audit-zod-i18n.mjs) rejects inline literals and does not run under
+  // turbo, so nothing local would catch a regression here.
+  it("該拒絕訊息走 i18n key，而不是寫死的英文句子", async () => {
+    const s = await seedScenario(t.db, { llmEvalEnabled: false });
+    const caller = await callerFor({
+      db: t.db,
+      userId: s.owner.id,
+      replayQueue: makeFakeQueue().queue,
+    });
+
+    await expect(
+      caller.replay.enqueue({
+        orgId: s.org.id,
+        requestId: s.requestId,
+        targetModel: TARGET_MODEL,
+      }),
+    ).rejects.toMatchObject({
+      message: "validation.custom.replay.evalDisabled",
+    });
   });
 
   it("the author gets a queued replay_runs row and a job whose jobId is the bare runId", async () => {
