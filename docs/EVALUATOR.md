@@ -187,9 +187,10 @@ that reclaims stale `running` rows the way BullMQ reclaims stalled jobs. The
 comparison page (`ReplayComparisonView.tsx`) treats a sufficiently old `running`
 row as `stale_running` and keeps polling it rather than rendering it as a hard
 failure, so the gap is visible (an operator watching the page sees "no result yet"
-forever, not a false success) rather than silent. Polling a warned run steps down
-from 3s to 15s and caps at 30s, so a tab left open on a permanently stranded run
-does not keep re-decrypting its bodies every three seconds. There is no automatic
+forever, not a false success) rather than silent. Polling a warned run backs off
+— the interval widens from 3s to 15s and caps at 30s — so a tab left open on a
+permanently stranded run does not keep re-decrypting its bodies every three
+seconds. There is no automatic
 recovery: an operator has to identify the row and re-run manually.
 
 ---
