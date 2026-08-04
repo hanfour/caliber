@@ -17,10 +17,28 @@ import { E2E_GATEWAY_BASE_URL } from "../fixtures/gateway-env";
  * real pipeline proves the page renders the two bodies that actually came back
  * from two different models.
  *
+ * That last sentence used to be aspiration, not fact. Step 6 asserted only that
+ * the two `ResponsePanel`s were VISIBLE — and they mount unconditionally,
+ * substituting `emptyText` when a side has no body — so the spec stayed green
+ * for the life of the branch while the replay was failing
+ * `eval_key_unavailable` before it ever reached an upstream. The assertion is
+ * now on panel CONTENT (`msg_fake_e2e`, the fake upstream's canned reply id),
+ * which nothing but a completed loopback can put on the page. This is the ONLY
+ * automated coverage of the enqueue → worker → loopback → capture chain; every
+ * other layer in the repo stubs `fetchImpl`.
+ *
  * ENVIRONMENT PREREQUISITE (same as specs 20/30/40): ENABLE_EVALUATOR=true
  * must be exported for the local run — the replay router is behind
  * `evaluatorProcedure` and the gateway only wires the replay worker inside the
  * same ENABLE_EVALUATOR block. CI's e2e job sets it at the job level.
+ *
+ * ENABLE_GATEWAY=true, CREDENTIAL_ENCRYPTION_KEY and API_KEY_HASH_PEPPER must
+ * be exported too, and that is easy to miss: playwright.config.ts puts them in
+ * the GATEWAY webServer's env only, never the API's, so a bare local run leaves
+ * the API with ENABLE_GATEWAY=false and step 1 dies on `accounts.create`
+ * → NOT_FOUND (ensureGatewayEnabled) with nothing pointing at the cause. CI
+ * does not hit this because its e2e job sets all of them job-wide, so every
+ * process inherits them. Use the same values as e2e/fixtures/gateway-env.ts.
  */
 test("comparison page: fidelity warning sits above the comparison, latency is never presented as comparable, and a same-model baseline can be started", async ({
   page,
@@ -188,15 +206,36 @@ test("comparison page: fidelity warning sits above the comparison, latency is ne
   );
 
   // ── 6. The comparison itself ──────────────────────────────────────────
-  // The page polls while the run is queued/running and while the replay's own
-  // usage_logs row is still being written, so both panels appearing is proof
-  // the whole pipeline (enqueue → worker → loopback → capture) completed.
+  // Both panels are MOUNTED unconditionally (`ResponsePanel` substitutes
+  // `emptyText` when its side has no body), so `toBeVisible()` alone proves
+  // only that the page rendered — an `eval_key_unavailable` run that never
+  // reached an upstream satisfies it just as well. Kept as a cheap mount check;
+  // the pipeline proof is the content assertion below it.
   await expect(page.getByTestId("source-response")).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByTestId("replay-response")).toBeVisible({
-    timeout: 60_000,
-  });
+  const replayPanel = page.getByTestId("replay-response");
+  await expect(replayPanel).toBeVisible({ timeout: 60_000 });
+
+  // THE falsifiable assertion. `msg_fake_e2e` is the id in the fake upstream's
+  // canned reply (apps/web/e2e/fixtures/fake-anthropic.ts), so it can only
+  // appear inside the replay panel if every link of the chain that spends money
+  // actually ran: enqueue → worker claimed the run → loopback POST to the
+  // gateway authenticated with the org eval key → forwarded upstream → response
+  // captured, encrypted and written → the replay's own usage_logs row landed →
+  // getComparison found, decrypted and rendered it.
+  //
+  // Nothing else in this repo covers that chain: every other layer stubs
+  // `fetchImpl`. Scoped to the panel because the SOURCE response carries the
+  // same canned id — a page-wide search would pass on the source alone.
+  await expect(replayPanel).toContainText("msg_fake_e2e", { timeout: 60_000 });
+  await expect(page.getByTestId("source-response")).toContainText(
+    "msg_fake_e2e",
+  );
+
+  // The negation stated directly, so a regression fails with the symptom named
+  // rather than with "some string was missing".
+  await expect(replayPanel).not.toContainText("尚無重放結果可比對");
 
   // The caveat must sit ABOVE what it qualifies. A footnote under the
   // comparison has already failed at its job.
