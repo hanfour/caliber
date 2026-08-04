@@ -40,8 +40,8 @@ import { requireMasterKeyHex } from "../trpc/routers/_credentials.js";
 // ─── Stale-claim policy ───────────────────────────────────────────────────────
 
 /**
- * How long a `running` row may go without completing before this endpoint
- * reports it as failed.
+ * How long a run may go without reaching a displayable result before this
+ * endpoint stops calling it healthy.
  *
  * Generous on purpose: a single replay is one blocking upstream call, which
  * this project has measured at 50–111s against a slow model, and the worker
@@ -49,19 +49,46 @@ import { requireMasterKeyHex } from "../trpc/routers/_credentials.js";
  * minutes is far beyond any legitimate single replay and far below "the
  * operator gave up and refreshed all afternoon".
  *
- * Exported so the test asserts against the same number the service enforces.
+ * ANCHOR CAVEAT: `replay_runs` records only `created_at` — there is no column
+ * for when the worker claimed the row — so the window is necessarily measured
+ * from creation, which includes queue time. With `concurrency: 1` a deep
+ * enough backlog can therefore push a perfectly healthy run past this window
+ * before it ever starts. That is exactly why `stale_running` is reported as a
+ * WARNING the caller keeps watching (see below) rather than a terminal state:
+ * a late run must be able to replace the warning with its result on its own.
+ *
+ * Exported so the tests assert against the same number the service enforces.
  */
 export const REPLAY_STALE_RUNNING_MS = 15 * 60 * 1000;
 
 /**
- * The synthetic `failureReason` for the case above.
+ * Synthetic reason: the run is `running` and has been for longer than the
+ * window above.
  *
  * Deliberately NOT one of `apps/gateway/src/workers/replay/failureReasons.ts`'s
  * values: those describe something the worker observed and wrote down. This one
- * means the opposite — the worker never came back to write anything — and the
+ * means the opposite — the worker has not come back to write anything — and the
  * UI must say so in those words rather than inventing a cause.
+ *
+ * **Not terminal.** The row is still `running` in the database and the worker
+ * may still finish it; consumers must keep polling and let a real result
+ * replace this. See `ReplayComparisonView.isPending`.
  */
 export const STALE_RUNNING_FAILURE_REASON = "stale_running";
+
+/**
+ * Synthetic reason: the run finished upstream (`ok`) but its own `usage_logs`
+ * row never landed within the window, so there is nothing to compare against.
+ *
+ * This one IS terminal. The usage row is written seconds after the loopback
+ * returns; if it has not arrived in fifteen minutes it was dropped, and the
+ * only recourse is a new replay. Without this bound the page would show
+ * "results being written…" and poll forever — the same never-resolving lie the
+ * stale-running rule exists to prevent, just on the other branch.
+ *
+ * The copy for it must be honest that the replay DID run and DID cost money.
+ */
+export const RESULT_MISSING_FAILURE_REASON = "result_missing";
 
 /** Reported when `replay_runs.status` holds a value this build does not know. */
 export const UNKNOWN_STATUS_FAILURE_REASON = "unknown_status";
@@ -252,6 +279,30 @@ function effectiveStatus(
   return { status: parsed.data, failureReason: storedReason };
 }
 
+type Outcome = { status: ReplayComparisonStatus; failureReason: string | null };
+
+/**
+ * Bound the "results are still being written" window.
+ *
+ * An `ok` run whose own `usage_logs` row has not landed is a normal, short
+ * state — but only briefly. Left unbounded it is indistinguishable from a row
+ * that was dropped, and a caller polling on it never stops. Past the window it
+ * is reported as a terminal failure with its own reason, so the page can say
+ * "the replay ran but its record is gone" instead of spinning forever.
+ *
+ * Returns a NEW outcome; never mutates the one it was given.
+ */
+function boundMissingResult(
+  outcome: Outcome,
+  hasReplaySide: boolean,
+  createdAt: Date,
+  nowMs: number,
+): Outcome {
+  if (outcome.status !== "ok" || hasReplaySide) return outcome;
+  if (nowMs - createdAt.getTime() <= REPLAY_STALE_RUNNING_MS) return outcome;
+  return { status: "failed", failureReason: RESULT_MISSING_FAILURE_REASON };
+}
+
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 export async function getReplayComparison(
@@ -304,7 +355,7 @@ export async function getReplayComparison(
       "Cannot show captured content: CREDENTIAL_ENCRYPTION_KEY is not configured on this API server",
   });
 
-  const { status, failureReason } = effectiveStatus(
+  const claimed = effectiveStatus(
     run.status,
     run.createdAt,
     run.failureReason,
@@ -317,9 +368,16 @@ export async function getReplayComparison(
   // is additionally required because a run can be `ok` before its own
   // usage_logs row has landed — see ReplayComparison.replay.
   const replayRow =
-    status === "ok" && run.replayRequestId
+    claimed.status === "ok" && run.replayRequestId
       ? await loadSide(db, orgId, run.replayRequestId)
       : undefined;
+
+  const { status, failureReason } = boundMissingResult(
+    claimed,
+    replayRow !== undefined,
+    run.createdAt,
+    nowMs,
+  );
 
   return {
     source: toSide(
@@ -349,8 +407,19 @@ export async function getReplayComparison(
     comparable: {
       // Rule 1 — see the file header. No condition, by design.
       latency: false,
-      // Rule 2 — the replay always runs cold.
-      cost: source.cacheReadTokens === 0,
+      // Rule 2 — BOTH directions. A cache read on EITHER side means the two
+      // calls were not priced on the same terms.
+      //
+      // The reverse direction is not hypothetical, and this feature is what
+      // makes it reachable: `buildReplayBody` overrides only `model` and
+      // `stream`, so the original's `cache_control` markers are replayed
+      // verbatim. Pressing 「用同一模型再跑一次」 twice inside the cache TTL,
+      // through the same upstream account, gives the second replay a cache
+      // read the first one wrote — while the source stayed cold. A
+      // source-only test would have declared those two costs comparable and
+      // printed both figures side by side.
+      cost:
+        source.cacheReadTokens === 0 && (replayRow?.cacheReadTokens ?? 0) === 0,
     },
   };
 }

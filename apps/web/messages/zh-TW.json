@@ -1411,7 +1411,6 @@
     "statusFailedTitle": "這次重放沒有完成",
     "bannerTitle": "解讀之前，先看這些落差",
     "bannerStreaming": "重放一律關閉串流，延遲不可比——兩邊量到的不是同一件事。",
-    "bannerCache": "原請求命中提示快取（讀取 {tokens} tokens），重放跑的是冷快取，成本不可比。",
     "bannerToolResult": "原請求的 tool result 曾被截斷，送出的輸入與當初不完全相同。",
     "bannerAccountGone": "原請求使用的上游帳號已不存在，重放走的是另一個帳號。",
     "colMetric": "指標",
@@ -1426,7 +1425,7 @@
     "metricLatency": "延遲",
     "notComparable": "不可比",
     "latencyNote": "延遲不可比：重放強制關閉串流，原請求的耗時與這裡量到的不是同一件事。",
-    "costNote": "成本不可比：原請求命中提示快取，重放跑的是冷快取，兩者不是同一種計價。",
+    "costNote": "成本不可比：兩次呼叫中至少有一邊命中了提示快取，計價前提不同。",
     "sourceResponseTitle": "原始回應",
     "replayResponseTitle": "重放回應",
     "responseUnavailable": "內容無法顯示（未擷取、已超過保存期限，或無法解密）。",
@@ -1447,9 +1446,14 @@
       "upstream_error": "上游回應失敗（HTTP {status}）。",
       "upstream_error_nostatus": "上游回應失敗。",
       "missing_request_id": "重放送出去了，但沒有拿到可追蹤的 request id，結果無法對照。",
-      "stale_running": "這次重放逾時未回報結果（執行程序可能已中斷）。請重新發起一次重放。",
+      "stale_running": "可能排在其他重放後面，也可能執行程序已中斷。本頁仍在持續等待，若結果回來了會自動顯示；等太久的話再重新發起一次。",
       "unknown_status": "無法辨識這次重放的狀態。",
-      "unknown": "重放失敗（{reason}）。"
-    }
+      "unknown": "重放失敗（{reason}）。",
+      "result_missing": "重放已送出並取得回應（費用可能已產生），但一直找不到對應的用量與內容記錄，這次結果已無法對照。請重新發起一次重放。"
+    },
+    "bannerCost": "提示快取的命中狀況會直接改變計價，本次對照的成本不可比。",
+    "bannerCacheSource": "原請求從提示快取讀取了 {tokens} tokens。",
+    "bannerCacheReplay": "這次重放從提示快取讀取了 {tokens} tokens。",
+    "statusStalledTitle": "這次重放已超過預期時間仍未回報"
   }
 }

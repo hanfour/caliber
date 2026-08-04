@@ -1411,7 +1411,6 @@
     "statusFailedTitle": "这次重放没有完成",
     "bannerTitle": "解读之前，先看这些差距",
     "bannerStreaming": "重放一律关闭流式输出，延迟不可比——两边量到的不是同一件事。",
-    "bannerCache": "原请求命中了提示缓存（读取 {tokens} tokens），重放跑的是冷缓存，成本不可比。",
     "bannerToolResult": "原请求的 tool result 曾被截断，送出的输入与当初并不完全相同。",
     "bannerAccountGone": "原请求使用的上游账号已不存在，重放走的是另一个账号。",
     "colMetric": "指标",
@@ -1426,7 +1425,7 @@
     "metricLatency": "延迟",
     "notComparable": "不可比",
     "latencyNote": "延迟不可比：重放强制关闭流式输出，原请求的耗时与这里量到的不是同一件事。",
-    "costNote": "成本不可比：原请求命中提示缓存，重放跑的是冷缓存，两者不是同一种计价。",
+    "costNote": "成本不可比：两次调用中至少有一边命中了提示缓存，计价前提不同。",
     "sourceResponseTitle": "原始响应",
     "replayResponseTitle": "重放响应",
     "responseUnavailable": "内容无法显示（未采集、已超过保存期限，或无法解密）。",
@@ -1447,9 +1446,14 @@
       "upstream_error": "上游响应失败（HTTP {status}）。",
       "upstream_error_nostatus": "上游响应失败。",
       "missing_request_id": "重放已发出，但没有拿到可追踪的 request id，结果无法对照。",
-      "stale_running": "这次重放超时未回报结果（执行进程可能已中断）。请重新发起一次重放。",
+      "stale_running": "可能排在其他重放后面，也可能执行进程已中断。本页仍在持续等待，结果回来后会自动显示；等太久的话再重新发起一次。",
       "unknown_status": "无法识别这次重放的状态。",
-      "unknown": "重放失败（{reason}）。"
-    }
+      "unknown": "重放失败（{reason}）。",
+      "result_missing": "重放已发出并取得响应（费用可能已产生），但始终找不到对应的用量与内容记录，这次结果已无法对照。请重新发起一次重放。"
+    },
+    "bannerCost": "提示缓存的命中情况会直接改变计价，本次对照的成本不可比。",
+    "bannerCacheSource": "原请求从提示缓存读取了 {tokens} tokens。",
+    "bannerCacheReplay": "这次重放从提示缓存读取了 {tokens} tokens。",
+    "statusStalledTitle": "这次重放已超过预期时间仍未回报"
   }
 }

@@ -14,6 +14,8 @@ interface Props {
   fidelity: Fidelity | null;
   comparableCost: boolean;
   sourceCacheReadTokens: number;
+  /** `null` while there is no replay side to report on yet. */
+  replayCacheReadTokens: number | null;
 }
 
 /**
@@ -34,12 +36,24 @@ export function FidelityBanner({
   fidelity,
   comparableCost,
   sourceCacheReadTokens,
+  replayCacheReadTokens,
 }: Props) {
   const t = useTranslations("replayComparison");
 
   const notes: string[] = [t("bannerStreaming")];
+  // Which SIDE read from cache is stated explicitly, because either one can.
+  // The replay inherits the original's cache_control markers verbatim, so a
+  // second same-model baseline inside the cache TTL reads warm while the
+  // original stayed cold — and a line that always blamed "the original" would
+  // then be simply false.
   if (!comparableCost) {
-    notes.push(t("bannerCache", { tokens: sourceCacheReadTokens }));
+    notes.push(t("bannerCost"));
+    if (sourceCacheReadTokens > 0) {
+      notes.push(t("bannerCacheSource", { tokens: sourceCacheReadTokens }));
+    }
+    if (replayCacheReadTokens !== null && replayCacheReadTokens > 0) {
+      notes.push(t("bannerCacheReplay", { tokens: replayCacheReadTokens }));
+    }
   }
   if (fidelity?.toolResultTruncated) notes.push(t("bannerToolResult"));
   if (fidelity && !fidelity.originalAccountStillExists) {

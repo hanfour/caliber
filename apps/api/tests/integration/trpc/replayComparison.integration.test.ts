@@ -42,6 +42,7 @@ import { createCallerFactory } from "../../../src/trpc/procedures.js";
 import { appRouter } from "../../../src/trpc/router.js";
 import {
   REPLAY_STALE_RUNNING_MS,
+  RESULT_MISSING_FAILURE_REASON,
   STALE_RUNNING_FAILURE_REASON,
   UNKNOWN_STATUS_FAILURE_REASON,
 } from "../../../src/services/replayComparison.js";
@@ -318,6 +319,30 @@ describe("replay.getComparison", () => {
     expect(res.comparable.latency).toBe(false);
     expect(res.comparable.cost).toBe(false);
     expect(res.source.cacheReadTokens).toBe(4096);
+  });
+
+  it("原請求冷、但重放命中快取時，成本一樣不可比（規則是雙向的）", async () => {
+    // Reachable through this very feature: `buildReplayBody` only overrides
+    // `model` and `stream`, so the source's cache_control markers replay
+    // verbatim. Pressing the same-model baseline twice inside the cache TTL
+    // gives replay #2 a cache read that replay #1 wrote — with the source
+    // still cold. A source-only rule would print both $ figures side by side
+    // and call them comparable.
+    const s = await seedScenario(t.db, { cacheReadTokens: 0 });
+    const { runId } = await seedCompletedRun(t.db, s, {
+      cacheReadTokens: 8192,
+    });
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    expect(res.source.cacheReadTokens).toBe(0);
+    expect(res.replay!.cacheReadTokens).toBe(8192);
+    expect(res.comparable.cost).toBe(false);
+    expect(res.comparable.latency).toBe(false);
   });
 
   it("原請求無 cache read 時成本可比，但延遲仍不可比（重放強制關串流）", async () => {
@@ -604,7 +629,9 @@ describe("replay.getComparison", () => {
       triggeredBy: s.owner.id,
       status: "ok",
       // The gateway writes `ok` as soon as the loopback returns; the replay's
-      // own usage_logs row lands later via a separate async queue.
+      // own usage_logs row lands later via a separate async queue. Freshly
+      // created, so this also pins that the missing-result bound below does
+      // NOT fire during the normal short window.
       replayRequestId: randomUUID(),
       fidelity: { ...SEEDED_FIDELITY },
     });
@@ -617,5 +644,60 @@ describe("replay.getComparison", () => {
 
     expect(res.status).toBe("ok");
     expect(res.replay).toBeNull();
+    expect(res.failureReason).toBeNull();
+  });
+
+  it("ok 但結果始終沒落地，超過時限後回報 result_missing（不是無止境的整理中）", async () => {
+    // The other half of the "never resolves" hazard: without this bound the
+    // page shows 「用量資料整理中…」 and re-queries every few seconds forever.
+    const s = await seedScenario(t.db);
+    const runId = await seedRun(t.db, {
+      orgId: s.org.id,
+      sourceRequestId: s.sourceRequestId,
+      triggeredBy: s.owner.id,
+      status: "ok",
+      replayRequestId: randomUUID(),
+      fidelity: { ...SEEDED_FIDELITY },
+      createdAt: new Date(Date.now() - REPLAY_STALE_RUNNING_MS - 60_000),
+    });
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    expect(res.status).toBe("failed");
+    expect(res.failureReason).toBe(RESULT_MISSING_FAILURE_REASON);
+    expect(res.replay).toBeNull();
+    // Read-only, exactly like the stale-running rule: the stored row keeps
+    // saying `ok`, because the replay really did run and really did cost
+    // money. Only the reading is downgraded.
+    const [row] = await t.db
+      .select({ status: replayRuns.status })
+      .from(replayRuns)
+      .where(eq(replayRuns.id, runId));
+    expect(row!.status).toBe("ok");
+  });
+
+  it("結果已落地的舊 run 不會被誤判為 result_missing", async () => {
+    const s = await seedScenario(t.db);
+    const { runId } = await seedCompletedRun(t.db, s);
+    await t.db
+      .update(replayRuns)
+      .set({
+        createdAt: new Date(Date.now() - REPLAY_STALE_RUNNING_MS - 60_000),
+      })
+      .where(eq(replayRuns.id, runId));
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    expect(res.status).toBe("ok");
+    expect(res.failureReason).toBeNull();
+    expect(res.replay).not.toBeNull();
   });
 });

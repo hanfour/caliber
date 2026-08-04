@@ -23,6 +23,25 @@ export interface FailureReasonMessage {
   values?: Record<string, string | number>;
 }
 
+/**
+ * The run is `running` and has not been heard from within the API's window.
+ *
+ * NOT terminal, and the difference matters: the window is measured from row
+ * creation (`replay_runs` has no claim timestamp), so it includes queue time,
+ * and with a `concurrency: 1` worker a deep backlog can push a perfectly
+ * healthy run past it. The page must keep watching so a late run replaces this
+ * warning with its own result — telling the operator to start over would spend
+ * a second billed replay on a run that was fine.
+ */
+export const STALE_RUNNING_REASON = "stale_running";
+
+/**
+ * The run finished upstream but its own usage row never landed. Terminal: the
+ * money is spent and the result is unrecoverable, so re-running is the only
+ * recourse and the page must stop pretending it is still loading.
+ */
+export const RESULT_MISSING_REASON = "result_missing";
+
 const KNOWN_REASONS = new Set([
   "truncated_not_replayable",
   "body_missing",
@@ -30,7 +49,8 @@ const KNOWN_REASONS = new Set([
   "decrypt_failed",
   "eval_key_unavailable",
   "missing_request_id",
-  "stale_running",
+  STALE_RUNNING_REASON,
+  RESULT_MISSING_REASON,
   "unknown_status",
 ]);
 

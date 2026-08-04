@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const invalidate = vi.fn();
@@ -90,8 +90,26 @@ const mutate = vi.fn();
 beforeEach(() => {
   invalidate.mockReset();
   mutate.mockReset();
+  useQuery.mockReset();
   useMutation.mockReturnValue({ mutate, isPending: false });
 });
+
+/**
+ * Ask the component's OWN `refetchInterval` what it would do with a given
+ * comparison — i.e. whether the page keeps watching this run.
+ *
+ * Asserting on the rendered spinner would not catch either bug this covers:
+ * both are about what happens NEXT, and react-query is mocked out, so the
+ * option the component passed is the only place that answer exists.
+ */
+function pollDecision(data: Record<string, unknown>): number | false {
+  useQuery.mockReturnValue({ data, isLoading: false, error: null });
+  renderView();
+  const options = useQuery.mock.calls[0]![1] as {
+    refetchInterval: (q: { state: { data: unknown } }) => number | false;
+  };
+  return options.refetchInterval({ state: { data } });
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -155,8 +173,41 @@ describe("ReplayComparisonView", () => {
       screen.getAllByText(/cost is not comparable/i).length,
     ).toBeGreaterThan(0);
     expect(
-      screen.getByText(/read 4096 tokens from the prompt cache/i),
+      screen.getByText(/original request read 4096 tokens from the prompt cache/i),
     ).toBeInTheDocument();
+  });
+
+  it("suppresses the cost figures when the REPLAY is the warm side (the rule is bidirectional)", () => {
+    // Reachable through this feature: the replay inherits the original's
+    // cache_control markers verbatim, so a second same-model baseline inside
+    // the cache TTL reads warm while the original stayed cold. A source-only
+    // rule prints two $ figures here and calls them comparable.
+    useQuery.mockReturnValue({
+      data: makeComparison({
+        source: makeSide({ cacheReadTokens: 0 }),
+        replay: makeSide({
+          model: "claude-sonnet-4-5",
+          cacheReadTokens: 8192,
+          totalCost: "0.0030000000",
+        }),
+        comparable: { latency: false, cost: false },
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderView();
+
+    const row = metricRow("Cost");
+    expect(within(row).getAllByText("Not comparable")).toHaveLength(2);
+    expect(row.textContent).not.toContain("$");
+    // And the banner must blame the RIGHT side — "the original read from
+    // cache" would simply be false here.
+    expect(
+      screen.getByText(/this replay read 8192 tokens from the prompt cache/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/original request read .* from the prompt cache/i),
+    ).toBeNull();
   });
 
   it("shows both response bodies side by side", () => {
@@ -199,21 +250,6 @@ describe("ReplayComparisonView", () => {
     expect(screen.getByText(/HTTP 503/)).toBeInTheDocument();
   });
 
-  it("explains a stale claim as a run that never reported back", () => {
-    useQuery.mockReturnValue({
-      data: makeComparison({
-        replay: null,
-        status: "failed",
-        failureReason: "stale_running",
-      }),
-      isLoading: false,
-      error: null,
-    });
-    renderView();
-
-    expect(screen.getByText(/never reported back/i)).toBeInTheDocument();
-  });
-
   it("starts the same-model baseline against the SOURCE model", async () => {
     const user = userEvent.setup();
     useQuery.mockReturnValue({ data: makeComparison(), isLoading: false, error: null });
@@ -232,6 +268,85 @@ describe("ReplayComparisonView", () => {
         targetModel: "claude-sonnet-4-5",
       }),
     );
+  });
+
+  // ── Run-state reporting ────────────────────────────────────────────────
+  // The API's staleness window is measured from row creation (replay_runs has
+  // no claim timestamp), so it includes queue time — a healthy run stuck
+  // behind a concurrency:1 worker can trip it. Everything below exists so a
+  // late-but-successful run can still replace the warning on its own.
+
+  it("KEEPS polling a stale-but-running replay, so a late result can replace the warning", () => {
+    expect(
+      pollDecision(
+        makeComparison({
+          replay: null,
+          status: "failed",
+          failureReason: "stale_running",
+        }),
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it("warns about a stale run without telling the reader to spend another replay", () => {
+    useQuery.mockReturnValue({
+      data: makeComparison({
+        replay: null,
+        status: "failed",
+        failureReason: "stale_running",
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderView();
+
+    expect(screen.getByText(/has not reported back/i)).toBeInTheDocument();
+    expect(screen.getByText(/still watching/i)).toBeInTheDocument();
+    // The terminal "did not finish" headline would push the operator into
+    // re-running a job that may simply be queued — and so would the same
+    // wording in the empty metric cells.
+    expect(screen.queryByText("This replay did not finish")).toBeNull();
+    expect(screen.queryAllByText("Did not finish")).toHaveLength(0);
+    expect(
+      within(metricRow("Requested model")).getByText("No result yet"),
+    ).toBeInTheDocument();
+  });
+
+  it("stops polling once the replay's result is declared missing", () => {
+    expect(
+      pollDecision(
+        makeComparison({
+          replay: null,
+          status: "failed",
+          failureReason: "result_missing",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("says the replay ran and cost money when its result went missing", () => {
+    useQuery.mockReturnValue({
+      data: makeComparison({
+        replay: null,
+        status: "failed",
+        failureReason: "result_missing",
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderView();
+
+    expect(screen.getByText("This replay did not finish")).toBeInTheDocument();
+    expect(screen.getByText(/may have cost money/i)).toBeInTheDocument();
+  });
+
+  it("polls while the replay's usage row is still being written, and stops once it lands", () => {
+    expect(
+      pollDecision(makeComparison({ replay: null, status: "ok" })),
+    ).toBeGreaterThan(0);
+    cleanup();
+    useQuery.mockReset();
+    expect(pollDecision(makeComparison())).toBe(false);
   });
 
   it("tells the reader the deployment cannot decrypt, rather than showing a blank page", () => {

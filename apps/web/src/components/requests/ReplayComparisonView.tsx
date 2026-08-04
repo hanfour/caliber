@@ -9,10 +9,14 @@ import { trpc } from "@/lib/trpc/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatUsd } from "@/lib/money";
+import { cn } from "@/lib/utils";
 import { FidelityBanner } from "./FidelityBanner";
 import { ResponsePanel } from "./ResponsePanel";
 import { bodyToText, lineDiff, type DiffLine } from "./lineDiff";
-import { describeFailureReason } from "./replayFailureReason";
+import {
+  describeFailureReason,
+  STALE_RUNNING_REASON,
+} from "./replayFailureReason";
 
 type Comparison = inferRouterOutputs<AppRouter>["replay"]["getComparison"];
 type Side = Comparison["source"];
@@ -28,17 +32,39 @@ interface Props {
 }
 
 /**
- * Is this run still going somewhere?
+ * A `running` run the API has stopped calling healthy — but which may still
+ * finish. See `STALE_RUNNING_REASON`: the API's window includes queue time, so
+ * this fires on backlogged-but-alive runs too.
+ */
+function isStaleButWatched(data: Comparison | undefined): boolean {
+  return (
+    data?.status === "failed" && data.failureReason === STALE_RUNNING_REASON
+  );
+}
+
+/**
+ * Is this run still expected to change on its own?
  *
- * `ok` with a null replay is included on purpose: the gateway marks a run `ok`
- * the moment its loopback call returns, but the replay's own `usage_logs` row
- * is written by a separate asynchronous pipeline. That gap is "results being
- * written", not "no result" — polling through it is what stops the page from
- * telling the operator the replay produced nothing.
+ * Three things are true here and each one is load-bearing:
+ *
+ *  1. `ok` with a null replay is pending: the gateway marks a run `ok` the
+ *     moment its loopback returns, but the replay's own `usage_logs` row is
+ *     written by a separate asynchronous pipeline. That gap is "results being
+ *     written", not "no result". The API bounds it — past its window the
+ *     status becomes `failed`/`result_missing`, so this branch cannot spin
+ *     forever.
+ *  2. A stale `running` run is ALSO pending. It is reported as failed so the
+ *     reader is warned, but the run may simply be queued behind others; if
+ *     polling stopped here, a run that came back a minute later would never
+ *     replace the warning and the operator would spend another billed replay
+ *     on a run that was fine.
+ *  3. Every other `failed` is terminal — including `result_missing`, where the
+ *     usage row is genuinely gone and no amount of waiting will produce it.
  */
 function isPending(data: Comparison | undefined): boolean {
   if (!data) return false;
   if (data.status === "queued" || data.status === "running") return true;
+  if (isStaleButWatched(data)) return true;
   return data.status === "ok" && data.replay === null;
 }
 
@@ -148,9 +174,14 @@ export function ReplayComparisonView({
   const failure = describeFailureReason(
     data.status === "failed" ? data.failureReason : null,
   );
+  const staleButWatched = isStaleButWatched(data);
   const notComparable = t("notComparable");
+  // A stale-but-watched run has NOT finished — the page is still polling it —
+  // so its empty metric cells must read "no result yet", not "did not finish".
   const pendingReplayCell =
-    data.status === "failed" ? t("replayFailedShort") : t("replayPendingShort");
+    data.status === "failed" && !staleButWatched
+      ? t("replayFailedShort")
+      : t("replayPendingShort");
 
   const cell = (side: Side | null, read: (s: Side) => string): string =>
     side ? read(side) : pendingReplayCell;
@@ -162,18 +193,31 @@ export function ReplayComparisonView({
         fidelity={data.fidelity}
         comparableCost={data.comparable.cost}
         sourceCacheReadTokens={data.source.cacheReadTokens}
+        replayCacheReadTokens={data.replay?.cacheReadTokens ?? null}
       />
 
       {/* Rendered on `failed` even when the row carries no reason: "this did
           not finish" is the fact the reader needs, and withholding it because
           the explanation is missing would leave the page looking like a run
-          that is merely quiet. */}
+          that is merely quiet.
+
+          A stale-but-watched run takes the amber "still waiting" treatment
+          instead of the rose failure one: the page is still polling, so
+          dressing it as a completed failure would push the operator into
+          spending a second billed replay on a run that has not finished. */}
       {data.status === "failed" && (
         <Card
           role="status"
-          className="shadow-card border-rose-300 p-4 text-sm dark:border-rose-500/40"
+          className={cn(
+            "shadow-card p-4 text-sm",
+            staleButWatched
+              ? "border-amber-300 dark:border-amber-500/40"
+              : "border-rose-300 dark:border-rose-500/40",
+          )}
         >
-          <p className="font-medium">{t("statusFailedTitle")}</p>
+          <p className="font-medium">
+            {staleButWatched ? t("statusStalledTitle") : t("statusFailedTitle")}
+          </p>
           {failure && (
             <p className="mt-1 text-xs text-muted-foreground">
               {t(`reason.${failure.key}`, failure.values)}
@@ -182,7 +226,7 @@ export function ReplayComparisonView({
         </Card>
       )}
 
-      {isPending(data) && (
+      {isPending(data) && !staleButWatched && (
         <Card
           role="status"
           className="shadow-card p-4 text-sm text-muted-foreground"
