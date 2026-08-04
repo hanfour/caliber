@@ -290,16 +290,32 @@ type Outcome = { status: ReplayComparisonStatus; failureReason: string | null };
  * is reported as a terminal failure with its own reason, so the page can say
  * "the replay ran but its record is gone" instead of spinning forever.
  *
+ * ANCHOR: `completed_at`, NOT `created_at` — and the difference is the whole
+ * correctness of this function. The thing being waited on is the usage-log
+ * write, which only starts once the loopback returns, so the grace must start
+ * counting from the same moment. Anchored on `created_at` instead, a run that
+ * queued long enough to trip `stale_running` would arrive at `ok` with its
+ * window ALREADY spent, and the very next poll would declare it terminally
+ * lost a second or two before its real data landed — a one-shot, irreversible
+ * verdict, aimed squarely at the backlogged runs the stale-running warning
+ * exists to protect.
+ *
+ * apps/gateway's `finish()` writes `completed_at` in the same UPDATE as
+ * `status` and `replay_request_id`, so an `ok` row always carries it. The
+ * `created_at` fallback at the call site covers only a row no worker in this
+ * codebase can produce, and exists so this stays bounded rather than polling
+ * forever on an anomaly.
+ *
  * Returns a NEW outcome; never mutates the one it was given.
  */
 function boundMissingResult(
   outcome: Outcome,
   hasReplaySide: boolean,
-  createdAt: Date,
+  settledAt: Date,
   nowMs: number,
 ): Outcome {
   if (outcome.status !== "ok" || hasReplaySide) return outcome;
-  if (nowMs - createdAt.getTime() <= REPLAY_STALE_RUNNING_MS) return outcome;
+  if (nowMs - settledAt.getTime() <= REPLAY_STALE_RUNNING_MS) return outcome;
   return { status: "failed", failureReason: RESULT_MISSING_FAILURE_REASON };
 }
 
@@ -322,6 +338,7 @@ export async function getReplayComparison(
       failureReason: replayRuns.failureReason,
       fidelity: replayRuns.fidelity,
       createdAt: replayRuns.createdAt,
+      completedAt: replayRuns.completedAt,
     })
     .from(replayRuns)
     .where(and(eq(replayRuns.id, runId), eq(replayRuns.orgId, orgId)))
@@ -375,7 +392,10 @@ export async function getReplayComparison(
   const { status, failureReason } = boundMissingResult(
     claimed,
     replayRow !== undefined,
-    run.createdAt,
+    // `completed_at` is written atomically with `status` by the worker's
+    // `finish()`, so an `ok` row always has it. The fallback is unreachable
+    // from any writer in this codebase and only keeps the check bounded.
+    run.completedAt ?? run.createdAt,
     nowMs,
   );
 

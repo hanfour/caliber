@@ -210,6 +210,7 @@ async function seedRun(
     failureReason?: string;
     fidelity?: Record<string, unknown>;
     createdAt?: Date;
+    completedAt?: Date;
   },
 ) {
   const [row] = await db
@@ -224,6 +225,7 @@ async function seedRun(
       failureReason: opts.failureReason ?? null,
       fidelity: opts.fidelity ?? null,
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+      ...(opts.completedAt ? { completedAt: opts.completedAt } : {}),
     })
     .returning({ id: replayRuns.id });
   return row!.id;
@@ -650,7 +652,12 @@ describe("replay.getComparison", () => {
   it("ok 但結果始終沒落地，超過時限後回報 result_missing（不是無止境的整理中）", async () => {
     // The other half of the "never resolves" hazard: without this bound the
     // page shows 「用量資料整理中…」 and re-queries every few seconds forever.
+    //
+    // `completedAt` is set explicitly rather than left null: the grace window
+    // is anchored on completion, so a null here would only be measuring the
+    // fallback path and would say nothing about the real one.
     const s = await seedScenario(t.db);
+    const longAgo = new Date(Date.now() - REPLAY_STALE_RUNNING_MS - 60_000);
     const runId = await seedRun(t.db, {
       orgId: s.org.id,
       sourceRequestId: s.sourceRequestId,
@@ -658,7 +665,8 @@ describe("replay.getComparison", () => {
       status: "ok",
       replayRequestId: randomUUID(),
       fidelity: { ...SEEDED_FIDELITY },
-      createdAt: new Date(Date.now() - REPLAY_STALE_RUNNING_MS - 60_000),
+      createdAt: longAgo,
+      completedAt: longAgo,
     });
     const caller = await callerFor({ db: t.db, userId: s.owner.id });
 
@@ -678,6 +686,41 @@ describe("replay.getComparison", () => {
       .from(replayRuns)
       .where(eq(replayRuns.id, runId));
     expect(row!.status).toBe("ok");
+  });
+
+  it("排隊很久才剛跑完的 run，仍有完整的整理寬限期（寬限期從完成時起算，不是從建立時）", async () => {
+    // The exact population the stale-running warning exists to protect. A run
+    // that waited out a deep queue trips `stale_running` first; the moment it
+    // finishes, `now - createdAt` is ALREADY past the window. Anchoring the
+    // materialising grace on createdAt would therefore declare it terminally
+    // lost on the very next 3s poll — one shot, no retry — while its
+    // usage_logs row (a separate best-effort BullMQ batch, ~1s flush, no SLA)
+    // was still a second or two from landing.
+    const s = await seedScenario(t.db);
+    const runId = await seedRun(t.db, {
+      orgId: s.org.id,
+      sourceRequestId: s.sourceRequestId,
+      triggeredBy: s.owner.id,
+      status: "ok",
+      replayRequestId: randomUUID(),
+      fidelity: { ...SEEDED_FIDELITY },
+      // Queued far longer than the whole window …
+      createdAt: new Date(Date.now() - REPLAY_STALE_RUNNING_MS * 3),
+      // … but it only just came back.
+      completedAt: new Date(Date.now() - 2_000),
+    });
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    // Still materialising — the caller keeps polling and the real result gets
+    // its chance to arrive.
+    expect(res.status).toBe("ok");
+    expect(res.failureReason).toBeNull();
+    expect(res.replay).toBeNull();
   });
 
   it("結果已落地的舊 run 不會被誤判為 result_missing", async () => {
