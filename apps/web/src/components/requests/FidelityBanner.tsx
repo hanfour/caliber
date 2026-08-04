@@ -12,6 +12,12 @@ interface Fidelity {
 
 interface Props {
   fidelity: Fidelity | null;
+  /**
+   * The run HAD a fidelity record and it could not be read (see
+   * `services/replayComparison.ts`). Distinct from `fidelity === null` alone,
+   * which also covers a run that legitimately never recorded one.
+   */
+  fidelityUnreadable: boolean;
   comparableCost: boolean;
   sourceCacheReadTokens: number;
   /** `null` while there is no replay side to report on yet. */
@@ -34,6 +40,7 @@ interface Props {
  */
 export function FidelityBanner({
   fidelity,
+  fidelityUnreadable,
   comparableCost,
   sourceCacheReadTokens,
   replayCacheReadTokens,
@@ -59,6 +66,12 @@ export function FidelityBanner({
   if (fidelity && !fidelity.originalAccountStillExists) {
     notes.push(t("bannerAccountGone"));
   }
+  // Under-warning is the one direction this banner must not fail in. An
+  // unreadable fidelity record silently removes the two caveats above from the
+  // list, and a comparison MISSING a caveat reads as more like-for-like than it
+  // is — turning an honest comparison into a misleading one. Saying "we could
+  // not read it" is the honest floor.
+  if (fidelityUnreadable) notes.push(t("bannerFidelityUnreadable"));
 
   return (
     <div

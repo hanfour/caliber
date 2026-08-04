@@ -1372,12 +1372,10 @@
     "memberSelectLabel": "成员",
     "colTime": "时间",
     "colModel": "请求模型",
-    "colUpstreamModel": "实际模型",
     "colTokens": "Token",
     "colCost": "费用",
     "colStatus": "状态",
     "colDuration": "耗时",
-    "colStopReason": "结束原因",
     "colReplay": "重放",
     "replayButton": "重放",
     "replayBadge": "重放结果",
@@ -1449,11 +1447,14 @@
       "stale_running": "可能排在其他重放后面，也可能执行进程已中断。本页仍在持续等待，结果回来后会自动显示；等太久的话再重新发起一次。",
       "unknown_status": "无法识别这次重放的状态。",
       "unknown": "重放失败（{reason}）。",
-      "result_missing": "重放已发出并取得响应（费用可能已产生），但始终找不到对应的用量与内容记录，这次结果已无法对照。请重新发起一次重放。"
+      "result_missing": "重放已发出并取得响应（费用可能已产生），但始终找不到对应的用量与内容记录，这次结果已无法对照。请重新发起一次重放。",
+      "stale_queued": "一直没有任何 worker 认领这次重放。最常见的原因是这个部署没有在消化重放队列的 worker（gateway 端的 evaluator 管线未启用）。本页仍在持续等待，若之后开始执行会自动显示；请先确认重放 worker，而不是再发起一次。"
     },
     "bannerCost": "提示缓存的命中情况会直接改变计价，本次对照的成本不可比。",
     "bannerCacheSource": "原请求从提示缓存读取了 {tokens} tokens。",
     "bannerCacheReplay": "这次重放从提示缓存读取了 {tokens} tokens。",
-    "statusStalledTitle": "这次重放已超过预期时间仍未回报"
+    "statusStalledTitle": "这次重放已超过预期时间仍未回报",
+    "statusStalledQueuedTitle": "这次重放迟迟没有开始执行",
+    "bannerFidelityUnreadable": "这次重放的保真度信息无法读取，以下清单可能漏了部分落差——请把两边视为比看起来更不对等。"
   }
 }

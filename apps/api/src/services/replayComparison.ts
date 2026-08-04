@@ -26,6 +26,11 @@
  * sweeper anywhere in this codebase, so a process crash mid-replay strands the
  * row at `running` permanently. Reporting that as "still working" would be a
  * lie that never resolves — see `REPLAY_STALE_RUNNING_MS`.
+ *
+ * The same rule applies to `queued`, for a different cause: nothing claims a
+ * job when no replay worker is running at all. EVERY non-terminal state must
+ * be bounded, or the page polls forever and the operator buys a second replay
+ * to escape the spinner — see `REPLAY_STALE_QUEUED_MS`.
  */
 
 import { TRPCError } from "@trpc/server";
@@ -62,6 +67,36 @@ import { requireMasterKeyHex } from "../trpc/routers/_credentials.js";
 export const REPLAY_STALE_RUNNING_MS = 15 * 60 * 1000;
 
 /**
+ * How long a run may sit at `queued` before this endpoint stops calling it
+ * healthy.
+ *
+ * Same window as the running one, deliberately: both are measured from
+ * `created_at` (the only timestamp the row has before it finishes), so one
+ * constant keeps the two bounds from drifting into an ordering where a run
+ * could be "too old to be queued" but not yet "too old to be running". Aliased
+ * rather than re-typed so that stays true by construction, while leaving room
+ * for the two policies to diverge later if a claim timestamp is ever added.
+ *
+ * The state this bounds is NOT exotic. `queued` means "no worker has claimed
+ * this yet", and three ordinary configurations produce it forever:
+ *
+ *  - the gateway's `ENABLE_EVALUATOR` off while the API's is on. The replay
+ *    worker is created only inside `wireEvaluatorPipeline`, so the API happily
+ *    accepts and enqueues while nothing on the other side consumes. This is
+ *    documented in docs/EVALUATOR.md and signalled nowhere in code — the same
+ *    class of split-config defect this project already shipped once as a
+ *    missing compose env anchor.
+ *  - BullMQ exhausting `attempts: 3` inside the pre-spend window, which
+ *    `releaseClaim` deliberately returns to `queued`.
+ *  - a flushed Redis, which drops the job while the row survives.
+ *
+ * Left unbounded the page shows 「排隊中」 and polls forever, and the operator's
+ * natural response to a permanent spinner is to press replay again — spending
+ * money on a queue that is not being consumed.
+ */
+export const REPLAY_STALE_QUEUED_MS = REPLAY_STALE_RUNNING_MS;
+
+/**
  * Synthetic reason: the run is `running` and has been for longer than the
  * window above.
  *
@@ -75,6 +110,21 @@ export const REPLAY_STALE_RUNNING_MS = 15 * 60 * 1000;
  * replace this. See `ReplayComparisonView.isPending`.
  */
 export const STALE_RUNNING_FAILURE_REASON = "stale_running";
+
+/**
+ * Synthetic reason: the run is still `queued` and has been for longer than
+ * `REPLAY_STALE_QUEUED_MS` — nothing has claimed it.
+ *
+ * **Not terminal**, symmetric with `stale_running`: the row is genuinely still
+ * `queued`, and starting a worker (or a BullMQ retry landing) makes it run for
+ * real. Consumers must keep polling and let a real result replace this.
+ *
+ * Distinct from `stale_running` because the operational cause is different and
+ * actionable: a stale `running` run may simply be slow, whereas a stale
+ * `queued` run means no replay worker is consuming the queue. The copy must
+ * say that rather than blame the run.
+ */
+export const STALE_QUEUED_FAILURE_REASON = "stale_queued";
 
 /**
  * Synthetic reason: the run finished upstream (`ok`) but its own `usage_logs`
@@ -152,6 +202,23 @@ export interface ReplayComparison {
   status: ReplayComparisonStatus;
   failureReason: string | null;
   fidelity: ReplayFidelity | null;
+  /**
+   * The row DID carry a fidelity record and it failed validation, so the
+   * caveats it would have contributed are missing from `fidelity`.
+   *
+   * Reported separately because `fidelity: null` alone is ambiguous — it also
+   * covers a run that legitimately never recorded one (every pre-gate failure
+   * path). The consumer must be able to tell "nothing to warn about" from
+   * "we could not read the warnings", because silently dropping a caveat makes
+   * the two sides look MORE like-for-like than they are. Under-warning is the
+   * one direction this comparison must never fail in.
+   *
+   * Unreachable from any writer in this codebase today (`resolveFidelity`
+   * always writes all five keys and `z.object` strips extras rather than
+   * failing) — it exists so a future gateway-side shape change degrades
+   * loudly instead of quietly.
+   */
+  fidelityUnreadable: boolean;
   comparable: { latency: boolean; cost: boolean };
 }
 
@@ -270,11 +337,15 @@ function effectiveStatus(
   if (!parsed.success) {
     return { status: "failed", failureReason: UNKNOWN_STATUS_FAILURE_REASON };
   }
-  if (
-    parsed.data === "running" &&
-    nowMs - createdAt.getTime() > REPLAY_STALE_RUNNING_MS
-  ) {
+  const ageMs = nowMs - createdAt.getTime();
+  if (parsed.data === "running" && ageMs > REPLAY_STALE_RUNNING_MS) {
     return { status: "failed", failureReason: STALE_RUNNING_FAILURE_REASON };
+  }
+  // Symmetric bound on the other non-terminal state. Without it `queued` is the
+  // one status that can never resolve on its own — see REPLAY_STALE_QUEUED_MS
+  // for the three ordinary configurations that produce exactly that.
+  if (parsed.data === "queued" && ageMs > REPLAY_STALE_QUEUED_MS) {
+    return { status: "failed", failureReason: STALE_QUEUED_FAILURE_REASON };
   }
   return { status: parsed.data, failureReason: storedReason };
 }
@@ -424,6 +495,11 @@ export async function getReplayComparison(
     status,
     failureReason,
     fidelity: fidelityParsed.success ? fidelityParsed.data : null,
+    // `run.fidelity !== null` is the load-bearing half: without it every run
+    // that never recorded fidelity (all the pre-gate failure paths) would be
+    // reported as unreadable, and a warning that fires on the ordinary case
+    // stops being read.
+    fidelityUnreadable: run.fidelity !== null && !fidelityParsed.success,
     comparable: {
       // Rule 1 — see the file header. No condition, by design.
       latency: false,

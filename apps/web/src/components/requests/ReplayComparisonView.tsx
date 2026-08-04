@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@caliber/api-types";
@@ -15,13 +15,44 @@ import { ResponsePanel } from "./ResponsePanel";
 import { bodyToText, lineDiff, type DiffLine } from "./lineDiff";
 import {
   describeFailureReason,
+  STALE_QUEUED_REASON,
   STALE_RUNNING_REASON,
 } from "./replayFailureReason";
 
 type Comparison = inferRouterOutputs<AppRouter>["replay"]["getComparison"];
 type Side = Comparison["source"];
 
-const POLL_MS = 3000;
+/**
+ * Poll cadence while a run is expected to change on its own.
+ *
+ * Exported so the tests assert against the same numbers the component uses.
+ */
+export const POLL_MS = 3000;
+/** First step once the API has warned about the run. */
+export const WARNED_POLL_MS = 15000;
+/** Ceiling. Never higher: a run that DOES come back must be noticed promptly. */
+export const WARNED_POLL_MAX_MS = 30000;
+
+/**
+ * How fast to poll next.
+ *
+ * The trade-off behind polling a warned run at all is correct and must be
+ * preserved: a wasted query costs less than wrongly telling an operator to
+ * spend another billed replay. Only the FLAT interval was wrong —
+ * `getComparison` performs two joins and up to two AES-GCM decrypts of
+ * up-to-256KB bodies, so a permanently stranded run with a tab left open was
+ * ~1,200 decrypt round trips an hour, indefinitely.
+ *
+ * Backing off applies ONLY to warned runs. An ordinary `queued`/`running`/
+ * results-being-written run is expected to resolve within seconds, and any run
+ * that returns to one of those states resets to `POLL_MS` — that reset is what
+ * keeps the self-correction property: a late-but-successful run still replaces
+ * the warning without a reload.
+ */
+export function nextPollMs(currentMs: number, warned: boolean): number {
+  if (!warned) return POLL_MS;
+  return currentMs < WARNED_POLL_MS ? WARNED_POLL_MS : WARNED_POLL_MAX_MS;
+}
 
 interface Props {
   orgId: string;
@@ -32,13 +63,22 @@ interface Props {
 }
 
 /**
- * A `running` run the API has stopped calling healthy — but which may still
- * finish. See `STALE_RUNNING_REASON`: the API's window includes queue time, so
- * this fires on backlogged-but-alive runs too.
+ * A run the API has stopped calling healthy — but which may still resolve.
+ *
+ * Two reasons land here and both are warnings, not verdicts:
+ *  - `stale_running`: the API's window includes queue time, so this fires on
+ *    backlogged-but-alive runs too.
+ *  - `stale_queued`: nothing has claimed the run yet. Starting the replay
+ *    worker (or a BullMQ retry landing) makes it run for real.
+ *
+ * Neither may be dressed as a completed failure: that pushes the operator into
+ * spending a second billed replay on a run that was fine.
  */
 function isStaleButWatched(data: Comparison | undefined): boolean {
+  if (data?.status !== "failed") return false;
   return (
-    data?.status === "failed" && data.failureReason === STALE_RUNNING_REASON
+    data.failureReason === STALE_RUNNING_REASON ||
+    data.failureReason === STALE_QUEUED_REASON
   );
 }
 
@@ -101,10 +141,26 @@ export function ReplayComparisonView({
   const tCommon = useTranslations("common");
   const utils = trpc.useUtils();
 
+  // The live cadence, stepped up while the API is warning about this run. A
+  // ref (not state) on purpose: changing it must not re-render, and react-query
+  // asks for the next interval after every poll.
+  const pollMsRef = useRef(POLL_MS);
+
   const query = trpc.replay.getComparison.useQuery(
     { orgId, runId },
     {
-      refetchInterval: (q) => (isPending(q.state.data) ? POLL_MS : false),
+      refetchInterval: (q) => {
+        const current = q.state.data;
+        if (!isPending(current)) {
+          pollMsRef.current = POLL_MS;
+          return false;
+        }
+        pollMsRef.current = nextPollMs(
+          pollMsRef.current,
+          isStaleButWatched(current),
+        );
+        return pollMsRef.current;
+      },
     },
   );
 
@@ -191,6 +247,7 @@ export function ReplayComparisonView({
       {/* ── The caveats come FIRST. See FidelityBanner's own comment. ── */}
       <FidelityBanner
         fidelity={data.fidelity}
+        fidelityUnreadable={data.fidelityUnreadable}
         comparableCost={data.comparable.cost}
         sourceCacheReadTokens={data.source.cacheReadTokens}
         replayCacheReadTokens={data.replay?.cacheReadTokens ?? null}
@@ -215,8 +272,16 @@ export function ReplayComparisonView({
               : "border-rose-300 dark:border-rose-500/40",
           )}
         >
+          {/* Three headlines, because the three situations need different
+              things from the reader: a terminal failure, a run that started
+              and went quiet, and a run nothing ever started. Collapsing the
+              last two would hide the only one with an operational fix. */}
           <p className="font-medium">
-            {staleButWatched ? t("statusStalledTitle") : t("statusFailedTitle")}
+            {data.failureReason === STALE_QUEUED_REASON
+              ? t("statusStalledQueuedTitle")
+              : staleButWatched
+                ? t("statusStalledTitle")
+                : t("statusFailedTitle")}
           </p>
           {failure && (
             <p className="mt-1 text-xs text-muted-foreground">

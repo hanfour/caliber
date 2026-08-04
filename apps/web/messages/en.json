@@ -1372,12 +1372,10 @@
     "memberSelectLabel": "Member",
     "colTime": "Time",
     "colModel": "Requested model",
-    "colUpstreamModel": "Upstream model",
     "colTokens": "Tokens",
     "colCost": "Cost",
     "colStatus": "Status",
     "colDuration": "Duration",
-    "colStopReason": "Stop reason",
     "colReplay": "Replay",
     "replayButton": "Replay",
     "replayBadge": "Replay result",
@@ -1449,11 +1447,14 @@
       "stale_running": "It may be queued behind other replays, or its worker may have stopped. This page is still watching and will show the result if it arrives; start another replay if it never does.",
       "unknown_status": "This replay's status could not be recognized.",
       "unknown": "Replay failed ({reason}).",
-      "result_missing": "The replay was sent and answered (so it may have cost money), but its usage and content records never arrived, so this result can no longer be compared. Start a new replay."
+      "result_missing": "The replay was sent and answered (so it may have cost money), but its usage and content records never arrived, so this result can no longer be compared. Start a new replay.",
+      "stale_queued": "Nothing has picked this replay up. The usual cause is that no replay worker is consuming the queue on this deployment (the gateway's evaluator pipeline is off). This page is still watching and will show the result if it does start; check the replay worker rather than starting another replay."
     },
     "bannerCost": "A prompt-cache hit changes how a call is priced, so cost is not comparable here.",
     "bannerCacheSource": "The original request read {tokens} tokens from the prompt cache.",
     "bannerCacheReplay": "This replay read {tokens} tokens from the prompt cache.",
-    "statusStalledTitle": "This replay has taken longer than expected and has not reported back"
+    "statusStalledTitle": "This replay has taken longer than expected and has not reported back",
+    "statusStalledQueuedTitle": "This replay has not started yet",
+    "bannerFidelityUnreadable": "This run's fidelity record could not be read, so some gaps may be missing from this list — treat the two sides as less like-for-like than they look."
   }
 }

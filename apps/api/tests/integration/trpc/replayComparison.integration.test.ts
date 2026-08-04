@@ -41,8 +41,10 @@ import {
 import { createCallerFactory } from "../../../src/trpc/procedures.js";
 import { appRouter } from "../../../src/trpc/router.js";
 import {
+  REPLAY_STALE_QUEUED_MS,
   REPLAY_STALE_RUNNING_MS,
   RESULT_MISSING_FAILURE_REASON,
+  STALE_QUEUED_FAILURE_REASON,
   STALE_RUNNING_FAILURE_REASON,
   UNKNOWN_STATUS_FAILURE_REASON,
 } from "../../../src/services/replayComparison.js";
@@ -393,6 +395,58 @@ describe("replay.getComparison", () => {
       content: [{ type: "text", text: "replay answer" }],
     });
     expect(res.fidelity).toMatchObject(SEEDED_FIDELITY);
+    expect(res.fidelityUnreadable).toBe(false);
+  });
+
+  // ── Unreadable fidelity ────────────────────────────────────────────────────
+  // `fidelity` failing to parse silently drops the tool-result-truncated and
+  // account-gone caveats from the banner. Under-warning is the ONE direction
+  // this comparison must not fail in: a comparison missing a caveat reads as
+  // more like-for-like than it is. `fidelity: null` alone cannot carry that —
+  // it is also what every pre-gate failure path legitimately writes.
+
+  it("fidelity 存在但格式無法辨識時，明確標示為讀不到（而不是靜默當成沒有落差）", async () => {
+    const s = await seedScenario(t.db);
+    const { replayRequestId } = await seedCompletedRun(t.db, s);
+    const runId = await seedRun(t.db, {
+      orgId: s.org.id,
+      sourceRequestId: s.sourceRequestId,
+      triggeredBy: s.owner.id,
+      status: "ok",
+      replayRequestId,
+      // Shape a future gateway change could produce: present, but not what
+      // this build's schema expects.
+      fidelity: { toolResultTruncated: "yes" },
+    });
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    expect(res.fidelity).toBeNull();
+    expect(res.fidelityUnreadable).toBe(true);
+  });
+
+  it("run 本來就沒有 fidelity 時不謊稱讀不到（否則警告會出現在每一筆失敗上）", async () => {
+    const s = await seedScenario(t.db);
+    const runId = await seedRun(t.db, {
+      orgId: s.org.id,
+      sourceRequestId: s.sourceRequestId,
+      triggeredBy: s.owner.id,
+      status: "failed",
+      failureReason: "body_missing",
+    });
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    expect(res.fidelity).toBeNull();
+    expect(res.fidelityUnreadable).toBe(false);
   });
 
   it("尚未完成時 replay 為 null，status 反映實際進度", async () => {
@@ -493,6 +547,65 @@ describe("replay.getComparison", () => {
       .from(replayRuns)
       .where(eq(replayRuns.id, runId));
     expect(row!.status).toBe("running");
+  });
+
+  // ── Stalled queue ──────────────────────────────────────────────────────────
+  // `queued` was the one non-terminal state with no bound at all, so a run that
+  // never got picked up polled forever behind 「排隊中」. Three real routes in:
+  //   - the gateway's ENABLE_EVALUATOR off while the API's is on (the replay
+  //     worker is only created inside wireEvaluatorPipeline — documented in
+  //     docs/EVALUATOR.md, signalled nowhere in code);
+  //   - BullMQ exhausting `attempts: 3` inside the pre-spend window, which
+  //     `releaseClaim` deliberately returns to `queued`;
+  //   - a flushed Redis.
+  // The operator's natural response to a permanent spinner is to press replay
+  // again and spend more money, which is precisely what this bound prevents.
+
+  it(`一個超過 ${REPLAY_STALE_QUEUED_MS}ms 仍停在 queued 的 run 要被明確標示`, async () => {
+    const s = await seedScenario(t.db);
+    const runId = await seedRun(t.db, {
+      orgId: s.org.id,
+      sourceRequestId: s.sourceRequestId,
+      triggeredBy: s.owner.id,
+      status: "queued",
+      createdAt: new Date(Date.now() - REPLAY_STALE_QUEUED_MS - 60_000),
+    });
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    expect(res.status).toBe("failed");
+    expect(res.failureReason).toBe(STALE_QUEUED_FAILURE_REASON);
+    // Read-only, exactly like the stale-running rule: rewriting the row would
+    // reopen the one-way claim fence and let a run be billed twice.
+    const [row] = await t.db
+      .select({ status: replayRuns.status })
+      .from(replayRuns)
+      .where(eq(replayRuns.id, runId));
+    expect(row!.status).toBe("queued");
+  });
+
+  it("仍在時限內的 queued run 照實回報排隊中", async () => {
+    const s = await seedScenario(t.db);
+    const runId = await seedRun(t.db, {
+      orgId: s.org.id,
+      sourceRequestId: s.sourceRequestId,
+      triggeredBy: s.owner.id,
+      status: "queued",
+      createdAt: new Date(Date.now() - 5_000),
+    });
+    const caller = await callerFor({ db: t.db, userId: s.owner.id });
+
+    const res = await caller.replay.getComparison({
+      orgId: s.org.id,
+      runId,
+    });
+
+    expect(res.status).toBe("queued");
+    expect(res.failureReason).toBeNull();
   });
 
   it("仍在時限內的 running run 照實回報進行中", async () => {

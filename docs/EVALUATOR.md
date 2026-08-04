@@ -123,9 +123,18 @@ underlying queue (`apps/api/src/server.ts`) is only constructed when
 and not the other's — the same class of miss as the `ENABLE_GITHUB_DELIVERY`
 compose-anchor bug) accepts replay requests without complaint: each call inserts a
 `replay_runs` row and pushes a job to Redis, and nothing is ever there to consume
-it. The row sits at `queued` forever with `failure_reason` still `NULL` — there is
-no timeout that flips it to `failed`, because from the API's perspective the job
-was successfully handed off.
+it. The row itself stays at `queued` with `failure_reason` still `NULL` — nothing
+writes to it, because from the API's perspective the job was successfully handed
+off.
+
+What the operator sees is bounded, though. `replay.getComparison`
+(`apps/api/src/services/replayComparison.ts`) reports a run that has been `queued`
+longer than `REPLAY_STALE_QUEUED_MS` (15 minutes) as `failed` /
+`stale_queued`, and the comparison page renders that as an amber, still-watching
+warning whose copy names this exact cause: nothing is consuming the replay queue.
+The stored row is deliberately NOT rewritten — the claim fence is one-way so a run
+can never be billed twice — so a worker started later still picks the job up and
+its real result replaces the warning without a reload.
 
 The web UI's only signal here is `replayEnabled` on `usage.listRequests`
 (`ctx.env.ENABLE_EVALUATOR`, read from the API process), which drives whether the
@@ -134,6 +143,33 @@ whether a gateway process anywhere is actually running the worker. An operator
 turning `ENABLE_EVALUATOR` off — or on — needs to flip it on **both** services, and
 should confirm with `gw_eval_dlq_count` / a live worker log line rather than trust
 the UI alone.
+
+### Replay also requires the org's `llm_eval_enabled`
+
+Replay authenticates its loopback call with the org's **LLM-eval key**, not with
+the key of the person who pressed the button (a member's raw key exists only at
+issue time, and inventing an attribution override would be a forgery gun in a
+system used for performance reviews). That borrowing makes the org's own
+`organizations.llm_eval_enabled` switch a precondition of replay, exactly as it is
+for LLM evaluation itself.
+
+Both layers enforce it. `replay.enqueue` refuses with `PRECONDITION_FAILED` so no
+billed round trip is queued at all, and `runReplay` refuses again with
+`eval_key_unavailable` — the same reason it writes when the key is missing from
+Redis, because the operator's conclusion is identical (this org has no usable
+system key right now).
+
+The second check is not redundant. `provisionLlmEvalKey` writes the key with a
+bare `redis.set` — **no TTL** — and nothing in this repo ever deprovisions it
+(`contentCapture.setSettings` only handles turning eval *on*). An org that enabled
+LLM eval and later disabled it therefore still has a working key sitting in Redis
+indefinitely. Checking only for the key's presence would let a replay decrypt a
+member's full prompt, POST it upstream and bill the org in a configuration where
+the org's own control says no — and because `request.replay` grants a self-branch,
+any member could do it to their own requests.
+
+**Operator consequence:** turning LLM eval off also turns replay off, immediately
+and at both layers. Turning it back on re-enables both.
 
 ### Known gap: a crashed replay worker can strand a row at `running`
 
@@ -149,10 +185,12 @@ crash (OOM kill, `SIGKILL`, a bad deploy landing mid-request) during that
 post-fetch window leaves the row at `running` permanently — there is no sweeper
 that reclaims stale `running` rows the way BullMQ reclaims stalled jobs. The
 comparison page (`ReplayComparisonView.tsx`) treats a sufficiently old `running`
-row as `stale_running` and keeps polling it indefinitely rather than rendering it
-as a hard failure, so the gap is visible (an operator watching the page sees "no
-result yet" forever, not a false success) rather than silent. There is no
-automatic recovery: an operator has to identify the row and re-run manually.
+row as `stale_running` and keeps polling it rather than rendering it as a hard
+failure, so the gap is visible (an operator watching the page sees "no result yet"
+forever, not a false success) rather than silent. Polling a warned run steps down
+from 3s to 15s and caps at 30s, so a tab left open on a permanently stranded run
+does not keep re-decrypting its bodies every three seconds. There is no automatic
+recovery: an operator has to identify the row and re-run manually.
 
 ---
 

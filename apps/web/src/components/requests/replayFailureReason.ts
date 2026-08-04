@@ -36,6 +36,17 @@ export interface FailureReasonMessage {
 export const STALE_RUNNING_REASON = "stale_running";
 
 /**
+ * Nothing has claimed the run — it is still `queued` past the API's window.
+ *
+ * NOT terminal either, and for a cause the operator can act on: the ordinary
+ * way to reach it is a deployment where nothing consumes the replay queue (the
+ * gateway's replay worker lives inside its evaluator pipeline, so the API can
+ * accept and enqueue while the other side never runs). A late-starting run must
+ * still be able to replace this warning, so the page keeps watching.
+ */
+export const STALE_QUEUED_REASON = "stale_queued";
+
+/**
  * The run finished upstream but its own usage row never landed. Terminal: the
  * money is spent and the result is unrecoverable, so re-running is the only
  * recourse and the page must stop pretending it is still loading.
@@ -50,6 +61,7 @@ const KNOWN_REASONS = new Set([
   "eval_key_unavailable",
   "missing_request_id",
   STALE_RUNNING_REASON,
+  STALE_QUEUED_REASON,
   RESULT_MISSING_REASON,
   "unknown_status",
 ]);

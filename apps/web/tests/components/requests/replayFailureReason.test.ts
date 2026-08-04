@@ -15,6 +15,7 @@ describe("describeFailureReason", () => {
       "eval_key_unavailable",
       "missing_request_id",
       "stale_running",
+      "stale_queued",
       "result_missing",
       "unknown_status",
     ]) {

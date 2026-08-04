@@ -16,7 +16,11 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-import { ReplayComparisonView } from "@/components/requests/ReplayComparisonView";
+import {
+  POLL_MS,
+  ReplayComparisonView,
+  WARNED_POLL_MAX_MS,
+} from "@/components/requests/ReplayComparisonView";
 import { trpc } from "@/lib/trpc/client";
 
 const useQuery = trpc.replay.getComparison.useQuery as unknown as ReturnType<
@@ -61,6 +65,7 @@ function makeComparison(overrides: Record<string, unknown> = {}) {
       originalAccountStillExists: true,
       streamingDisabled: true,
     },
+    fidelityUnreadable: false,
     comparable: { latency: false, cost: true },
     ...overrides,
   };
@@ -103,12 +108,23 @@ beforeEach(() => {
  * option the component passed is the only place that answer exists.
  */
 function pollDecision(data: Record<string, unknown>): number | false {
+  return pollOptions(data)({ state: { data } });
+}
+
+/**
+ * The component's own `refetchInterval`, kept callable across successive
+ * polls — the backoff is a property of the SEQUENCE, so a single call cannot
+ * observe it.
+ */
+function pollOptions(
+  data: Record<string, unknown>,
+): (q: { state: { data: unknown } }) => number | false {
   useQuery.mockReturnValue({ data, isLoading: false, error: null });
   renderView();
   const options = useQuery.mock.calls[0]![1] as {
     refetchInterval: (q: { state: { data: unknown } }) => number | false;
   };
-  return options.refetchInterval({ state: { data } });
+  return options.refetchInterval;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -127,6 +143,36 @@ describe("ReplayComparisonView", () => {
       banner.compareDocumentPosition(content) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  // Under-warning is the ONE direction this banner must not fail in. When the
+  // fidelity record cannot be parsed, the tool-result-truncated and
+  // account-gone caveats silently vanish from the list — and a comparison
+  // missing a caveat reads as MORE like-for-like than it is, which is exactly
+  // the misleading conclusion this whole page exists to prevent. Saying "we
+  // could not read it" is the honest floor.
+  it("says the fidelity record was unreadable instead of silently dropping its caveats", () => {
+    useQuery.mockReturnValue({
+      data: makeComparison({ fidelity: null, fidelityUnreadable: true }),
+      isLoading: false,
+      error: null,
+    });
+    renderView();
+
+    const banner = screen.getByTestId("fidelity-banner");
+    expect(within(banner).getByText(/could not be read/i)).toBeInTheDocument();
+  });
+
+  it("does not cry unreadable when the run simply carries no fidelity record", () => {
+    useQuery.mockReturnValue({
+      data: makeComparison({ fidelity: null, fidelityUnreadable: false }),
+      isLoading: false,
+      error: null,
+    });
+    renderView();
+
+    const banner = screen.getByTestId("fidelity-banner");
+    expect(within(banner).queryByText(/could not be read/i)).toBeNull();
   });
 
   it("never renders latency as a number, even when cost IS comparable", () => {
@@ -310,6 +356,97 @@ describe("ReplayComparisonView", () => {
     expect(
       within(metricRow("Requested model")).getByText("No result yet"),
     ).toBeInTheDocument();
+  });
+
+  // ── Stalled queue ───────────────────────────────────────────────────────
+  // `queued` used to be the one non-terminal state with no bound: the page
+  // showed 「排隊中」 and polled forever whenever no replay worker was consuming
+  // the queue (the gateway's ENABLE_EVALUATOR off while the API's is on is the
+  // ordinary way to get there). It gets the same amber, still-watching
+  // treatment as a stale run — a run nothing has claimed can still start.
+
+  it("KEEPS polling a replay nothing has picked up, so a late start can still resolve it", () => {
+    expect(
+      pollDecision(
+        makeComparison({
+          replay: null,
+          status: "failed",
+          failureReason: "stale_queued",
+        }),
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it("names the operational cause when nothing picks a replay up, instead of blaming the run", () => {
+    useQuery.mockReturnValue({
+      data: makeComparison({
+        replay: null,
+        status: "failed",
+        failureReason: "stale_queued",
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderView();
+
+    expect(screen.getByText(/has not started/i)).toBeInTheDocument();
+    // The actionable part: the queue is not being consumed. Telling the
+    // operator to "try again" here would buy a second run for the same queue
+    // that is already not draining.
+    expect(screen.getByText(/replay worker/i)).toBeInTheDocument();
+    expect(screen.queryByText("This replay did not finish")).toBeNull();
+    expect(
+      within(metricRow("Requested model")).getByText("No result yet"),
+    ).toBeInTheDocument();
+  });
+
+  // ── Poll backoff ────────────────────────────────────────────────────────
+  // The trade-off behind polling a warned run is right and must be preserved:
+  // a wasted query costs less than wrongly telling an operator to spend
+  // another replay. Only the FLAT interval was wrong. `getComparison` does two
+  // joins and up to two AES-GCM decrypts of up-to-256KB bodies, so a stranded
+  // run with a tab left open was ~1,200 decrypt round trips per hour, forever.
+
+  it("backs off once a run is in a warned state, instead of hammering at a flat 3s", () => {
+    const warned = makeComparison({
+      replay: null,
+      status: "failed",
+      failureReason: "stale_running",
+    });
+    const refetchInterval = pollOptions(warned);
+
+    const seq = [0, 1, 2, 3].map(
+      () => refetchInterval({ state: { data: warned } }) as number,
+    );
+
+    // Off the fast cadence immediately — by the time the API warns, the page
+    // has already polled at 3s for the whole stale window.
+    expect(seq[0]).toBeGreaterThan(POLL_MS);
+    expect(seq[1]).toBeGreaterThan(seq[0]!);
+    // Capped, not unbounded: a run that DOES come back must still be noticed
+    // promptly, so the ceiling is the point of the step, not an accident.
+    expect(seq[2]).toBe(WARNED_POLL_MAX_MS);
+    expect(seq[3]).toBe(WARNED_POLL_MAX_MS);
+  });
+
+  it("returns to the fast interval when a warned run resumes, so a late result is not delayed", () => {
+    const warned = makeComparison({
+      replay: null,
+      status: "failed",
+      failureReason: "stale_running",
+    });
+    const refetchInterval = pollOptions(warned);
+
+    refetchInterval({ state: { data: warned } });
+    refetchInterval({ state: { data: warned } });
+    expect(refetchInterval({ state: { data: warned } })).toBe(
+      WARNED_POLL_MAX_MS,
+    );
+
+    // The worker came back and the run is now `ok`, just waiting on its usage
+    // row. That window is short, so the page must poll it at full speed again.
+    const materializing = makeComparison({ replay: null, status: "ok" });
+    expect(refetchInterval({ state: { data: materializing } })).toBe(POLL_MS);
   });
 
   it("stops polling once the replay's result is declared missing", () => {
