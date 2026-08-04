@@ -178,6 +178,32 @@ async function seedMemberKey(
   });
 }
 
+/**
+ * Seed an org's LLM-eval key — the ONLY key shape `replayOfHeader()` trusts.
+ *
+ * `keyPrefix` is 12 characters here, not 8, because that is exactly what
+ * `apps/api/src/services/llmEvalKeyProvisioning.ts` writes
+ * (`rawKey.slice(0, 12)` of `caliber-eval-<random>`), and the guard compares
+ * the stored prefix against `EVAL_KEY_PREFIX` for equality. A shorter slice
+ * would authenticate fine and then silently fail the guard, making this test
+ * pass for the wrong reason.
+ */
+async function seedEvalKey(
+  orgId: string,
+  userId: string,
+  rawKey: string,
+): Promise<void> {
+  await db.insert(apiKeys).values({
+    orgId,
+    userId,
+    keyHash: hashApiKey(pepper, rawKey),
+    keyPrefix: rawKey.slice(0, 12),
+    name: "test-key-eval",
+    groupId: null,
+    routingPolicy: "own",
+  });
+}
+
 /** Seed a single user-owned OAuth anthropic upstream + its credential. */
 async function seedOwnOauthAccount(
   orgId: string,
@@ -281,6 +307,69 @@ describe("x-caliber-replay-of header — anti-forgery (real request path)", () =
 
     expect(rows.length).toBe(1);
     expect(rows[0]!.replayOfRequestId).toBeNull();
+
+    await app.close();
+  });
+
+  /**
+   * The other direction — and the one nothing else in this repo covers.
+   *
+   * `usageLogging.ts` has exactly ONE production call site of
+   * `replayOfHeader()`: the line that puts its result into the usage-log
+   * payload. Deleting that line used to pass the entire suite. The unit test
+   * never touches payload assembly; the sibling test above asserts the column
+   * is NULL, so the mutation makes it pass harder; `writeUsageLogBatch` feeds a
+   * payload directly; `runReplay` stubs `fetchImpl` and never reaches this
+   * route; E2E 41 asserts panels render and never queries the column.
+   *
+   * What that regression would cost, both at once:
+   *   - every replay row lands unmarked → `replayCostUsd` reads $0.0000
+   *     forever, so replay spend becomes invisible; and
+   *   - those same rows re-enter `usage_logs_scored`, so replay traffic
+   *     reaches members' performance scores.
+   *
+   * Both design commitments of this feature break on one deleted line, which
+   * is why the assertion lives on the REAL request path (auth middleware →
+   * route handler → payload assembly → persisted row) rather than on the unit.
+   */
+  it("eval key 帶 x-caliber-replay-of 時，該欄位必須寫入 header 的值（成本才看得見、評分才排除得掉）", async () => {
+    const orgId = await seedOrg();
+    const userId = await seedUser();
+    const rawKey = `caliber-eval-${Math.random().toString(36).slice(2)}`;
+    await seedEvalKey(orgId, userId, rawKey);
+    await seedOwnOauthAccount(orgId, userId);
+
+    const sourceRequestId = `req-source-${Math.random().toString(36).slice(2)}`;
+
+    const redis = new RedisMock({
+      keyPrefix: "caliber:gw:",
+    }) as unknown as Redis;
+    const app = await makeApp(redis, container.getConnectionUri());
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: {
+        authorization: `Bearer ${rawKey}`,
+        [REPLAY_OF_HEADER]: sourceRequestId,
+      },
+      payload: {
+        model: "claude-forgery-test",
+        max_tokens: 8,
+        messages: [{ role: "user", content: "hi" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    await new Promise((r) => setTimeout(r, 50));
+    const rows = await db
+      .select({ replayOfRequestId: usageLogs.replayOfRequestId })
+      .from(usageLogs)
+      .where(and(eq(usageLogs.orgId, orgId), eq(usageLogs.userId, userId)));
+
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.replayOfRequestId).toBe(sourceRequestId);
 
     await app.close();
   });
