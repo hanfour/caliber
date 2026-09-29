@@ -22,8 +22,35 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Preflight canary secrets
+        env:
+          CANARY_API_BASE_URL: ${{ secrets.CANARY_API_BASE_URL }}
+          CANARY_GATEWAY_BASE_URL: ${{ secrets.CANARY_GATEWAY_BASE_URL }}
+          CANARY_ADMIN_SESSION_COOKIE: ${{ secrets.CANARY_ADMIN_SESSION_COOKIE }}
+          CANARY_GATEWAY_API_KEY: ${{ secrets.CANARY_GATEWAY_API_KEY }}
+          CANARY_ORG_ID: ${{ secrets.CANARY_ORG_ID }}
+          CANARY_USER_ID: ${{ secrets.CANARY_USER_ID }}
+        run: |
+          missing=()
+          for secret_name in \
+            CANARY_API_BASE_URL \
+            CANARY_GATEWAY_BASE_URL \
+            CANARY_ADMIN_SESSION_COOKIE \
+            CANARY_GATEWAY_API_KEY \
+            CANARY_ORG_ID \
+            CANARY_USER_ID
+          do
+            if [[ -z "${!secret_name}" ]]; then
+              missing+=("$secret_name")
+            fi
+          done
+
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Canary environment may not exist yet. Missing required secrets: ${missing[*]}. Configure the canary environment before running post-release smoke."
+            exit 1
+          fi
+
       - uses: pnpm/action-setup@v5
-        with: { version: 9 }
 
       - uses: actions/setup-node@v6
         with:
@@ -55,15 +82,18 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_REF: ${{ github.event.workflow_run.head_branch || github.ref_name || github.sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url || format('https://github.com/{0}/actions/runs/{1}', github.repository, github.run_id) }}
         run: |
-          TAG="${{ github.event.workflow_run.head_branch || github.sha }}"
-          RUN_URL="${{ github.event.workflow_run.html_url || format('https://github.com/{0}/actions/runs/{1}', github.repository, github.run_id) }}"
+          gh label create release-blocker \
+            --color B60205 \
+            --description "Post-release smoke failure requiring investigation before rollout" \
+            --force
           gh issue create \
-            --title "Post-release smoke failed: $TAG" \
+            --title "Post-release smoke failed: $RELEASE_REF" \
             --body "Smoke workflow failed after release.
 
           Run: $RUN_URL
 
-          This is a release-blocker. Investigate before promoting v$TAG to user-facing rollout." \
-            --label release-blocker \
-            --label v0.5.0
+          This is a release-blocker. Investigate before promoting $RELEASE_REF to user-facing rollout." \
+            --label release-blocker
